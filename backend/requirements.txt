@@ -1,0 +1,9 @@
+fastapi==0.162.0
+uvicorn==0.54.0
+pandas==3.0.5
+openpyxl==3.1.5
+SQLAlchemy==2.1.6
+psycopg[binary]==3.3.6
+itsdangerous==2.2.0
+python-multipart==0.0.32
+python-dotenv==1.2.3

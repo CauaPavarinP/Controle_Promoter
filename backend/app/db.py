@@ -1,0 +1,55 @@
+"""Acesso ao banco. As tabelas são pequenas (faturamento já vem agregado por mês),
+então lemos e gravamos tabelas inteiras com o pandas."""
+from datetime import datetime
+
+import pandas as pd
+from sqlalchemy import create_engine, inspect
+
+from .config import DATABASE_URL
+
+engine = create_engine(DATABASE_URL)
+
+COLUNAS = {
+    "faturamento": ["ano", "mes", "cnpj", "cod_cliente", "razao_social", "cidade", "uf", "valor", "notas"],
+    "promotores": ["codigo", "nome", "admissao", "municipio", "supervisor",
+                   "salario", "ajuda_custo", "transporte", "custo_mensal"],
+    "roteiro": ["codigo_promotor", "colaborador", "cnpj", "loja", "cidade", "uf", "visitas_semana"],
+    "importacoes": ["tipo", "arquivo", "data_hora", "linhas", "detalhe"],
+}
+
+
+def ler_tabela(nome: str) -> pd.DataFrame:
+    if not inspect(engine).has_table(nome):
+        return pd.DataFrame(columns=COLUNAS[nome])
+    return pd.read_sql_table(nome, engine)
+
+
+def substituir_tabela(nome: str, df: pd.DataFrame) -> None:
+    df[COLUNAS[nome]].to_sql(nome, engine, if_exists="replace", index=False)
+
+
+def gravar_faturamento(novo: pd.DataFrame) -> None:
+    """Substitui só os meses que vieram no arquivo novo e mantém os demais."""
+    atual = ler_tabela("faturamento")
+    meses_novos = set(zip(novo["ano"], novo["mes"]))
+    if not atual.empty:
+        manter = [(a, m) not in meses_novos for a, m in zip(atual["ano"], atual["mes"])]
+        atual = atual[manter]
+    substituir_tabela("faturamento", pd.concat([atual, novo], ignore_index=True))
+
+
+def registrar_importacao(tipo: str, arquivo: str, linhas: int, detalhe: str = "") -> None:
+    registro = pd.DataFrame([{
+        "tipo": tipo, "arquivo": arquivo, "data_hora": datetime.now().isoformat(timespec="seconds"),
+        "linhas": linhas, "detalhe": detalhe,
+    }])
+    registro.to_sql("importacoes", engine, if_exists="append", index=False)
+
+
+def ultimas_importacoes() -> dict:
+    df = ler_tabela("importacoes")
+    if df.empty:
+        return {}
+    df = df.sort_values("data_hora").groupby("tipo").tail(1)
+    return {r.tipo: {"arquivo": r.arquivo, "data_hora": r.data_hora, "linhas": int(r.linhas)}
+            for r in df.itertuples()}

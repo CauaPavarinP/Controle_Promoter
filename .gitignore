@@ -1,0 +1,18 @@
+# Dependências e build
+node_modules/
+frontend/dist/
+__pycache__/
+.pytest_cache/
+.venv/
+
+# Segredos e banco local
+.env
+backend/dados/
+
+# NUNCA versionar planilhas reais (custo de pessoal e faturamento).
+# Só as fictícias de exemplo entram no repositório.
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+!backend/exemplos/*.xlsx
