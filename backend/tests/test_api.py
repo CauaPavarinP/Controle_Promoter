@@ -1,29 +1,4 @@
-import importlib
-import subprocess
-import sys
-from pathlib import Path
-
-import pytest
-from fastapi.testclient import TestClient
-
-BACKEND = Path(__file__).resolve().parent.parent
-EXEMPLOS = BACKEND / "exemplos"
-
-
-@pytest.fixture()
-def cliente(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'teste.db'}")
-    monkeypatch.setenv("APP_USUARIO", "mauricio")
-    monkeypatch.setenv("APP_SENHA", "senha-teste")
-    monkeypatch.setenv("SECRET_KEY", "chave-teste")
-    import app.config
-    import app.db
-    import app.main
-    for modulo in (app.config, app.db, app.main):
-        importlib.reload(modulo)
-    if not (EXEMPLOS / "faturamento_exemplo.xlsx").exists():
-        subprocess.run([sys.executable, str(BACKEND / "scripts" / "gerar_dados_exemplo.py")], check=True)
-    return TestClient(app.main.app)
+from conftest import EXEMPLOS
 
 
 def _entrar(cliente):

@@ -63,8 +63,10 @@ export default function TabelaLojas({ lojas, regras }) {
                 <td className="quebra">
                   {l.loja}
                   {l.compartilhado && (
-                    <span className="etiqueta" title="Valor do CNPJ/rede inteiro, compartilhado com outras lojas">
-                      valor da rede ({l.lojas_mesmo_cnpj} lojas)
+                    <span className="etiqueta" title="O ERP fatura por CNPJ: o valor é do CNPJ inteiro e conta uma vez só nos totais">
+                      {regras.modo_rede === 'cnpj'
+                        ? `faturamento compartilhado com outra loja (${l.lojas_mesmo_cnpj} lojas no CNPJ)`
+                        : `valor da rede (${l.lojas_mesmo_cnpj} lojas)`}
                     </span>
                   )}
                 </td>

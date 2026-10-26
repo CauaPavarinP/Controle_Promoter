@@ -1,21 +1,50 @@
-"""Acesso ao banco. As tabelas são pequenas (faturamento já vem agregado por mês),
-então lemos e gravamos tabelas inteiras com o pandas."""
+"""Acesso ao banco.
+
+- Cadastros (supervisores, promotores, PDVs, roteiros, usuários): SQLAlchemy ORM (app/modelos.py),
+  com a estrutura criada pelas migrations (backend/migrations).
+- Faturamento agregado, histórico de importações e configurações: tabelas lidas e gravadas
+  inteiras com o pandas (são pequenas).
+"""
 import json
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import sessionmaker
 
 from .config import DATABASE_URL
 
 engine = create_engine(DATABASE_URL)
+SessaoLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def sessao_db():
+    """Dependência do FastAPI: uma sessão do banco por requisição."""
+    sessao = SessaoLocal()
+    try:
+        yield sessao
+    finally:
+        sessao.close()
+
+
+def aplicar_migrations() -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    pasta = Path(__file__).resolve().parent.parent
+    configuracao = Config(str(pasta / "alembic.ini"))
+    configuracao.set_main_option("script_location", str(pasta / "migrations"))
+    command.upgrade(configuracao, "head")
+
 
 COLUNAS = {
     "faturamento": ["ano", "mes", "cnpj", "chave_tipo", "tipo_nf", "cod_cliente", "razao_social",
                     "cidade", "uf", "valor", "notas"],
-    "promotores": ["codigo", "nome", "admissao", "municipio", "supervisor",
-                   "salario", "ajuda_custo", "transporte", "custo_mensal"],
-    "roteiro": ["codigo_promotor", "colaborador", "cnpj", "loja", "cidade", "uf", "visitas_semana"],
+    # Formato da planilha importado pelas versões antigas (convertido para os cadastros).
+    "legado_promotores": ["codigo", "nome", "admissao", "municipio", "supervisor",
+                          "salario", "ajuda_custo", "transporte", "custo_mensal"],
+    "legado_roteiro": ["codigo_promotor", "colaborador", "cnpj", "loja", "cidade", "uf", "visitas_semana"],
     "importacoes": ["tipo", "arquivo", "data_hora", "linhas", "detalhe"],
     "configuracoes": ["chave", "valor"],
 }

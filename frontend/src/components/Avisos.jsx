@@ -13,8 +13,9 @@ export default function Avisos({ opcoes }) {
         <section className="bloco">
           <h2>Colaboradores do roteiro sem cadastro de promotor ({semVinculo.length})</h2>
           <p className="dica">
-            As lojas destes colaboradores ficam fora do painel. Normalmente o nome está escrito diferente entre as
-            abas do roteiro e a aba PROMOTORES BRASIL, ou a pessoa não está na lista de promotores.
+            As lojas destes colaboradores ficaram fora dos roteiros na importação. Normalmente o nome está escrito diferente
+            entre as abas do roteiro e a aba PROMOTORES BRASIL, ou a pessoa não está cadastrada. Cadastre o promotor (ou
+            corrija o nome) e importe o roteiro de novo, ou vincule os PDVs em Roteiros.
           </p>
           <ul className="lista-avisos">
             {semVinculo.map((nome) => <li key={nome}>{nome}</li>)}

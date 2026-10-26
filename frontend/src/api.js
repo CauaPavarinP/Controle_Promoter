@@ -18,6 +18,20 @@ async function requisitar(caminho, opcoes = {}) {
   return dados
 }
 
+const json = (metodo, corpo) => ({
+  method: metodo,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(corpo ?? {}),
+})
+
+// Atalhos para os cadastros: api.get('/api/promotores'), api.post('/api/pdvs', dados)…
+export const http = {
+  get: (caminho) => requisitar(caminho),
+  post: (caminho, corpo) => requisitar(caminho, json('POST', corpo)),
+  put: (caminho, corpo) => requisitar(caminho, json('PUT', corpo)),
+  delete: (caminho) => requisitar(caminho, { method: 'DELETE' }),
+}
+
 export const api = {
   sessao: () => requisitar('/api/sessao'),
   login: (usuario, senha) =>

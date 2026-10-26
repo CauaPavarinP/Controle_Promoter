@@ -4,13 +4,13 @@ import Login from './components/Login.jsx'
 import Painel from './components/Painel.jsx'
 
 export default function App() {
-  // undefined = verificando sessão; null = não logado; texto = usuário logado
+  // undefined = verificando sessão; null = não logado; objeto = usuário logado (nome, perfil…)
   const [usuario, setUsuario] = useState(undefined)
 
   useEffect(() => {
     definirAoExpirarSessao(() => setUsuario(null))
     api.sessao()
-      .then((dados) => setUsuario(dados.usuario))
+      .then((dados) => setUsuario(dados))
       .catch(() => setUsuario(null))
   }, [])
 

@@ -189,3 +189,82 @@ td.pct-critico, .texto-critico { color: var(--critico); font-weight: 600; }
 }
 .texto-ok { color: var(--ok); font-size: 14px; }
 .regras { padding-bottom: 8px; }
+
+/* Menu agrupado */
+.menu-itens { gap: 14px; }
+.menu-grupo { display: grid; gap: 2px; }
+.menu-grupo-titulo { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--texto-suave); padding: 0 12px 4px; }
+.menu-usuario .acoes { display: flex; gap: 6px; }
+.menu-usuario button.ativo { background: var(--primaria-clara); }
+.menu-lateral { overflow-y: auto; }
+
+/* Botões e situação */
+button.perigo { background: var(--critico); color: #fff; }
+button.secundario.perigo { background: var(--superficie); color: var(--critico); border-color: #f3b8b3; }
+.acoes { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.acoes button { padding: 5px 10px; font-size: 13px; }
+.situacao { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.situacao.ativa { background: var(--ok-fundo); color: var(--ok); }
+.situacao.inativa { background: #eef0f3; color: var(--texto-suave); }
+.situacao.agendada { background: var(--primaria-clara); color: var(--primaria); }
+.texto-alerta { color: var(--alerta); }
+
+/* Tabela genérica */
+th.ordenavel { cursor: pointer; user-select: none; }
+th.ordenavel:hover { text-decoration: underline; }
+.tabela-rodape { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+.paginacao { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+
+/* Janela (modal) */
+.modal-fundo {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, .45); display: flex; align-items: flex-start;
+  justify-content: center; padding: 40px 16px; overflow-y: auto; z-index: 20;
+}
+.modal { background: var(--superficie); border-radius: 12px; width: 100%; max-width: 560px; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+.modal-largo { max-width: 980px; }
+.modal-topo { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--borda); }
+.modal-topo h2 { font-size: 19px; }
+.modal-corpo { padding: 16px 20px; display: grid; gap: 12px; }
+.modal-corpo h3 { margin-top: 6px; font-size: 16px; }
+.modal-rodape { padding: 12px 20px; border-top: 1px solid var(--borda); display: flex; justify-content: flex-end; gap: 8px; }
+.fechar { background: transparent; color: var(--texto-suave); font-size: 24px; line-height: 1; padding: 0 6px; }
+
+/* Formulários */
+.campo { display: grid; gap: 4px; font-size: 14px; flex: 1 1 180px; }
+.campo > span { color: var(--texto-suave); font-size: 13px; }
+.campo input, .campo select { width: 100%; }
+.modal .campos-linha { margin-top: 0; }
+.formulario-estreito { max-width: 440px; display: grid; gap: 12px; }
+.dias { display: flex; gap: 6px; flex-wrap: wrap; }
+.dias label { border: 1px solid var(--borda); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
+.dias label.marcado { background: var(--primaria-clara); border-color: var(--primaria); color: var(--primaria); }
+.dias input { display: none; }
+.escolha-busca { position: relative; }
+.escolha-busca input { width: 100%; }
+.escolha-busca ul {
+  list-style: none; margin: 4px 0 0; padding: 4px; border: 1px solid var(--borda); border-radius: 8px;
+  max-height: 240px; overflow-y: auto; background: var(--superficie);
+}
+.escolha-busca li button { width: 100%; text-align: left; background: transparent; color: var(--texto); padding: 6px 8px; }
+.escolha-busca li button:hover { background: var(--primaria-clara); }
+.escolha-feita { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px;
+  border: 1px solid var(--primaria); border-radius: 6px; background: var(--primaria-clara); }
+.senha-gerada { font-family: ui-monospace, monospace; font-size: 22px; background: #f5f7fb; padding: 10px 14px; border-radius: 8px; }
+
+/* Detalhe do promotor */
+.detalhe-secao { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--borda); }
+.detalhe-secao:last-of-type { border-bottom: none; }
+.secao-titulo { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dados { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+.dados dt { color: var(--texto-suave); }
+.dados dd { margin: 0; }
+.caixa-acao { border: 1px solid var(--borda); border-radius: 8px; padding: 12px; background: #fafbfd; display: grid; gap: 10px; }
+.caixa-acao p { margin: 0; font-size: 14px; }
+
+/* Celular: menu agrupado vira uma linha só de abas (precisa vir depois das regras do menu) */
+@media (max-width: 860px) {
+  .menu-itens { gap: 4px; }
+  .menu-grupo { display: contents; }
+  .menu-grupo-titulo { display: none; }
+  .bloco-ferramentas > * { flex: 1 1 100%; }
+}

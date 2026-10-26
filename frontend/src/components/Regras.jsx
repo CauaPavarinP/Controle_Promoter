@@ -73,7 +73,7 @@ function Numero({ rotulo, valor, aoMudar, sufixo, passo = 1 }) {
   )
 }
 
-export default function Regras({ aoSalvar }) {
+export default function Regras({ aoSalvar, podeEditar = true }) {
   const [regras, setRegras] = useState(null)
   const [tipos, setTipos] = useState([])
   const [alterado, setAlterado] = useState(false)
@@ -236,13 +236,17 @@ export default function Regras({ aoSalvar }) {
         </div>
       </section>
 
-      <div className="barra-salvar">
-        {mensagem && <span className={mensagem.erro ? 'erro' : 'texto-ok'}>{mensagem.texto}</span>}
-        {alterado && !mensagem && <span className="dica">Há alterações não salvas.</span>}
-        <button onClick={salvar} disabled={!alterado || salvando}>
-          {salvando ? 'Salvando…' : 'Salvar regras'}
-        </button>
-      </div>
+      {podeEditar ? (
+        <div className="barra-salvar">
+          {mensagem && <span className={mensagem.erro ? 'erro' : 'texto-ok'}>{mensagem.texto}</span>}
+          {alterado && !mensagem && <span className="dica">Há alterações não salvas.</span>}
+          <button onClick={salvar} disabled={!alterado || salvando}>
+            {salvando ? 'Salvando…' : 'Salvar regras'}
+          </button>
+        </div>
+      ) : (
+        <p className="dica">Só administradores podem alterar as regras.</p>
+      )}
     </div>
   )
 }

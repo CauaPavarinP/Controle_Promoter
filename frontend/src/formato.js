@@ -24,3 +24,31 @@ export function classePercentual(valor, regras) {
   if (valor >= regras.faixa_alerta) return 'pct-alerta'
   return 'pct-ok'
 }
+
+// "2026-03-15" -> "15/03/2026"
+export const formatarData = (iso) => {
+  if (!iso) return '—'
+  const [ano, mes, dia] = iso.slice(0, 10).split('-')
+  return `${dia}/${mes}/${ano}`
+}
+
+export const NOMES_MESES_LONGOS = [
+  'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+]
+
+// Máscara de CNPJ (14 dígitos) ou CPF (11 dígitos) enquanto digita.
+export function mascararDocumento(texto) {
+  const d = texto.replace(/\D/g, '').slice(0, 14)
+  if (d.length <= 11) {
+    return d.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1-$2')
+  }
+  return d
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2')
+}
+
+export const UFS = ['AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PA', 'PB', 'PE',
+  'PI', 'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO']

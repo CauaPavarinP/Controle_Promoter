@@ -10,12 +10,12 @@ const TIPOS = [
   {
     tipo: 'promotores',
     titulo: 'Promotores',
-    descricao: 'Lista com código, colaborador, supervisor e custo (aba PROMOTORES BRASIL). Substitui a lista atual.',
+    descricao: 'Aba PROMOTORES BRASIL. Cria ou atualiza promotores, supervisores e custos pelo código. Não apaga nada; custo diferente vira reajuste a partir deste mês.',
   },
   {
     tipo: 'roteiro',
     titulo: 'Roteiro',
-    descricao: 'Qual promotor atende qual loja (abas SC, SP… com Colaborador e Razão Social). Substitui o roteiro atual.',
+    descricao: 'Abas SC, SP, PR… (Colaborador + Razão Social). Cria os PDVs e os vínculos que ainda não existem. Não apaga nada; colaborador não encontrado vira pendência.',
   },
 ]
 
@@ -58,8 +58,15 @@ function CartaoImportacao({ tipo, titulo, descricao, ultima, aoImportar }) {
         <div className="sucesso">
           Importado.
           {resultado.meses && <> Meses: {resultado.meses.join(', ')}.</>}
-          {resultado.promotores != null && <> {resultado.promotores} promotor(es).</>}
-          {resultado.lojas != null && <> {resultado.lojas} loja(s).</>}
+          {resultado.cadastros && (
+            <>
+              {' '}Novos: {resultado.cadastros.criados}.
+              {resultado.cadastros.atualizados != null && <> Atualizados: {resultado.cadastros.atualizados}.</>}
+              {resultado.cadastros.reajustes != null && <> Reajustes: {resultado.cadastros.reajustes}.</>}
+              {resultado.cadastros.mantidos != null && <> Já existiam: {resultado.cadastros.mantidos}.</>}
+              {resultado.cadastros.pendentes != null && <> Pendências: {resultado.cadastros.pendentes}.</>}
+            </>
+          )}
           {resultado.avisos?.map((aviso) => <p key={aviso} className="aviso-texto">⚠ {aviso}</p>)}
         </div>
       )}

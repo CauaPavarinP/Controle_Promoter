@@ -7,16 +7,30 @@ import TabelaLojas from './TabelaLojas.jsx'
 import Importar from './Importar.jsx'
 import Avisos from './Avisos.jsx'
 import Regras from './Regras.jsx'
+import Promotores from './cadastros/Promotores.jsx'
+import Supervisores from './cadastros/Supervisores.jsx'
+import Pdvs from './cadastros/Pdvs.jsx'
+import Roteiros from './cadastros/Roteiros.jsx'
+import Usuarios from './cadastros/Usuarios.jsx'
+import MeuPerfil from './cadastros/MeuPerfil.jsx'
 
 const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', supervisor: '', promotor: '', uf: '', cidade: '' }
 
+// grupo: título no menu | admin: só administrador vê
 const ABAS = [
-  { id: 'visao-geral', titulo: 'Visão geral', subtitulo: 'Custo dos promotores × faturamento das lojas' },
-  { id: 'lojas', titulo: 'Lojas', subtitulo: 'Faturamento de cada loja atendida no período' },
-  { id: 'avisos', titulo: 'Avisos dos dados', subtitulo: 'Problemas encontrados nas planilhas importadas' },
-  { id: 'importar', titulo: 'Atualizar dados', subtitulo: 'Importe as planilhas para atualizar o sistema' },
-  { id: 'regras', titulo: 'Regras do cálculo', subtitulo: 'Defina como o sistema calcula custo e faturamento' },
+  { id: 'visao-geral', grupo: 'Análise', titulo: 'Visão geral', subtitulo: 'Custo dos promotores × faturamento das lojas' },
+  { id: 'lojas', grupo: 'Análise', titulo: 'Lojas', subtitulo: 'Faturamento de cada loja atendida no período' },
+  { id: 'avisos', grupo: 'Análise', titulo: 'Avisos dos dados', subtitulo: 'Problemas encontrados nos dados' },
+  { id: 'promotores', grupo: 'Cadastros', titulo: 'Promotores', subtitulo: 'Promotores, custos por competência e roteiro de cada um' },
+  { id: 'supervisores', grupo: 'Cadastros', titulo: 'Supervisores', subtitulo: 'Supervisores e suas equipes' },
+  { id: 'pdvs', grupo: 'Cadastros', titulo: 'PDVs', subtitulo: 'Pontos de venda atendidos pelos promotores' },
+  { id: 'roteiros', grupo: 'Cadastros', titulo: 'Roteiros', subtitulo: 'Qual promotor atende qual PDV, desde quando e quantas vezes por semana' },
+  { id: 'importar', grupo: 'Configuração', titulo: 'Atualizar dados', subtitulo: 'Importe as planilhas para atualizar o sistema', admin: true },
+  { id: 'regras', grupo: 'Configuração', titulo: 'Regras do cálculo', subtitulo: 'Defina como o sistema calcula custo e faturamento' },
+  { id: 'usuarios', grupo: 'Configuração', titulo: 'Usuários', subtitulo: 'Quem acessa o sistema e com qual perfil', admin: true },
+  { id: 'perfil', grupo: null, titulo: 'Meu perfil', subtitulo: 'Seus dados de acesso' },
 ]
+const ABAS_DE_ANALISE = ['visao-geral', 'lojas', 'avisos']
 
 // Período padrão: janeiro do último ano com dados até o último mês importado.
 function periodoPadrao(meses) {
@@ -26,27 +40,31 @@ function periodoPadrao(meses) {
   return { inicio: inicioDoAno, fim: ultimo }
 }
 
-// A aba fica no endereço (#lojas, #importar…) para o F5 e o "voltar" do navegador funcionarem.
-function abaDoEndereco() {
-  const id = window.location.hash.replace('#', '')
-  return ABAS.some((a) => a.id === id) ? id : 'visao-geral'
-}
-
 export default function Painel({ usuario, aoSair }) {
+  const admin = usuario.perfil === 'admin'
+  const abasPermitidas = ABAS.filter((a) => !a.admin || admin)
+
+  // A aba fica no endereço (#lojas, #promotores…) para o F5 e o "voltar" do navegador funcionarem.
+  const abaDoEndereco = useCallback(() => {
+    const id = window.location.hash.replace('#', '')
+    return abasPermitidas.some((a) => a.id === id) ? id : 'visao-geral'
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin])
+
   const [aba, setAba] = useState(abaDoEndereco)
   const [opcoes, setOpcoes] = useState(null)
   const [filtros, setFiltros] = useState(FILTROS_VAZIOS)
   const [dados, setDados] = useState(null)
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
-  // Muda quando as regras são salvas, para o painel recalcular.
-  const [versaoRegras, setVersaoRegras] = useState(0)
+  // Muda quando regras ou cadastros mudam, para o painel recalcular.
+  const [versaoDados, setVersaoDados] = useState(0)
 
   useEffect(() => {
     const aoMudarEndereco = () => setAba(abaDoEndereco())
     window.addEventListener('hashchange', aoMudarEndereco)
     return () => window.removeEventListener('hashchange', aoMudarEndereco)
-  }, [])
+  }, [abaDoEndereco])
 
   const irPara = (id) => {
     window.location.hash = id
@@ -59,19 +77,26 @@ export default function Painel({ usuario, aoSair }) {
       setFiltros((atual) =>
         atual.inicio && novas.meses.includes(atual.inicio) ? atual : { ...atual, ...periodoPadrao(novas.meses) },
       )
-      if (!novas.meses.length) irPara('importar')
     } catch (e) {
       setErro(e.message)
     }
   }, [])
 
+  // Ao voltar para as abas de análise, recarrega: os cadastros podem ter mudado.
   useEffect(() => {
-    carregarOpcoes()
-  }, [carregarOpcoes])
+    if (ABAS_DE_ANALISE.includes(aba)) {
+      carregarOpcoes()
+      setVersaoDados((v) => v + 1)
+    }
+  }, [aba, carregarOpcoes])
+
+  useEffect(() => {
+    if (opcoes && !opcoes.meses.length && admin && aba === 'visao-geral') irPara('importar')
+  }, [opcoes, admin, aba])
 
   // Recalcula o painel sempre que um filtro muda.
   useEffect(() => {
-    if (!filtros.inicio) return
+    if (!filtros.inicio || !ABAS_DE_ANALISE.includes(aba)) return
     const { modo, ...resto } = filtros
     const parametros = { ...resto, fim: modo === 'mes' ? filtros.inicio : filtros.fim }
     let cancelado = false
@@ -84,7 +109,8 @@ export default function Painel({ usuario, aoSair }) {
     return () => {
       cancelado = true
     }
-  }, [filtros, versaoRegras])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtros, versaoDados])
 
   const alterarFiltro = (campo, valor) => setFiltros((atual) => ({ ...atual, [campo]: valor }))
 
@@ -97,6 +123,7 @@ export default function Painel({ usuario, aoSair }) {
   const temDados = opcoes && opcoes.meses.length > 0
   const totalAvisos = opcoes ? contarAvisos(opcoes) : 0
   const abaAtual = ABAS.find((a) => a.id === aba)
+  const grupos = [...new Set(abasPermitidas.map((a) => a.grupo).filter(Boolean))]
 
   return (
     <div className="layout">
@@ -106,16 +133,25 @@ export default function Painel({ usuario, aoSair }) {
           <span>Comercial • 101 do Brasil</span>
         </div>
         <nav className="menu-itens">
-          {ABAS.map((a) => (
-            <button key={a.id} className={aba === a.id ? 'ativo' : ''} onClick={() => irPara(a.id)}>
-              {a.titulo}
-              {a.id === 'avisos' && totalAvisos > 0 && <span className="contador">{totalAvisos}</span>}
-            </button>
+          {grupos.map((grupo) => (
+            <div key={grupo} className="menu-grupo">
+              <span className="menu-grupo-titulo">{grupo}</span>
+              {abasPermitidas.filter((a) => a.grupo === grupo).map((a) => (
+                <button key={a.id} className={aba === a.id ? 'ativo' : ''} onClick={() => irPara(a.id)}>
+                  {a.titulo}
+                  {a.id === 'avisos' && totalAvisos > 0 && <span className="contador">{totalAvisos}</span>}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="menu-usuario">
-          <strong>{usuario}</strong>
-          <button className="secundario" onClick={aoSair}>Sair</button>
+          <strong>{usuario.nome}</strong>
+          <span className="dica">{admin ? 'Administrador' : usuario.perfil === 'supervisor' ? 'Supervisor' : 'Consulta'}</span>
+          <div className="acoes">
+            <button className={`secundario ${aba === 'perfil' ? 'ativo' : ''}`} onClick={() => irPara('perfil')}>Meu perfil</button>
+            <button className="secundario" onClick={aoSair}>Sair</button>
+          </div>
         </div>
       </aside>
 
@@ -125,12 +161,12 @@ export default function Painel({ usuario, aoSair }) {
           <p className="subtitulo">{abaAtual.subtitulo}</p>
         </header>
 
-        {erro && <div className="erro-caixa">{erro}</div>}
+        {erro && ABAS_DE_ANALISE.includes(aba) && <div className="erro-caixa">{erro}</div>}
 
         {(aba === 'visao-geral' || aba === 'lojas') && !temDados && opcoes && (
           <div className="aviso">
             Ainda não há faturamento importado.{' '}
-            <a href="#importar">Importe as planilhas em Atualizar dados.</a>
+            {admin ? <a href="#importar">Importe as planilhas em Atualizar dados.</a> : 'Peça a um administrador para importar.'}
           </div>
         )}
 
@@ -162,12 +198,16 @@ export default function Painel({ usuario, aoSair }) {
         )}
 
         {aba === 'avisos' && opcoes && <Avisos opcoes={opcoes} />}
-
-        {aba === 'importar' && (
+        {aba === 'promotores' && <Promotores podeEditar={admin} />}
+        {aba === 'supervisores' && <Supervisores podeEditar={admin} />}
+        {aba === 'pdvs' && <Pdvs podeEditar={admin} />}
+        {aba === 'roteiros' && <Roteiros podeEditar={admin} />}
+        {aba === 'importar' && admin && (
           <Importar importacoes={opcoes?.importacoes || {}} aoImportar={carregarOpcoes} />
         )}
-
-        {aba === 'regras' && <Regras aoSalvar={() => setVersaoRegras((v) => v + 1)} />}
+        {aba === 'regras' && <Regras podeEditar={admin} aoSalvar={() => setVersaoDados((v) => v + 1)} />}
+        {aba === 'usuarios' && admin && <Usuarios eu={usuario} />}
+        {aba === 'perfil' && <MeuPerfil usuario={usuario} />}
       </main>
     </div>
   )

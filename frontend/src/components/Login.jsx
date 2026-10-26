@@ -14,7 +14,7 @@ export default function Login({ aoEntrar }) {
     setEnviando(true)
     try {
       const dados = await api.login(usuario, senha)
-      aoEntrar(dados.usuario)
+      aoEntrar(dados)
     } catch (e) {
       setErro(e.message)
     } finally {
