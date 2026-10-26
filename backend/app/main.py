@@ -10,20 +10,24 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import db
 from .calculos import Filtros, calcular_painel, opcoes_de_filtro
-from .config import (APP_SENHA, APP_USUARIO, FRONTEND_DIST, PRODUCAO, SECRET_KEY,
-                     SESSAO_HORAS)
+from .config import (APP_SENHA, APP_USUARIO, ARQUIVO_ENV, FRONTEND_DIST, PRODUCAO,
+                     SECRET_KEY, SESSAO_HORAS)
 from .importacao import (ErroImportacao, importar_faturamento, importar_promotores,
                          importar_roteiro, vincular_roteiro)
 
-log = logging.getLogger("controle-promotores")
+log = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="Controle de Promotores", docs_url=None if PRODUCAO else "/docs",
               redoc_url=None, openapi_url=None if PRODUCAO else "/openapi.json")
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=SESSAO_HORAS * 3600,
                    same_site="lax", https_only=PRODUCAO)
 
+# Ajuda a conferir o login sem mostrar a senha no terminal.
 if not APP_USUARIO or not APP_SENHA:
-    log.warning("APP_USUARIO/APP_SENHA não definidos: ninguém conseguirá entrar.")
+    log.warning("APP_USUARIO/APP_SENHA não definidos (%s): ninguém conseguirá entrar.",
+                f"arquivo {ARQUIVO_ENV}" if ARQUIVO_ENV.exists() else f"{ARQUIVO_ENV} não encontrado")
+else:
+    log.info("Login configurado para o usuário '%s' (senha com %d caracteres).", APP_USUARIO, len(APP_SENHA))
 
 
 # ---------------------------------------------------------------------------

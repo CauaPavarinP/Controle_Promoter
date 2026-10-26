@@ -6,7 +6,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+ARQUIVO_ENV = BASE_DIR / ".env"
+# utf-8-sig: aceita o .env salvo pelo Bloco de Notas com BOM.
+# override: em desenvolvimento o .env manda, mesmo que exista variável igual no Windows.
+load_dotenv(ARQUIVO_ENV, encoding="utf-8-sig", override=True)
 
 PRODUCAO = os.getenv("AMBIENTE", "").lower() == "producao"
 
@@ -22,8 +25,8 @@ elif _url.startswith("postgresql://"):
 DATABASE_URL = _url
 
 # Login
-APP_USUARIO = os.getenv("APP_USUARIO", "")
-APP_SENHA = os.getenv("APP_SENHA", "")
+APP_USUARIO = os.getenv("APP_USUARIO", "").strip()
+APP_SENHA = os.getenv("APP_SENHA", "").strip()
 
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY:
