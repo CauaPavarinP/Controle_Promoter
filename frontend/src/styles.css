@@ -46,6 +46,13 @@ input, select {
   border-radius: 10px; border: 1px solid var(--borda); display: grid; gap: 14px;
 }
 .login-caixa label { display: grid; gap: 4px; font-size: 14px; }
+.campo-senha { position: relative; }
+.campo-senha input { width: 100%; padding-right: 78px; }
+.ver-senha {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  background: transparent; color: var(--primaria); padding: 4px 10px; font-size: 13px;
+}
+.ver-senha:hover { background: var(--primaria-clara); }
 
 /* Estrutura: menu lateral + conteúdo */
 .layout { display: flex; min-height: 100vh; }

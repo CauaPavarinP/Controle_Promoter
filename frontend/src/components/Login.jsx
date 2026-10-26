@@ -4,6 +4,7 @@ import { api } from '../api.js'
 export default function Login({ aoEntrar }) {
   const [usuario, setUsuario] = useState('')
   const [senha, setSenha] = useState('')
+  const [mostrarSenha, setMostrarSenha] = useState(false)
   const [erro, setErro] = useState('')
   const [enviando, setEnviando] = useState(false)
 
@@ -32,7 +33,21 @@ export default function Login({ aoEntrar }) {
         </label>
         <label>
           Senha
-          <input type="password" value={senha} onChange={(e) => setSenha(e.target.value)} />
+          <div className="campo-senha">
+            <input
+              type={mostrarSenha ? 'text' : 'password'}
+              value={senha}
+              onChange={(e) => setSenha(e.target.value)}
+            />
+            <button
+              type="button"
+              className="ver-senha"
+              onClick={() => setMostrarSenha((v) => !v)}
+              aria-label={mostrarSenha ? 'Ocultar senha' : 'Mostrar senha'}
+            >
+              {mostrarSenha ? 'Ocultar' : 'Mostrar'}
+            </button>
+          </div>
         </label>
         {erro && <p className="erro">{erro}</p>}
         <button type="submit" disabled={enviando || !usuario || !senha}>
