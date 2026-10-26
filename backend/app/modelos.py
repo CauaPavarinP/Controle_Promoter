@@ -130,3 +130,75 @@ class Usuario(Carimbo, Base):
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     tentativas_falhas: Mapped[int] = mapped_column(Integer, default=0)
     bloqueado_ate: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class Importacao(Base):
+    """Histórico de importações. As de faturamento podem ser desfeitas (apaga os itens dela)."""
+    __tablename__ = "importacoes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(20))          # faturamento | promotores | roteiro | planilha
+    arquivo_nome: Mapped[str] = mapped_column(String(255), default="")
+    usuario: Mapped[str] = mapped_column(String(60), default="")
+    periodos: Mapped[str] = mapped_column(Text, default="")  # "2026-01,2026-02…"
+    linhas_lidas: Mapped[int] = mapped_column(Integer, default=0)
+    linhas_importadas: Mapped[int] = mapped_column(Integer, default=0)
+    linhas_com_erro: Mapped[int] = mapped_column(Integer, default=0)
+    total_venda: Mapped[float] = mapped_column(Numeric(16, 2, asdecimal=False), default=0)
+    avisos: Mapped[str] = mapped_column(Text, default="")    # JSON: lista de textos
+    log_erros: Mapped[str] = mapped_column(Text, default="")  # JSON: [{linha, motivo}]
+    situacao: Mapped[str] = mapped_column(String(20), default="ativa")  # ativa | desfeita
+    criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+def _texto(tamanho=None):
+    return mapped_column(String(tamanho) if tamanho else Text, nullable=True)
+
+
+def _valor():
+    return mapped_column(Numeric(14, 2, asdecimal=False), nullable=True)
+
+
+class FaturamentoItem(Base):
+    """Uma linha por item de nota fiscal, como na aba FATURAMENTO (exportação do ERP)."""
+    __tablename__ = "faturamento_itens"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    importacao_id: Mapped[int] = mapped_column(ForeignKey("importacoes.id", ondelete="CASCADE"))
+    ano: Mapped[int] = mapped_column(Integer)
+    mes: Mapped[int] = mapped_column(Integer)
+    data_emissao: Mapped[date | None] = mapped_column(Date)
+    cod_emp: Mapped[str | None] = _texto(20)
+    num_nf: Mapped[str | None] = _texto(30)
+    cod_segmento: Mapped[str | None] = _texto(20)
+    descricao_segmento: Mapped[str | None] = _texto(120)
+    cod_cli: Mapped[str] = mapped_column(String(30), default="")
+    cod_est: Mapped[str | None] = _texto(20)
+    tp_pes: Mapped[str | None] = _texto(2)
+    cnpj_cpf: Mapped[str] = mapped_column(String(14))
+    razao_social: Mapped[str | None] = _texto(200)
+    cidade: Mapped[str | None] = _texto(120)
+    uf: Mapped[str | None] = _texto(2)
+    cod_rep: Mapped[str | None] = _texto(20)
+    representante: Mapped[str | None] = _texto(150)
+    familia_2: Mapped[str | None] = _texto(120)
+    familia_4: Mapped[str | None] = _texto(150)
+    marca: Mapped[str | None] = _texto(150)
+    embalagem: Mapped[str | None] = _texto(40)
+    volume: Mapped[str | None] = _texto(20)
+    um: Mapped[str | None] = _texto(10)
+    cod_item: Mapped[str | None] = _texto(30)
+    descricao_item: Mapped[str | None] = _texto(255)
+    qtde: Mapped[float | None] = _valor()
+    ump: Mapped[str | None] = _texto(20)
+    preco_unit: Mapped[float | None] = _valor()
+    vlr_mercadoria: Mapped[float | None] = _valor()
+    vlr_total: Mapped[float | None] = _valor()
+    cod_tp_nf: Mapped[str | None] = _texto(20)
+    tipo_nf: Mapped[str] = mapped_column(String(60), default="")
+    tipo_nf_chave: Mapped[str] = mapped_column(String(60), default="")  # sem acento/maiúsculo, para as regras
+    cfop: Mapped[str | None] = _texto(10)
+    receita: Mapped[str | None] = _texto(10)
+    cond_pgto: Mapped[str | None] = _texto(60)
+    qtde_caixa: Mapped[float | None] = _valor()
+    bonificacao: Mapped[float | None] = _valor()
+    total_venda: Mapped[float | None] = _valor()
+    grupo: Mapped[str | None] = _texto(60)

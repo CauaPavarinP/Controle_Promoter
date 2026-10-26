@@ -5,7 +5,8 @@ import CardsResumo from './CardsResumo.jsx'
 import TabelaPromotores from './TabelaPromotores.jsx'
 import TabelaLojas from './TabelaLojas.jsx'
 import Importar from './Importar.jsx'
-import Avisos from './Avisos.jsx'
+import Pendencias from './Pendencias.jsx'
+import Conferencia from './Conferencia.jsx'
 import Regras from './Regras.jsx'
 import Promotores from './cadastros/Promotores.jsx'
 import Supervisores from './cadastros/Supervisores.jsx'
@@ -20,17 +21,18 @@ const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', supervisor: '',
 const ABAS = [
   { id: 'visao-geral', grupo: 'Análise', titulo: 'Visão geral', subtitulo: 'Custo dos promotores × faturamento das lojas' },
   { id: 'lojas', grupo: 'Análise', titulo: 'Lojas', subtitulo: 'Faturamento de cada loja atendida no período' },
-  { id: 'avisos', grupo: 'Análise', titulo: 'Avisos dos dados', subtitulo: 'Problemas encontrados nos dados' },
+  { id: 'pendencias', grupo: 'Análise', titulo: 'Pendências', subtitulo: 'O que falta corrigir para os números ficarem confiáveis' },
   { id: 'promotores', grupo: 'Cadastros', titulo: 'Promotores', subtitulo: 'Promotores, custos por competência e roteiro de cada um' },
   { id: 'supervisores', grupo: 'Cadastros', titulo: 'Supervisores', subtitulo: 'Supervisores e suas equipes' },
   { id: 'pdvs', grupo: 'Cadastros', titulo: 'PDVs', subtitulo: 'Pontos de venda atendidos pelos promotores' },
   { id: 'roteiros', grupo: 'Cadastros', titulo: 'Roteiros', subtitulo: 'Qual promotor atende qual PDV, desde quando e quantas vezes por semana' },
   { id: 'importar', grupo: 'Configuração', titulo: 'Atualizar dados', subtitulo: 'Importe as planilhas para atualizar o sistema', admin: true },
   { id: 'regras', grupo: 'Configuração', titulo: 'Regras do cálculo', subtitulo: 'Defina como o sistema calcula custo e faturamento' },
+  { id: 'conferencia', grupo: 'Configuração', titulo: 'Conferência', subtitulo: 'Totais do sistema comparados com as abas da planilha' },
   { id: 'usuarios', grupo: 'Configuração', titulo: 'Usuários', subtitulo: 'Quem acessa o sistema e com qual perfil', admin: true },
   { id: 'perfil', grupo: null, titulo: 'Meu perfil', subtitulo: 'Seus dados de acesso' },
 ]
-const ABAS_DE_ANALISE = ['visao-geral', 'lojas', 'avisos']
+const ABAS_DE_ANALISE = ['visao-geral', 'lojas', 'pendencias']
 
 // Período padrão: janeiro do último ano com dados até o último mês importado.
 function periodoPadrao(meses) {
@@ -121,7 +123,6 @@ export default function Painel({ usuario, aoSair }) {
   }
 
   const temDados = opcoes && opcoes.meses.length > 0
-  const totalAvisos = opcoes ? contarAvisos(opcoes) : 0
   const abaAtual = ABAS.find((a) => a.id === aba)
   const grupos = [...new Set(abasPermitidas.map((a) => a.grupo).filter(Boolean))]
 
@@ -139,7 +140,7 @@ export default function Painel({ usuario, aoSair }) {
               {abasPermitidas.filter((a) => a.grupo === grupo).map((a) => (
                 <button key={a.id} className={aba === a.id ? 'ativo' : ''} onClick={() => irPara(a.id)}>
                   {a.titulo}
-                  {a.id === 'avisos' && totalAvisos > 0 && <span className="contador">{totalAvisos}</span>}
+                  {a.id === 'pendencias' && opcoes?.pendencias > 0 && <span className="contador">{opcoes.pendencias}</span>}
                 </button>
               ))}
             </div>
@@ -162,6 +163,13 @@ export default function Painel({ usuario, aoSair }) {
         </header>
 
         {erro && ABAS_DE_ANALISE.includes(aba) && <div className="erro-caixa">{erro}</div>}
+
+        {opcoes?.reimportar_faturamento && ['visao-geral', 'lojas'].includes(aba) && (
+          <div className="aviso">
+            O sistema agora guarda o faturamento item a item. O faturamento importado na versão anterior não é usado:
+            {admin ? <> importe o arquivo de novo em <a href="#importar">Atualizar dados</a>.</> : ' peça a um administrador para importar de novo.'}
+          </div>
+        )}
 
         {(aba === 'visao-geral' || aba === 'lojas') && !temDados && opcoes && (
           <div className="aviso">
@@ -197,23 +205,19 @@ export default function Painel({ usuario, aoSair }) {
           </div>
         )}
 
-        {aba === 'avisos' && opcoes && <Avisos opcoes={opcoes} />}
+        {aba === 'pendencias' && (
+          <Pendencias podeEditar={admin} meses={opcoes?.meses || []} aoAlterar={carregarOpcoes} />
+        )}
+        {aba === 'conferencia' && <Conferencia />}
         {aba === 'promotores' && <Promotores podeEditar={admin} />}
         {aba === 'supervisores' && <Supervisores podeEditar={admin} />}
         {aba === 'pdvs' && <Pdvs podeEditar={admin} />}
         {aba === 'roteiros' && <Roteiros podeEditar={admin} />}
-        {aba === 'importar' && admin && (
-          <Importar importacoes={opcoes?.importacoes || {}} aoImportar={carregarOpcoes} />
-        )}
+        {aba === 'importar' && admin && <Importar aoImportar={carregarOpcoes} />}
         {aba === 'regras' && <Regras podeEditar={admin} aoSalvar={() => setVersaoDados((v) => v + 1)} />}
         {aba === 'usuarios' && admin && <Usuarios eu={usuario} />}
         {aba === 'perfil' && <MeuPerfil usuario={usuario} />}
       </main>
     </div>
   )
-}
-
-function contarAvisos(opcoes) {
-  const daImportacao = Object.values(opcoes.importacoes || {}).reduce((soma, i) => soma + (i.avisos?.length || 0), 0)
-  return daImportacao + (opcoes.roteiro_sem_vinculo?.length ? 1 : 0)
 }

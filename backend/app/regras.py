@@ -6,12 +6,17 @@ foram salvas, valem os valores de REGRAS_PADRAO.
 from . import db
 
 MODOS_REDE = {"cnpj", "rede_total", "rede_dividido"}
+COLUNAS_VALOR = {"total_venda", "vlr_total"}
 MODOS_RATEIO = {"igual", "visitas"}
 ACOES_TIPO = {"soma", "subtrai", "ignora"}
 
 REGRAS_PADRAO = {
-    # Tipo de nota (sem acento, maiúsculo) -> soma | subtrai | ignora. Tipo não listado = ignora.
-    "tipos_nf": {"1 VENDA": "soma"},
+    # Padrão igual à planilha: soma TOTAL VENDA de todas as linhas, sem filtrar tipo de nota nem RECEITA.
+    "valor_faturamento": "total_venda",   # total_venda (coluna AL) | vlr_total (coluna AD)
+    # Tipo de nota (sem acento, maiúsculo) -> soma | subtrai | ignora.
+    "tipos_nf": {},
+    "tipos_nf_padrao": "soma",            # o que fazer com tipos que não estão na lista acima
+    "somente_receita": False,             # True: só linhas com RECEITA = SIM
     # cnpj: só o CNPJ exato da loja | rede_total: rede inteira (raiz do CNPJ) em cada loja |
     # rede_dividido: faturamento da rede dividido igualmente entre as lojas dela.
     "modo_rede": "cnpj",
@@ -27,6 +32,9 @@ REGRAS_PADRAO = {
 
 def ler_regras() -> dict:
     salvas = db.ler_configuracao("regras", {}) or {}
+    if salvas and "tipos_nf_padrao" not in salvas:
+        # Regras salvas antes desta opção existir: tipo fora da lista ficava de fora.
+        salvas = {**salvas, "tipos_nf_padrao": "ignora"}
     return {**REGRAS_PADRAO, **salvas}
 
 
@@ -46,6 +54,11 @@ def validar_regras(dados: dict) -> dict:
         raise ValueError("Modo de rede inválido.")
     if regras["rateio_custo"] not in MODOS_RATEIO:
         raise ValueError("Forma de rateio inválida.")
+    if regras["valor_faturamento"] not in COLUNAS_VALOR:
+        raise ValueError("Coluna de valor inválida.")
+    if regras["tipos_nf_padrao"] not in ACOES_TIPO:
+        raise ValueError("Ação padrão de tipo de nota inválida.")
+    regras["somente_receita"] = bool(regras["somente_receita"])
     tipos = regras["tipos_nf"]
     if not isinstance(tipos, dict) or any(a not in ACOES_TIPO for a in tipos.values()):
         raise ValueError("Ação de tipo de nota inválida (use soma, subtrai ou ignora).")

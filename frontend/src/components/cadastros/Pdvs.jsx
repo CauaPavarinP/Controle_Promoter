@@ -3,9 +3,9 @@ import { http } from '../../api.js'
 import { formatarCnpj, mascararDocumento, UFS } from '../../formato.js'
 import { Campo, Modal, Situacao, Tabela, useLista } from '../ui.jsx'
 
-const PDV_VAZIO = { cnpj_cpf: '', nome_fantasia: '', razao_social: '', cod_cli_erp: '', cidade: '', uf: '' }
+export const PDV_VAZIO = { cnpj_cpf: '', nome_fantasia: '', razao_social: '', cod_cli_erp: '', cidade: '', uf: '' }
 
-function FormularioPdv({ inicial, aoFechar, aoSalvar }) {
+export function FormularioPdv({ inicial, aoFechar, aoSalvar }) {
   const [dados, setDados] = useState({ ...inicial, cnpj_cpf: mascararDocumento(inicial.cnpj_cpf || '') })
   const [sugestao, setSugestao] = useState(null)
   const [erro, setErro] = useState('')

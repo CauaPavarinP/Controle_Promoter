@@ -1,6 +1,6 @@
 import pandas as pd
 
-from conftest import EXEMPLOS, entrar
+from conftest import EXEMPLOS, entrar, gravar_itens
 
 CNPJ_A = "11222333000181"   # CNPJs com dígito verificador válido
 CNPJ_B = "11444777000161"
@@ -33,10 +33,7 @@ def _vincular(cliente, promotor_id, pdv_id, inicio="2026-01-01", visitas=None):
 
 
 def _faturamento(banco, linhas):
-    df = pd.DataFrame([{"ano": 2026, "mes": mes, "cnpj": cnpj, "chave_tipo": "1 VENDA", "tipo_nf": "1-Venda",
-                        "cod_cliente": "", "razao_social": "", "cidade": "", "uf": "", "valor": valor, "notas": 1}
-                       for mes, cnpj, valor in linhas])
-    banco.db.gravar_faturamento(df)
+    gravar_itens(banco, linhas)
 
 
 def _painel(cliente, inicio, fim, **filtros):
@@ -165,13 +162,13 @@ def test_importacao_da_planilha_e_idempotente(cliente):
     for _ in range(2):
         for tipo in ("promotores", "roteiro"):
             with open(EXEMPLOS / f"{tipo}_exemplo.xlsx", "rb") as arquivo:
-                resposta = cliente.post(f"/api/importar/{tipo}", files={"arquivo": (f"{tipo}.xlsx", arquivo)})
+                resposta = cliente.post(f"/api/importacoes/{tipo}", files={"arquivo": (f"{tipo}.xlsx", arquivo)})
             assert resposta.status_code == 200, resposta.text
     assert len(cliente.get("/api/promotores").json()) == 4
-    assert len(cliente.get("/api/pdvs").json()) == 9
-    assert len(cliente.get("/api/roteiros").json()) == 9
+    assert len(cliente.get("/api/pdvs").json()) == 11
+    assert len(cliente.get("/api/roteiros").json()) == 11
     assert len(cliente.get("/api/supervisores").json()) == 2
-    assert resposta.json()["cadastros"] == {"criados": 0, "mantidos": 9, "pendentes": 0}
+    assert resposta.json()["cadastros"] == {"criados": 0, "mantidos": 11, "pendentes": 0}
 
 
 def test_converte_dados_da_versao_anterior(banco):
@@ -184,8 +181,14 @@ def test_converte_dados_da_versao_anterior(banco):
                   {"codigo_promotor": "", "colaborador": "FULANO", "cnpj": CNPJ_B, "loja": "LOJA 2",
                    "cidade": "ITAJAI", "uf": "SC", "visitas_semana": None}]).to_sql("roteiro", banco.db.engine, index=False)
 
+    # Faturamento no formato antigo (somado por mês) e histórico antigo de importações.
+    pd.DataFrame([{"ano": 2026, "mes": 1, "cnpj": CNPJ_A, "valor": 10.0}]).to_sql("faturamento", banco.db.engine, index=False)
+    pd.DataFrame([{"tipo": "roteiro", "arquivo": "x.xlsx", "data_hora": "2026-10-01", "linhas": 1, "detalhe": ""}]).to_sql(
+        "importacoes", banco.db.engine, index=False)
+
     banco.carga.preparar_banco()
     banco.carga.preparar_banco()   # rodar de novo não duplica
+    assert banco.faturamento.tem_faturamento_antigo()   # avisa para importar o faturamento de novo
 
     with banco.db.SessaoLocal() as sessao:
         from app.modelos import Promotor, Roteiro

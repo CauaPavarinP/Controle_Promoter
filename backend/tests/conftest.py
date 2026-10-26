@@ -19,11 +19,13 @@ def recarregar_app():
     import app.config
     import app.dados
     import app.db
+    import app.faturamento
     import app.main
+    import app.pendencias
     import app.regras
     import app.usuarios
-    for modulo in (app.config, app.db, app.regras, app.carga, app.dados, app.autenticacao, app.usuarios,
-                   app.cadastros, app.main):
+    for modulo in (app.config, app.db, app.regras, app.faturamento, app.carga, app.dados, app.autenticacao,
+                   app.usuarios, app.cadastros, app.pendencias, app.main):
         importlib.reload(modulo)
     return app
 
@@ -49,3 +51,37 @@ def entrar(cliente, usuario="mauricio", senha="senha-teste"):
     resposta = cliente.post("/api/login", json={"usuario": usuario, "senha": senha})
     assert resposta.status_code == 200, resposta.text
     return resposta.json()
+
+
+def importar_cadastros(cliente, *tipos):
+    for tipo in tipos or ("promotores", "roteiro"):
+        with open(EXEMPLOS / f"{tipo}_exemplo.xlsx", "rb") as arquivo:
+            resposta = cliente.post(f"/api/importacoes/{tipo}", files={"arquivo": (f"{tipo}.xlsx", arquivo)})
+        assert resposta.status_code == 200, resposta.text
+
+
+def importar_faturamento(cliente, arquivo="faturamento_exemplo.xlsx", substituir=False):
+    with open(EXEMPLOS / arquivo, "rb") as conteudo:
+        previa = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": (arquivo, conteudo)})
+    assert previa.status_code == 200, previa.text
+    previa = previa.json()
+    resposta = cliente.post(f"/api/importacoes/faturamento/{previa['token']}/confirmar",
+                            json={"substituir": substituir})
+    return previa, resposta
+
+
+def gravar_itens(banco, linhas):
+    """Grava itens de faturamento direto no banco: [(mes, cnpj, valor[, cod_cli, tipo, receita])]."""
+    from app.importacao import normalizar_texto
+    from app.modelos import FaturamentoItem, Importacao
+    with banco.db.SessaoLocal() as sessao:
+        importacao = Importacao(tipo="faturamento", arquivo_nome="teste", situacao="ativa")
+        sessao.add(importacao)
+        sessao.flush()
+        for numero, linha in enumerate(linhas):
+            mes, cnpj, valor, *resto = linha
+            cod_cli, tipo, receita = list(resto) + ["", "1-Venda", "SIM"][len(resto):]
+            sessao.add(FaturamentoItem(importacao_id=importacao.id, ano=2026, mes=mes, cnpj_cpf=cnpj, cod_cli=cod_cli,
+                                       num_nf=str(numero), tipo_nf=tipo, tipo_nf_chave=normalizar_texto(tipo),
+                                       receita=receita, total_venda=valor, vlr_total=valor))
+        sessao.commit()

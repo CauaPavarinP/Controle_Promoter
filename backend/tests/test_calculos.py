@@ -42,9 +42,12 @@ def _dados():
     return faturamento, promotores, roteiro
 
 
+SO_VENDA = {"tipos_nf": {"1 VENDA": "soma"}, "tipos_nf_padrao": "ignora"}
+
+
 def test_acumulado_conta_cnpj_compartilhado_uma_vez():
     fat, prom, rot = _dados()
-    painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-06", supervisor="Vanessa"))
+    painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-06", supervisor="Vanessa"), SO_VENDA)
     ana = painel["promotores"][0]
     assert ana["faturamento"] == 15000.0          # rede com 2 lojas no mesmo CNPJ conta uma vez
     assert ana["custo_periodo"] == 6000.0         # 6 meses × 1000
@@ -63,6 +66,49 @@ def test_devolucao_descontada_quando_configurado():
     regras = {"tipos_nf": {"1 VENDA": "soma", "DEVOLUCAO": "subtrai"}}
     painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-06", supervisor="Vanessa"), regras)
     assert painel["resumo"]["faturamento"] == 13000.0
+
+
+def test_padrao_soma_todos_os_tipos_como_a_planilha():
+    fat, prom, rot = _dados()
+    painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-06", supervisor="Vanessa"))
+    assert painel["resumo"]["faturamento"] == 17000.0   # 10.000 + 5.000 + 2.000 da linha "Devolucao"
+
+
+def test_coluna_de_valor_e_somente_receita():
+    prom, rot = _dados()[1:]
+    fat = pd.DataFrame([
+        {"ano": 2026, "mes": 1, "cnpj": "111", "cod_cliente": "", "chave_tipo": "1 VENDA", "tipo_nf": "1-Venda",
+         "receita": "SIM", "total_venda": 1000.0, "vlr_total": 900.0, "notas": 1},
+        {"ano": 2026, "mes": 1, "cnpj": "111", "cod_cliente": "", "chave_tipo": "BONIF", "tipo_nf": "Bonif",
+         "receita": "NAO", "total_venda": 100.0, "vlr_total": 100.0, "notas": 1},
+    ])
+    filtros = Filtros("2026-01", "2026-01", promotor="1")
+    assert calcular_painel(fat, prom, rot, filtros)["resumo"]["faturamento"] == 1100.0
+    assert calcular_painel(fat, prom, rot, filtros, {"valor_faturamento": "vlr_total"})["resumo"]["faturamento"] == 1000.0
+    assert calcular_painel(fat, prom, rot, filtros, {"somente_receita": True})["resumo"]["faturamento"] == 1000.0
+
+
+def test_mesmo_cnpj_separado_pelo_cod_cli():
+    prom = _dados()[1]
+    rot = pd.DataFrame([
+        {"codigo_promotor": "1", "colaborador": "", "cnpj": "999", "loja": "LOJA A", "cidade": "X", "uf": "SC",
+         "visitas_semana": None, "cod_cli": "A1"},
+        {"codigo_promotor": "1", "colaborador": "", "cnpj": "999", "loja": "LOJA B", "cidade": "X", "uf": "SC",
+         "visitas_semana": None, "cod_cli": "B2"},
+    ])
+    fat = pd.DataFrame([_venda(2026, 1, "999", 700.0) | {"cod_cliente": "A1"},
+                        _venda(2026, 1, "999", 300.0) | {"cod_cliente": "B2"}])
+    painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-01"))
+    assert {l["loja"]: l["faturamento"] for l in painel["lojas"]} == {"LOJA A": 700.0, "LOJA B": 300.0}
+    assert all(l["separado_por_cod_cli"] and not l["compartilhado"] for l in painel["lojas"])
+    assert painel["resumo"]["faturamento"] == 1000.0
+
+    # Sem COD CLI numa das lojas: não dá para separar, o CNPJ é compartilhado e conta uma vez.
+    rot.loc[1, "cod_cli"] = ""
+    painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-01"))
+    assert [l["faturamento"] for l in painel["lojas"]] == [1000.0, 1000.0]
+    assert all(l["compartilhado"] for l in painel["lojas"])
+    assert painel["resumo"]["faturamento"] == 1000.0
 
 
 def test_mes_unico_e_outro_ano_nao_entram():

@@ -83,13 +83,37 @@ def raiz_cnpj(cnpj: str) -> str:
 
 
 def aplicar_tipos_de_nota(faturamento: pd.DataFrame, regras: dict) -> pd.DataFrame:
-    """Soma, desconta ou tira cada tipo de nota conforme as regras."""
-    acoes = faturamento["chave_tipo"].map(lambda c: regras["tipos_nf"].get(c, "ignora"))
-    fat = faturamento[acoes != "ignora"].copy()
+    """Escolhe a coluna de valor e soma, desconta ou tira cada tipo de nota conforme as regras."""
+    fat = faturamento.copy()
+    if "valor" not in fat:
+        coluna = regras["valor_faturamento"]
+        fat["valor"] = fat[coluna] if coluna in fat else fat["total_venda"]
+    if regras["somente_receita"] and "receita" in fat:
+        fat = fat[fat["receita"].map(normalizar_texto).isin({"SIM", "S"})]
+    acoes = fat["chave_tipo"].map(lambda c: regras["tipos_nf"].get(c, regras["tipos_nf_padrao"]))
+    fat = fat[acoes != "ignora"].copy()
     acoes = acoes[acoes != "ignora"]
     fat["valor"] = fat["valor"].astype(float).where(acoes == "soma", -fat["valor"].astype(float).abs())
     fat["notas"] = fat["notas"].where(acoes == "soma", 0)
+    if "cod_cliente" not in fat:
+        fat["cod_cliente"] = ""
     return fat
+
+
+def cnpjs_separados_por_cod_cli(roteiro: pd.DataFrame) -> set[str]:
+    """CNPJs com mais de uma loja no roteiro em que cada loja tem um COD CLI próprio (e diferente).
+
+    Nesses casos o faturamento é separado por COD CLI; nos demais, as lojas dividem o valor do CNPJ.
+    """
+    if "cod_cli" not in roteiro:
+        return set()
+    lojas = roteiro[roteiro["cnpj"].fillna("") != ""].drop_duplicates(["cnpj", "loja"])
+    separados = set()
+    for cnpj, codigos in lojas.groupby("cnpj")["cod_cli"]:
+        codigos = [c or "" for c in codigos]
+        if len(codigos) > 1 and all(codigos) and len(set(codigos)) == len(codigos):
+            separados.add(cnpj)
+    return separados
 
 
 def custos_por_mes(promotores: pd.DataFrame, custos: pd.DataFrame | None, regras: dict,
@@ -144,7 +168,15 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
     roteiro, _ = vincular_roteiro(roteiro, promotores)
     roteiro = roteiro.reset_index(drop=True).copy()
     roteiro["linha"] = roteiro.index
-    roteiro["chave"] = roteiro["cnpj"].fillna("").map(chave_de)
+    roteiro["cnpj"] = roteiro["cnpj"].fillna("")
+    separados = set() if por_rede else cnpjs_separados_por_cod_cli(roteiro)
+
+    def chave_com_cod_cli(cnpj, cod_cli):
+        # Lojas com o mesmo CNPJ e COD CLI diferentes: cada uma fica com o faturamento do seu código.
+        return f"{cnpj}#{cod_cli}" if cnpj in separados else chave_de(cnpj)
+
+    roteiro["chave"] = [chave_com_cod_cli(c, k) for c, k in
+                        zip(roteiro["cnpj"], roteiro["cod_cli"] if "cod_cli" in roteiro else [""] * len(roteiro))]
     tem_datas = "data_inicio" in roteiro
     roteiro["meses"] = [
         list(range(max(inicio, _indice_data(r.data_inicio) if tem_datas and _indice_data(r.data_inicio) is not None
@@ -166,7 +198,7 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
     fat = aplicar_tipos_de_nota(faturamento, regras)
     fat["mes"] = fat["ano"].astype(int) * 12 + fat["mes"].astype(int) - 1
     fat = fat[(fat["mes"] >= inicio) & (fat["mes"] <= fim)]
-    fat["chave"] = fat["cnpj"].map(chave_de)
+    fat["chave"] = [chave_com_cod_cli(c, k) for c, k in zip(fat["cnpj"], fat["cod_cliente"])]
     mensal = fat.groupby(["chave", "mes"]).agg(valor=("valor", "sum"), notas=("notas", "sum")).reset_index()
 
     ativos = ativos.merge(mensal, on=["chave", "mes"], how="left")
@@ -257,6 +289,7 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
             "meses_com_compra": int(l.meses_com_compra),
             "lojas_mesmo_cnpj": int(l.lojas_mesma_chave),
             "compartilhado": bool(l.compartilhado),
+            "separado_por_cod_cli": l.cnpj in separados,
             "custo_periodo": _arredondar(l.custo_periodo),
             "percentual_custo": None if l.compartilhado else _percentual(l.custo_periodo, l.faturamento),
             "custo_por_visita": _arredondar(custo_mensal_loja / visitas_mes) if visitas_mes > 0 else None,
@@ -290,11 +323,13 @@ def tipos_de_nota(faturamento: pd.DataFrame, regras: dict) -> list:
     """Tipos de nota existentes no faturamento importado, com a ação de cada um."""
     if faturamento.empty:
         return []
+    coluna = regras["valor_faturamento"]
     tipos = (faturamento.groupby("chave_tipo")
-                        .agg(tipo=("tipo_nf", "first"), notas=("notas", "sum"), valor=("valor", "sum"))
+                        .agg(tipo=("tipo_nf", "first"), notas=("notas", "sum"), valor=(coluna, "sum"))
                         .reset_index().sort_values("valor", ascending=False))
     return [{"chave": t.chave_tipo, "tipo": t.tipo, "notas": int(t.notas), "valor": _arredondar(t.valor),
-             "acao": regras["tipos_nf"].get(t.chave_tipo, "ignora")} for t in tipos.itertuples()]
+             "acao": regras["tipos_nf"].get(t.chave_tipo, regras["tipos_nf_padrao"]),
+             "na_lista": t.chave_tipo in regras["tipos_nf"]} for t in tipos.itertuples()]
 
 
 def opcoes_de_filtro(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro: pd.DataFrame,

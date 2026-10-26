@@ -30,6 +30,11 @@ export const http = {
   post: (caminho, corpo) => requisitar(caminho, json('POST', corpo)),
   put: (caminho, corpo) => requisitar(caminho, json('PUT', corpo)),
   delete: (caminho) => requisitar(caminho, { method: 'DELETE' }),
+  enviarArquivo: (caminho, arquivo) => {
+    const corpo = new FormData()
+    corpo.append('arquivo', arquivo)
+    return requisitar(caminho, { method: 'POST', body: corpo })
+  },
 }
 
 export const api = {

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from . import db
 from .autenticacao import exigir_admin, usuario_logado
 from .carga import custo_vigente
+from .faturamento import dados_do_cliente
 from .importacao import normalizar_cnpj, normalizar_texto
 from .modelos import CustoPromotor, Pdv, Promotor, Roteiro, Supervisor
 
@@ -330,7 +331,9 @@ def _pdv_json(pdv: Pdv, hoje: date, mesmo_cnpj: int = 1) -> dict:
 
 def _preencher_pdv(sessao: Session, pdv: Pdv, dados: PdvEntrada, ignorar_id: int | None = None):
     cnpj = normalizar_cnpj(dados.cnpj_cpf)
-    if cnpj and not documento_valido(cnpj):
+    # Valida só CNPJ digitado ou alterado: PDV importado com CNPJ inválido continua editável
+    # (aparece em Pendências para corrigir).
+    if cnpj and cnpj != pdv.cnpj_cpf and not documento_valido(cnpj):
         _erro("CNPJ/CPF inválido: confira os números (dígito verificador não confere).")
     chave = normalizar_texto(dados.nome_fantasia)
     existente = sessao.scalar(select(Pdv).where(Pdv.cnpj_cpf == cnpj, Pdv.nome_chave == chave))
@@ -359,14 +362,7 @@ def listar_pdvs(sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logad
 @rotas.get("/pdvs/sugestao")
 def sugerir_pdv(cnpj: str, _=Depends(usuario_logado)):
     """Dados do cliente no faturamento importado, para preencher o cadastro do PDV."""
-    digitos = normalizar_cnpj(cnpj)
-    fat = db.ler_tabela("faturamento")
-    linhas = fat[fat["cnpj"] == digitos]
-    if linhas.empty:
-        return {"encontrado": False}
-    ultima = linhas.sort_values(["ano", "mes"]).iloc[-1]
-    return {"encontrado": True, "razao_social": ultima["razao_social"], "cidade": ultima["cidade"],
-            "uf": ultima["uf"], "cod_cli_erp": sorted({c for c in linhas["cod_cliente"] if c})}
+    return dados_do_cliente(normalizar_cnpj(cnpj))
 
 
 @rotas.post("/pdvs")

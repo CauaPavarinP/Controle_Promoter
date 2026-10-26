@@ -268,3 +268,22 @@ th.ordenavel:hover { text-decoration: underline; }
   .menu-grupo-titulo { display: none; }
   .bloco-ferramentas > * { flex: 1 1 100%; }
 }
+
+/* Fase 2: importação, pendências e conferência */
+span.pct-ok { color: var(--ok); font-weight: 600; }
+span.pct-critico { color: var(--critico); font-weight: 600; }
+.etiqueta-ok { background: var(--ok-fundo); color: var(--ok); }
+.contador.zerado { background: var(--ok-fundo); color: var(--ok); }
+.bloco h2 .contador { font-size: 13px; vertical-align: middle; margin-left: 6px; }
+.importar-cartao.destaque { border-color: var(--primaria); box-shadow: 0 0 0 1px var(--primaria) inset; }
+.previa { display: grid; gap: 12px; }
+.previa h3 { margin: 0; }
+.previa-numeros { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.previa-numeros div { background: #f7f9fc; border: 1px solid var(--borda); border-radius: 8px; padding: 10px; display: grid; gap: 2px; }
+.previa-numeros span { font-size: 12px; color: var(--texto-suave); }
+.previa details { border: 1px solid var(--borda); border-radius: 8px; padding: 8px 12px; }
+.previa summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.previa-cadastros { display: grid; gap: 8px; margin-bottom: 14px; }
+.caixa-alerta { background: var(--alerta-fundo); color: var(--alerta); padding: 10px 12px; border-radius: 8px; align-items: flex-start; }
+.importar-cartao { min-width: 0; }
+.importar-cartao > input[type=file], .importar-cartao > button { width: 100%; max-width: 100%; min-width: 0; }

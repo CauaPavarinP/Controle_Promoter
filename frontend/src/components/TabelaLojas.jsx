@@ -62,6 +62,11 @@ export default function TabelaLojas({ lojas, regras }) {
               <tr key={`${l.codigo_promotor}-${l.cnpj}-${l.loja}`} className={l.faturamento <= 0 ? 'linha-sem-compra' : ''}>
                 <td className="quebra">
                   {l.loja}
+                  {l.separado_por_cod_cli && (
+                    <span className="etiqueta etiqueta-ok" title="Outras lojas usam o mesmo CNPJ; o faturamento foi separado pelo COD CLI de cada uma">
+                      separado pelo COD CLI
+                    </span>
+                  )}
                   {l.compartilhado && (
                     <span className="etiqueta" title="O ERP fatura por CNPJ: o valor é do CNPJ inteiro e conta uma vez só nos totais">
                       {regras.modo_rede === 'cnpj'

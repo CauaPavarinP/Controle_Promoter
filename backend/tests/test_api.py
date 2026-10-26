@@ -1,9 +1,4 @@
-from conftest import EXEMPLOS
-
-
-def _entrar(cliente):
-    resposta = cliente.post("/api/login", json={"usuario": "mauricio", "senha": "senha-teste"})
-    assert resposta.status_code == 200
+from conftest import entrar, importar_cadastros, importar_faturamento
 
 
 def test_rotas_exigem_login(cliente):
@@ -14,11 +9,10 @@ def test_rotas_exigem_login(cliente):
 
 
 def test_importar_e_consultar_painel(cliente):
-    _entrar(cliente)
-    for tipo in ("promotores", "roteiro", "faturamento"):
-        with open(EXEMPLOS / f"{tipo}_exemplo.xlsx", "rb") as arquivo:
-            resposta = cliente.post(f"/api/importar/{tipo}", files={"arquivo": (f"{tipo}.xlsx", arquivo)})
-        assert resposta.status_code == 200, resposta.text
+    entrar(cliente)
+    importar_cadastros(cliente)
+    _, resposta = importar_faturamento(cliente)
+    assert resposta.status_code == 200, resposta.text
 
     opcoes = cliente.get("/api/opcoes").json()
     assert opcoes["meses"][0] == "2026-01"
@@ -27,7 +21,7 @@ def test_importar_e_consultar_painel(cliente):
 
     painel = cliente.get("/api/painel", params={"inicio": "2026-01", "fim": "2026-09"}).json()
     assert painel["resumo"]["promotores"] == 4
-    assert painel["resumo"]["lojas"] == 9
+    assert painel["resumo"]["lojas"] == 11
     assert painel["resumo"]["faturamento"] > 0
 
     cliente.post("/api/logout")
@@ -35,30 +29,34 @@ def test_importar_e_consultar_painel(cliente):
 
 
 def test_importacao_com_arquivo_errado(cliente):
-    _entrar(cliente)
+    entrar(cliente)
+    from conftest import EXEMPLOS
     with open(EXEMPLOS / "promotores_exemplo.xlsx", "rb") as arquivo:
-        resposta = cliente.post("/api/importar/faturamento", files={"arquivo": ("p.xlsx", arquivo)})
+        resposta = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("p.xlsx", arquivo)})
     assert resposta.status_code == 400
     assert "faturamento" in resposta.json()["detail"]
 
 
 def test_regras_salvas_mudam_o_painel(cliente):
-    _entrar(cliente)
-    for tipo in ("promotores", "roteiro", "faturamento"):
-        with open(EXEMPLOS / f"{tipo}_exemplo.xlsx", "rb") as arquivo:
-            resposta = cliente.post(f"/api/importar/{tipo}", files={"arquivo": (f"{tipo}.xlsx", arquivo)})
-    assert any("sem regra" in a for a in resposta.json()["avisos"])  # a devolução do exemplo
+    entrar(cliente)
+    importar_cadastros(cliente)
+    importar_faturamento(cliente)
 
     dados = cliente.get("/api/regras").json()
-    assert {t["tipo"]: t["acao"] for t in dados["tipos_nf"]} == {"1-Venda": "soma", "2-Devolucao": "ignora"}
+    # Padrão igual à planilha: todos os tipos de nota somam.
+    assert {t["tipo"]: t["acao"] for t in dados["tipos_nf"]} == {
+        "1-Venda": "soma", "5-Bonificacao": "soma", "2-Devolucao": "soma"}
     parametros = {"inicio": "2026-01", "fim": "2026-09"}
     antes = cliente.get("/api/painel", params=parametros).json()["resumo"]["faturamento"]
 
     regras = dados["regras"]
-    regras["tipos_nf"]["2 DEVOLUCAO"] = "subtrai"
+    regras["tipos_nf"]["2 DEVOLUCAO"] = "ignora"       # a devolução de -500 deixa de contar
     assert cliente.put("/api/regras", json=regras).status_code == 200
-    depois = cliente.get("/api/painel", params=parametros).json()["resumo"]["faturamento"]
-    assert depois == antes - 500
+    assert cliente.get("/api/painel", params=parametros).json()["resumo"]["faturamento"] == antes + 500
+
+    regras["somente_receita"] = True                    # a bonificação (RECEITA = NAO) de 300 sai
+    assert cliente.put("/api/regras", json=regras).status_code == 200
+    assert cliente.get("/api/painel", params=parametros).json()["resumo"]["faturamento"] == antes + 500 - 300
 
     regras["faixa_alerta"] = 99
     assert cliente.put("/api/regras", json=regras).status_code == 400
