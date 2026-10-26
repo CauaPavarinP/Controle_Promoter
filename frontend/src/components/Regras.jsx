@@ -8,40 +8,18 @@ const ACOES = [
   { valor: 'ignora', texto: 'Fica de fora' },
 ]
 
-const MODOS_REDE = [
-  {
-    valor: 'cnpj',
-    titulo: 'Só o CNPJ da própria loja',
-    exemplo: 'A loja só mostra as compras feitas no CNPJ dela. Se a matriz comprou, a loja aparece com R$ 0,00.',
-  },
-  {
-    valor: 'rede_total',
-    titulo: 'Rede inteira em cada loja',
-    exemplo:
-      'Junta todos os CNPJs da mesma empresa (mesma raiz, os 8 primeiros números). Se a rede comprou R$ 100.000, ' +
-      'cada loja mostra R$ 100.000, e o total conta esse valor uma vez só.',
-  },
-  {
-    valor: 'rede_dividido',
-    titulo: 'Rede dividida igualmente entre as lojas',
-    exemplo:
-      'Junta os CNPJs da mesma empresa e divide pelo número de lojas no roteiro. Rede com 4 lojas que comprou ' +
-      'R$ 100.000: cada loja fica com R$ 25.000.',
-  },
-]
-
 const MODOS_RATEIO = [
-  {
-    valor: 'igual',
-    titulo: 'Igual entre as lojas',
-    exemplo: 'Promotor de R$ 3.000 com 3 lojas: cada loja custa R$ 1.000.',
-  },
   {
     valor: 'visitas',
     titulo: 'Proporcional às visitas por semana',
     exemplo:
-      'Promotor de R$ 3.000 que vai 4x numa loja e 2x em outra: a primeira custa R$ 2.000 e a segunda R$ 1.000. ' +
-      'Só funciona se o roteiro tiver as visitas de todas as lojas do promotor; se faltar, divide igual.',
+      'O promotor custa R$ 4.500 e faz 20 visitas por semana; uma loja com 5 visitas recebe 5/20 × 4.500 = R$ 1.125. ' +
+      'Se faltar a frequência de alguma loja do promotor, divide em partes iguais.',
+  },
+  {
+    valor: 'igual',
+    titulo: 'Em partes iguais por loja',
+    exemplo: 'Promotor de R$ 4.500 com 15 lojas: cada loja recebe R$ 300.',
   },
 ]
 
@@ -185,41 +163,9 @@ export default function Regras({ aoSalvar, podeEditar = true }) {
       </section>
 
       <section className="bloco">
-        <h2>2. Lojas de rede que compram pela matriz</h2>
+        <h2>2. Custo do promotor atribuído a cada loja</h2>
         <p className="dica">
-          Em redes como Condor ou Giassi, muitas vezes a nota sai no CNPJ da matriz, e não no da loja. Escolha como o
-          sistema deve ligar essas compras às lojas.
-        </p>
-        <Opcoes nome="modo_rede" opcoes={MODOS_REDE} valor={regras.modo_rede} aoMudar={(v) => alterar('modo_rede', v)} />
-      </section>
-
-      <section className="bloco">
-        <h2>3. Custo do promotor</h2>
-        <p className="dica">
-          O custo mensal vem da planilha de promotores (salário + ajuda de custo + transporte). Aqui você pode somar o que
-          não está nela. Exemplo: salário de R$ 2.000 com 70% de encargos acrescenta R$ 1.400 por mês.
-        </p>
-        <div className="campos-linha">
-          <Numero
-            rotulo="Encargos sobre o salário (INSS, FGTS, férias…)"
-            valor={regras.encargos_percentual}
-            sufixo="%"
-            aoMudar={(v) => alterar('encargos_percentual', v)}
-          />
-          <Numero
-            rotulo="Custo extra por promotor, por mês (celular, combustível…)"
-            valor={regras.custo_extra_mensal}
-            sufixo="R$"
-            passo={10}
-            aoMudar={(v) => alterar('custo_extra_mensal', v)}
-          />
-        </div>
-      </section>
-
-      <section className="bloco">
-        <h2>4. Como dividir o custo do promotor entre as lojas dele</h2>
-        <p className="dica">
-          Serve para ver quanto cada loja custa e comparar com o que ela compra (aba Lojas).
+          Serve para comparar o custo de cada loja com o que ela compra (aba Lojas).
         </p>
         <Opcoes
           nome="rateio_custo"
@@ -227,34 +173,20 @@ export default function Regras({ aoSalvar, podeEditar = true }) {
           valor={regras.rateio_custo}
           aoMudar={(v) => alterar('rateio_custo', v)}
         />
-        <div className="campos-linha">
-          <Numero
-            rotulo="Semanas por mês (para o custo por visita)"
-            valor={regras.semanas_por_mes}
-            passo={0.01}
-            aoMudar={(v) => alterar('semanas_por_mes', v)}
-          />
-        </div>
       </section>
 
       <section className="bloco">
-        <h2>5. Quando o custo está alto</h2>
+        <h2>3. Limite de custo sobre faturamento</h2>
         <p className="dica">
-          O sistema calcula quanto do faturamento vai para pagar o promotor. Exemplo: promotor de R$ 3.000 em lojas que
-          compram R$ 30.000 = 10%. Defina a partir de quantos % o resultado fica amarelo (atenção) e vermelho (crítico).
+          A loja fica destacada em vermelho quando o custo do promotor passa desse % do faturamento dela. Exemplo:
+          promotor custando R$ 1.000 numa loja que compra R$ 4.000 = 25%. Deixe vazio enquanto o limite não for definido.
         </p>
         <div className="campos-linha">
           <Numero
-            rotulo="Amarelo a partir de"
-            valor={regras.faixa_alerta}
+            rotulo="Destacar a partir de"
+            valor={regras.limite_percentual ?? ''}
             sufixo="%"
-            aoMudar={(v) => alterar('faixa_alerta', v)}
-          />
-          <Numero
-            rotulo="Vermelho a partir de"
-            valor={regras.faixa_critico}
-            sufixo="%"
-            aoMudar={(v) => alterar('faixa_critico', v)}
+            aoMudar={(v) => alterar('limite_percentual', v === '' ? null : v)}
           />
         </div>
       </section>

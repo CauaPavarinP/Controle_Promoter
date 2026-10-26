@@ -12,7 +12,7 @@ from .autenticacao import exigir_admin, usuario_logado
 from .cadastros import documento_valido, vigente_em
 from .calculos import aplicar_tipos_de_nota, indice_mes
 from .carga import obter_pdv
-from .faturamento import codigos_por_cnpj, faturamento_mensal, ultimas_por_tipo
+from .faturamento import codigos_por_cnpj, faturamento_mensal
 from .modelos import FaturamentoItem, Pdv, Promotor, Roteiro, RoteiroPendente
 from .regras import ler_regras
 
@@ -133,7 +133,6 @@ def calcular_pendencias(sessao: Session, inicio: str = "", fim: str = "") -> dic
         "promotores_incompletos": promotores_incompletos,
         "roteiros_sem_visitas": sem_visitas,
         "documentos": documentos,
-        "importacoes": ultimas_por_tipo(sessao),
     }
 
 
@@ -198,17 +197,15 @@ def resolver_colaborador(dados: ResolverColaborador, sessao: Session = Depends(d
 # ---------------------------------------------------------------------------
 
 def calcular_conferencia() -> dict:
-    """Compara, por aba e mês, o total da planilha com o mesmo cálculo feito pelo sistema.
-
-    "Sistema (mesma conta da planilha)" soma o faturamento do CNPJ em cada linha da aba, como o
-    SOMASE da planilha (lojas com o mesmo CNPJ contam várias vezes). "Sistema sem repetir CNPJ"
-    conta cada CNPJ uma vez só, que é como o painel soma.
+    """Compara, por aba e mês, o total da planilha com o mesmo cálculo feito pelo sistema
+    (documento, seção 6.1, item 5): o faturamento do CNPJ de cada linha da aba, como o SOMASE
+    da planilha, lado a lado, apontando as diferenças.
     """
     planilha = db.ler_tabela("conferencia_planilha")
     ano = db.ler_configuracao("conferencia_ano")
     if planilha.empty or not ano:
         return {"disponivel": False}
-    regras = {**ler_regras(), "modo_rede": "cnpj"}
+    regras = ler_regras()
     fat = aplicar_tipos_de_nota(faturamento_mensal(), regras)
     fat = fat[fat["ano"].astype(int) == int(ano)]
     valor_por = fat.groupby(["cnpj", "mes"])["valor"].sum()
@@ -222,12 +219,11 @@ def calcular_conferencia() -> dict:
         for mes, linhas in linhas_aba.groupby("mes"):
             valor_planilha = float(linhas["valor"].sum())
             mesma_conta = sistema(linhas)
-            sem_repetir = sistema(linhas[linhas["cnpj"] != ""].drop_duplicates("cnpj"))
             if valor_planilha == 0 and mesma_conta == 0:
                 continue
             meses.append({"mes": int(mes), "planilha": round(valor_planilha, 2), "sistema": round(mesma_conta, 2),
-                          "diferenca": round(valor_planilha - mesma_conta, 2), "sem_repetir_cnpj": round(sem_repetir, 2)})
-        total = {c: round(sum(m[c] for m in meses), 2) for c in ("planilha", "sistema", "diferenca", "sem_repetir_cnpj")}
+                          "diferenca": round(valor_planilha - mesma_conta, 2)})
+        total = {c: round(sum(m[c] for m in meses), 2) for c in ("planilha", "sistema", "diferenca")}
         abas.append({"aba": aba, "meses": meses, "total": total})
 
     # Linhas que mais explicam as diferenças.

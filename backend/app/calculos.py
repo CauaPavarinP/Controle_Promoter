@@ -7,18 +7,14 @@ O cálculo é feito mês a mês e depois somado no período escolhido:
 - Custo: em cada mês vale o custo da competência (último reajuste até aquele mês), contado a
   partir do mês de admissão e até o mês de desligamento. Reajuste não muda meses anteriores.
 
-As regras ajustáveis vêm de app/regras.py (aba "Regras do cálculo"):
-- tipos de nota: cada tipo soma, desconta ou fica de fora do faturamento;
-- modo de rede: faturamento pelo CNPJ exato da loja, pela rede inteira (raiz do CNPJ,
-  os 8 primeiros dígitos) ou pela rede dividida igualmente entre as lojas dela;
-- custo: + encargos (% do salário) + custo extra fixo;
-- divisão do custo do promotor entre as lojas dele: igual ou pelas visitas por semana;
-- faixas de cor do % de custo sobre faturamento.
+As regras ajustáveis vêm de app/regras.py (aba "Regras do cálculo"): o que conta como
+faturamento, a divisão do custo do promotor entre as lojas e o limite de % que destaca a loja.
 
-Regras fixas:
-- Quando várias lojas mostram o mesmo valor (CNPJ ou rede compartilhados), os totais contam
-  esse valor uma vez só, e o % de custo dessas lojas não é calculado.
-- Se uma loja tem mais de um promotor ao mesmo tempo, o faturamento conta para cada um deles.
+Lojas com o mesmo CNPJ: se cada uma tem o seu COD CLI (e eles são diferentes), o faturamento é
+separado pelo COD CLI; senão, o faturamento do CNPJ conta uma vez só nos totais e as lojas
+aparecem como "faturamento compartilhado" (sem % de custo).
+Se uma loja tem mais de um promotor ao mesmo tempo, o faturamento conta para cada um deles.
+
 """
 from calendar import monthrange
 from dataclasses import dataclass
@@ -27,6 +23,9 @@ import pandas as pd
 
 from .importacao import normalizar_texto, vincular_roteiro
 from .regras import REGRAS_PADRAO
+
+# Para o faturamento por visita: visitas no mês = visitas por semana × semanas do mês (52 / 12).
+SEMANAS_POR_MES = 52 / 12
 
 
 @dataclass
@@ -78,11 +77,6 @@ def meses_de_custo(admissao: str, inicio: int, fim: int) -> int:
     return max(0, fim - comeco + 1)
 
 
-def raiz_cnpj(cnpj: str) -> str:
-    """Os 8 primeiros dígitos identificam a empresa; todas as filiais têm a mesma raiz."""
-    return cnpj[:8] if len(cnpj) == 14 else cnpj
-
-
 def aplicar_tipos_de_nota(faturamento: pd.DataFrame, regras: dict) -> pd.DataFrame:
     """Escolhe a coluna de valor e soma, desconta ou tira cada tipo de nota conforme as regras."""
     fat = faturamento.copy()
@@ -117,33 +111,24 @@ def cnpjs_separados_por_cod_cli(roteiro: pd.DataFrame) -> set[str]:
     return separados
 
 
-def custos_por_mes(promotores: pd.DataFrame, custos: pd.DataFrame | None, regras: dict,
-                   meses: range) -> tuple[dict, dict]:
-    """Custo de cada promotor em cada mês e o custo mensal vigente no fim do período.
+def custos_por_mes(promotores: pd.DataFrame, custos: pd.DataFrame | None, meses: range) -> tuple[dict, dict]:
+    """Custo de cada promotor em cada mês (competência) e o custo mensal vigente no fim do período.
 
     Sem tabela de custos (formato antigo), usa o custo mensal atual em todos os meses.
     """
-    encargos, extra = regras["encargos_percentual"] / 100, regras["custo_extra_mensal"]
     vigencias = {}
     if custos is not None and not custos.empty:
         for c in custos.itertuples():
-            vigencias.setdefault(c.codigo, []).append((int(c.ano) * 12 + int(c.mes) - 1, float(c.total),
-                                                       float(c.salario)))
+            vigencias.setdefault(c.codigo, []).append((int(c.ano) * 12 + int(c.mes) - 1, float(c.total)))
         for lista in vigencias.values():
             lista.sort()
     por_mes, mensal_atual = {}, {}
     for p in promotores.itertuples():
-        if custos is None:
-            lista = [(-1, float(p.custo_mensal or 0), float(p.salario or 0))]
-        else:
-            lista = vigencias.get(p.codigo, [])
+        lista = [(-1, float(p.custo_mensal or 0))] if custos is None else vigencias.get(p.codigo, [])
 
         def custo_em(mes):
             anteriores = [v for v in lista if v[0] <= mes]
-            if not anteriores:
-                return 0.0
-            _, total, salario = anteriores[-1]
-            return total + salario * encargos + extra
+            return anteriores[-1][1] if anteriores else 0.0
 
         admissao = _indice_data(p.admissao)
         desligamento = _indice_data(getattr(p, "desligamento", ""))
@@ -161,20 +146,17 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
     if inicio > fim:
         inicio, fim = fim, inicio
     meses = range(inicio, fim + 1)
-    por_rede = regras["modo_rede"] != "cnpj"
-    dividido = regras["modo_rede"] == "rede_dividido"
-    chave_de = raiz_cnpj if por_rede else (lambda c: c)
 
     # --- Roteiro: uma linha por (vínculo, mês em que estava vigente no período) ---------------
     roteiro, _ = vincular_roteiro(roteiro, promotores)
     roteiro = roteiro.reset_index(drop=True).copy()
     roteiro["linha"] = roteiro.index
     roteiro["cnpj"] = roteiro["cnpj"].fillna("")
-    separados = set() if por_rede else cnpjs_separados_por_cod_cli(roteiro)
+    separados = cnpjs_separados_por_cod_cli(roteiro)
 
     def chave_com_cod_cli(cnpj, cod_cli):
         # Lojas com o mesmo CNPJ e COD CLI diferentes: cada uma fica com o faturamento do seu código.
-        return f"{cnpj}#{cod_cli}" if cnpj in separados else chave_de(cnpj)
+        return f"{cnpj}#{cod_cli}" if cnpj in separados else cnpj
 
     roteiro["chave"] = [chave_com_cod_cli(c, k) for c, k in
                         zip(roteiro["cnpj"], roteiro["cod_cli"] if "cod_cli" in roteiro else [""] * len(roteiro))]
@@ -190,12 +172,11 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
               .explode("meses").rename(columns={"meses": "mes"}))
     ativos["mes"] = ativos["mes"].astype(int)
 
-    # Quantas lojas dividem o mesmo CNPJ/rede (no roteiro inteiro, não só no filtro).
+    # Quantas lojas dividem o mesmo CNPJ (no roteiro inteiro, não só no filtro).
     com_chave = ativos[ativos["chave"] != ""]
-    lojas_por_chave_mes = com_chave.drop_duplicates(["chave", "loja", "mes"]).groupby(["chave", "mes"]).size()
     lojas_por_chave = com_chave.drop_duplicates(["chave", "loja"]).groupby("chave").size()
 
-    # --- Faturamento mensal por CNPJ ou rede ------------------------------------------------
+    # --- Faturamento mensal por CNPJ (ou CNPJ + COD CLI) ------------------------------------
     fat = aplicar_tipos_de_nota(faturamento, regras)
     fat["mes"] = fat["ano"].astype(int) * 12 + fat["mes"].astype(int) - 1
     fat = fat[(fat["mes"] >= inicio) & (fat["mes"] <= fim)]
@@ -205,12 +186,9 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
     ativos = ativos.merge(mensal, on=["chave", "mes"], how="left")
     ativos[["valor", "notas"]] = ativos[["valor", "notas"]].fillna(0)
     ativos.loc[ativos["chave"] == "", ["valor", "notas"]] = 0
-    if dividido:
-        divisor = pd.Series(list(zip(ativos["chave"], ativos["mes"]))).map(lojas_por_chave_mes).fillna(1).values
-        ativos["valor"] = ativos["valor"] / divisor
 
     # --- Custo: por mês da competência, dividido entre as lojas do promotor naquele mês ------
-    custo_mes, custo_atual = custos_por_mes(promotores, custos, regras, meses)
+    custo_mes, custo_atual = custos_por_mes(promotores, custos, meses)
     visitas = pd.to_numeric(ativos["visitas_semana"], errors="coerce")
     ativos["peso"] = 1.0
     if regras["rateio_custo"] == "visitas":
@@ -241,19 +219,17 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
 
     def somar_faturamento(linhas):
         validas = linhas[linhas["chave"] != ""]
-        return validas.drop_duplicates(["chave", "loja", "mes"] if dividido else ["chave", "mes"])["valor"].sum()
+        return validas.drop_duplicates(["chave", "mes"])["valor"].sum()
 
     # --- Por linha do roteiro (loja × promotor) ------------------------------------------------
     por_linha = ativos.groupby("linha").agg(
-        faturamento=("valor", "sum"), notas=("notas", "sum"), custo_periodo=("custo", "sum"),
-        meses_ativos=("mes", "nunique"),
-        meses_com_compra=("valor", lambda v: int((v > 0).sum())))
+        faturamento=("valor", "sum"), custo_periodo=("custo", "sum"), meses_ativos=("mes", "nunique"))
     lojas = lojas.join(por_linha, on="linha")
-    lojas[["faturamento", "notas", "custo_periodo", "meses_ativos", "meses_com_compra"]] = (
-        lojas[["faturamento", "notas", "custo_periodo", "meses_ativos", "meses_com_compra"]].fillna(0))
+    lojas[["faturamento", "custo_periodo", "meses_ativos"]] = (
+        lojas[["faturamento", "custo_periodo", "meses_ativos"]].fillna(0))
     lojas["lojas_mesma_chave"] = lojas["chave"].map(lojas_por_chave).fillna(1).astype(int)
     lojas.loc[lojas["chave"] == "", "lojas_mesma_chave"] = 1
-    lojas["compartilhado"] = (lojas["lojas_mesma_chave"] > 1) & (not dividido)
+    lojas["compartilhado"] = lojas["lojas_mesma_chave"] > 1
 
     nomes = dict(zip(proms["codigo"], proms["nome"]))
     supervisores = dict(zip(proms["codigo"], proms["supervisor"]))
@@ -269,7 +245,6 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
             "codigo": p.codigo, "nome": p.nome, "supervisor": p.supervisor, "municipio": p.municipio,
             "custo_mensal": _arredondar(custo_atual[p.codigo]), "custo_periodo": _arredondar(custo_p),
             "lojas": int(lojas_p.drop_duplicates(["chave", "loja"]).shape[0]),
-            "lojas_sem_compra": int((lojas_p["faturamento"] <= 0).sum()),
             "visitas_semana": _arredondar(visitas_p.sum()) if not visitas_p.empty else None,
             "faturamento": _arredondar(fat_p),
             "percentual_custo": _percentual(custo_p, fat_p),
@@ -277,26 +252,21 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
     linhas_promotores.sort(key=lambda l: (l["percentual_custo"] is None, -(l["percentual_custo"] or 0)))
 
     # --- Tabela por loja -------------------------------------------------------------------------
-    semanas = regras["semanas_por_mes"]
     linhas_lojas = []
     for l in lojas.itertuples():
         visitas_l = pd.to_numeric(l.visitas_semana, errors="coerce")
-        visitas_mes = 0 if pd.isna(visitas_l) else visitas_l * semanas
-        custo_mensal_loja = l.custo_periodo / l.meses_ativos if l.meses_ativos else 0
-        visitas_periodo = visitas_mes * l.meses_ativos
+        visitas_periodo = 0 if pd.isna(visitas_l) else visitas_l * SEMANAS_POR_MES * l.meses_ativos
         linhas_lojas.append({
             "loja": l.loja, "cnpj": l.cnpj, "cidade": l.cidade, "uf": l.uf,
             "codigo_promotor": l.codigo_promotor, "promotor": nomes.get(l.codigo_promotor, ""),
             "supervisor": supervisores.get(l.codigo_promotor, ""),
             "visitas_semana": _arredondar(visitas_l),
-            "faturamento": _arredondar(l.faturamento), "notas": int(l.notas),
-            "meses_com_compra": int(l.meses_com_compra),
+            "faturamento": _arredondar(l.faturamento),
             "lojas_mesmo_cnpj": int(l.lojas_mesma_chave),
             "compartilhado": bool(l.compartilhado),
             "separado_por_cod_cli": l.cnpj in separados,
             "custo_periodo": _arredondar(l.custo_periodo),
             "percentual_custo": None if l.compartilhado else _percentual(l.custo_periodo, l.faturamento),
-            "custo_por_visita": _arredondar(custo_mensal_loja / visitas_mes) if visitas_mes > 0 else None,
             # Quanto a loja comprou para cada visita do promotor no período.
             "faturamento_por_visita": (_arredondar(l.faturamento / visitas_periodo)
                                        if visitas_periodo > 0 and not l.compartilhado else None),
@@ -307,24 +277,20 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
     custo_total = sum(l["custo_periodo"] for l in linhas_promotores)
     fat_total = somar_faturamento(ativos)
     unicas = lojas.drop_duplicates(["chave", "loja"])
-    fat_por_loja = (ativos.drop_duplicates(["chave", "loja", "mes"]).groupby(["chave", "loja"])["valor"].sum())
-    sem_compra = sum(1 for chave, loja in zip(unicas["chave"], unicas["loja"])
-                     if fat_por_loja.get((chave, loja), 0) <= 0)
     visitas_total = pd.to_numeric(lojas["visitas_semana"], errors="coerce").sum()
     resumo = {
         "meses": len(meses),
         "promotores": len(linhas_promotores),
         "lojas": int(len(unicas)),
-        "lojas_sem_compra": int(sem_compra),
         "visitas_semana": _arredondar(visitas_total) if visitas_total else None,
         "custo": _arredondar(custo_total),
         "faturamento": _arredondar(fat_total),
         "percentual_custo": _percentual(custo_total, fat_total),
         "cnpjs_compartilhados": int(unicas[unicas["compartilhado"]]["chave"].nunique()),
     }
-    regras_usadas = {c: regras[c] for c in ("modo_rede", "rateio_custo", "faixa_alerta", "faixa_critico")}
+    regras_usadas = {c: regras[c] for c in ("rateio_custo", "limite_percentual")}
     return {"resumo": resumo, "promotores": linhas_promotores, "lojas": linhas_lojas, "regras": regras_usadas,
-            "grade": _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados, por_rede, dividido),
+            "grade": _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados),
             "custos": _bloco_custos(proms, custos, fim)}
 
 
@@ -332,11 +298,10 @@ def _rotulo_mes(indice: int) -> str:
     return f"{indice // 12}-{indice % 12 + 1:02d}"
 
 
-def _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados, por_rede, dividido) -> dict:
+def _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados) -> dict:
     """Faturamento de cada loja × promotor mês a mês, como as abas SC, SP, PR… da planilha.
 
-    "totais" conta cada CNPJ (ou rede) uma vez por mês; "soma_das_linhas" soma linha a linha,
-    como a linha de totais da planilha (lojas com o mesmo CNPJ contam várias vezes).
+    A linha de totais conta cada CNPJ uma vez por mês.
     """
     rotulos = [_rotulo_mes(m) for m in meses]
     valores = ativos.groupby(["linha", "mes"])["valor"].sum()
@@ -348,20 +313,13 @@ def _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados, por_r
             "promotor": nomes.get(l.codigo_promotor, ""), "cnpj": l.cnpj, "loja": l.loja, "cidade": l.cidade,
             "uf": l.uf, "meses": por_mes, "total": round(sum(por_mes.values()), 2),
             "compartilhado": bool(l.compartilhado),
-            # Para abrir as notas do valor: CNPJ (ou raiz da rede) e, se separado, o COD CLI.
-            "detalhe": {"cnpj": raiz_cnpj(l.cnpj) if por_rede else l.cnpj, "rede": por_rede,
-                        "cod_cli": (getattr(l, "cod_cli", "") or "") if l.cnpj in separados else "",
-                        "dividido_por": int(l.lojas_mesma_chave) if dividido else 1},
+            # Para abrir as notas do valor: CNPJ e, se separado, o COD CLI.
+            "detalhe": {"cnpj": l.cnpj, "cod_cli": (getattr(l, "cod_cli", "") or "") if l.cnpj in separados else ""},
         })
     validas = ativos[ativos["chave"] != ""]
-    unicas = validas.drop_duplicates(["chave", "loja", "mes"] if dividido else ["chave", "mes"])
-    por_mes_total = unicas.groupby("mes")["valor"].sum()
-    por_mes_linhas = ativos.groupby("mes")["valor"].sum()
+    por_mes_total = validas.drop_duplicates(["chave", "mes"]).groupby("mes")["valor"].sum()
     totais = {_rotulo_mes(m): round(float(por_mes_total.get(m, 0.0)), 2) for m in meses}
-    soma_linhas = {_rotulo_mes(m): round(float(por_mes_linhas.get(m, 0.0)), 2) for m in meses}
-    return {"meses": rotulos, "linhas": linhas,
-            "totais": {**totais, "total": round(sum(totais.values()), 2)},
-            "soma_das_linhas": {**soma_linhas, "total": round(sum(soma_linhas.values()), 2)}}
+    return {"meses": rotulos, "linhas": linhas, "totais": {**totais, "total": round(sum(totais.values()), 2)}}
 
 
 def _bloco_custos(proms: pd.DataFrame, custos: pd.DataFrame | None, fim: int) -> list:

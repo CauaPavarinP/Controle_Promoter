@@ -199,7 +199,7 @@ def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: 
 
 
 @app.get("/api/faturamento/itens")
-def itens_de_um_mes(cnpj: str, mes: str, cod_cli: str = "", rede: bool = False, _=Depends(usuario_logado)):
+def itens_de_um_mes(cnpj: str, mes: str, cod_cli: str = "", _=Depends(usuario_logado)):
     """Notas (itens) de um PDV num mês: o detalhe de um valor da grade mês a mês."""
     try:
         ano, numero = int(mes[:4]), int(mes[5:7])
@@ -207,7 +207,7 @@ def itens_de_um_mes(cnpj: str, mes: str, cod_cli: str = "", rede: bool = False, 
         _erro("Mês inválido. Use AAAA-MM.")
     if len(cnpj) < 8:
         _erro("CNPJ inválido.")
-    return faturamento.itens_do_cliente(cnpj, ano, numero, cod_cli, rede, ler_regras())
+    return faturamento.itens_do_cliente(cnpj, ano, numero, cod_cli, ler_regras())
 
 
 # ---------------------------------------------------------------------------

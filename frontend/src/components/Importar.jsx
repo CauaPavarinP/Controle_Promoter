@@ -74,16 +74,6 @@ function PreviaFaturamento({ previa, aoConcluir, aoCancelar }) {
             ]} />
         </details>
       )}
-      <details>
-        <summary>Tipos de nota no arquivo</summary>
-        <Tabela chave="tipo" linhas={previa.tipos_nf} porPagina={20}
-          colunas={[
-            { campo: 'tipo', titulo: 'Tipo de nota' },
-            { campo: 'linhas', titulo: 'Linhas', num: true },
-            { campo: 'valor', titulo: 'TOTAL VENDA', num: true, mostrar: (t) => formatarMoeda(t.valor) },
-          ]} />
-        <p className="dica">O que cada tipo faz (soma, desconta, fica de fora) é definido em Regras do cálculo.</p>
-      </details>
 
       {existentes && (
         <label className="marcar caixa-alerta">

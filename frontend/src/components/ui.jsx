@@ -113,7 +113,7 @@ export function Tabela({
               {colunas.map((c) => (
                 <th
                   key={c.campo}
-                  className={`${c.num ? 'num' : ''} ${c.semOrdem ? '' : 'ordenavel'} ${c.fixa ? 'coluna-fixa' : ''}`}
+                  className={`${c.num ? 'num' : ''} ${c.semOrdem ? '' : 'ordenavel'}`}
                   onClick={c.semOrdem ? undefined : () => ordenarPor(c.campo)}
                 >
                   {c.titulo}
@@ -127,7 +127,7 @@ export function Tabela({
               <tr key={l[chave]} className={`${aoClicar ? 'clicavel' : ''} ${classeLinha ? classeLinha(l) : ''}`}
                 onClick={aoClicar ? () => aoClicar(l) : undefined}>
                 {colunas.map((c) => (
-                  <td key={c.campo} className={`${c.num ? 'num' : ''} ${c.quebra ? 'quebra' : ''} ${c.fixa ? 'coluna-fixa' : ''}`}>
+                  <td key={c.campo} className={`${c.num ? 'num' : ''} ${c.quebra ? 'quebra' : ''}`}>
                     {c.mostrar ? c.mostrar(l) : l[c.campo]}
                   </td>
                 ))}
@@ -142,7 +142,7 @@ export function Tabela({
               {rodape.map((l, i) => (
                 <tr key={i}>
                   {colunas.map((c) => (
-                    <td key={c.campo} className={`${c.num ? 'num' : ''} ${c.fixa ? 'coluna-fixa' : ''}`}>{c.mostrar && l[c.campo] !== undefined ? c.mostrar(l) : l[c.campo]}</td>
+                    <td key={c.campo} className={`${c.num ? 'num' : ''}`}>{c.mostrar && l[c.campo] !== undefined ? c.mostrar(l) : l[c.campo]}</td>
                   ))}
                 </tr>
               ))}

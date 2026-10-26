@@ -58,5 +58,5 @@ def test_regras_salvas_mudam_o_painel(cliente):
     assert cliente.put("/api/regras", json=regras).status_code == 200
     assert cliente.get("/api/painel", params=parametros).json()["resumo"]["faturamento"] == antes + 500 - 300
 
-    regras["faixa_alerta"] = 99
+    regras["limite_percentual"] = "abc"
     assert cliente.put("/api/regras", json=regras).status_code == 400

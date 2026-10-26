@@ -11,10 +11,10 @@ Pedido do Maurício (Comercial • 101 do Brasil), a validar com o Rayan.
   "últimos 3/6/12 meses"), supervisor, promotor, UF, cidade e PDV.
 - **Resumo:** custo dos promotores no período, faturamento das lojas, % do custo sobre o faturamento e lojas sem compra.
 - **Tabela de promotores:** lojas, visitas/semana, custo, faturamento e % de custo. Clicar num promotor filtra as lojas dele.
-- **Tabela de lojas:** faturamento no período, meses com compra, custo da loja, % de custo, faturamento por
-  visita e custo por visita.
-- **Faturamento mês a mês** (substitui as abas SC, SP, PR…): grade JAN…DEZ + TOTAL por loja × promotor, com
-  linha de total (sem repetir CNPJ) e "soma das linhas" (como a planilha). Clicar num valor abre as notas.
+- **Detalhe por loja:** loja, cidade, promotor, visitas/semana, faturamento, custo do promotor atribuído à
+  loja, % e faturamento por visita; destaque das lojas sem faturamento e com visitas, e das que passam do limite.
+- **Faturamento por UF** (substitui as abas SC, SP, PR…): supervisor, promotor, CNPJ, PDV, cidade, UF,
+  JAN…DEZ e TOTAL, com linha de total por mês. Clicar num valor abre as notas daquele mês.
 - **Custo dos promotores** como a aba PROMOTORES BRASIL (salário, ajuda de custo, VT, total), com linha de total.
 - Todas as tabelas **ordenam por coluna** e **exportam para Excel**; botão **Imprimir** (A4 paisagem, com os
   filtros no cabeçalho e todas as linhas).
@@ -88,14 +88,11 @@ Os valores padrão estão em `REGRAS_PADRAO` (`app/regras.py`).
 
 | Regra | Opções | Padrão |
 |---|---|---|
-| **Coluna de valor** | TOTAL VENDA (AL) · VLR TOTAL (AD) | TOTAL VENDA, como a planilha |
-| **Tipos de nota** | cada tipo soma, desconta ou fica de fora; e o que fazer com tipos fora da lista | todos somam, como a planilha |
-| **Só RECEITA = SIM** | sim · não | não, como a planilha |
-| **Lojas de rede** | CNPJ exato da loja · rede inteira (raiz do CNPJ) em cada loja · rede dividida igualmente entre as lojas | CNPJ exato |
-| **Custo do promotor** | + encargos (% do salário) + custo extra fixo por mês | 0% e R$ 0 |
-| **Divisão do custo entre lojas** | igual · proporcional às visitas por semana | igual |
-| **Semanas por mês** | usado no custo por visita | 4,33 |
-| **Faixas de cor do % de custo** | amarelo a partir de X% · vermelho a partir de Y% | 15% e 30% |
+| **Coluna de valor** (6.3) | TOTAL VENDA (AL) · VLR TOTAL (AD) | TOTAL VENDA, como a planilha |
+| **Tipos de nota** (6.3) | cada tipo soma, desconta ou fica de fora; e o que fazer com tipos fora da lista | todos somam, como a planilha |
+| **Só RECEITA = SIM** (6.3) | sim · não | não, como a planilha |
+| **Custo atribuído a cada loja** (8.7) | proporcional às visitas por semana · partes iguais | por visitas (sugestão do documento) |
+| **Limite de % de custo** (7.1) | número ou vazio | vazio (o documento pede sem valor fixo) |
 
 Regras fixas:
 - **Custo por competência:** em cada mês vale o último reajuste até aquele mês. Conta a partir do mês de
@@ -107,10 +104,9 @@ Regras fixas:
   2. se não, o faturamento do CNPJ conta **uma vez só** nos totais e as lojas aparecem com o aviso
      "faturamento compartilhado com outra loja";
   3. essas lojas são listadas em **Pendências**, para confirmar se são lojas diferentes ou erro de digitação.
-- Quando várias lojas mostram o mesmo valor (CNPJ ou rede inteira), os totais contam esse valor uma vez só,
-  e o % de custo da loja não é calculado.
-- Loja com mais de um promotor: o faturamento conta inteiro para cada promotor.
-- Tipos de nota novos ficam de fora até o usuário escolher o que fazer com eles.
+- Loja com faturamento compartilhado: o % de custo da loja não é calculado.
+- PDV com mais de um promotor ao mesmo tempo: o faturamento aparece cheio para cada um (opção "a" do
+  documento, seção 5.5), sinalizado na tela de Roteiros.
 
 ## Pendências com o Maurício / Rayan
 

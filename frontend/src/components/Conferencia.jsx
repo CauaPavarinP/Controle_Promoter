@@ -30,10 +30,6 @@ export default function Conferencia() {
           {dados.regras.somente_receita ? ', só RECEITA = SIM' : ''}, conforme Regras do cálculo) do CNPJ de cada linha, mês a
           mês. <b>Diferença zero</b> = o sistema reproduz a planilha.
         </p>
-        <p className="dica">
-          A última coluna conta cada CNPJ <b>uma vez só</b>, que é como o painel soma. A diferença entre "Planilha" e essa
-          coluna é o valor que a planilha soma em dobro quando lojas diferentes têm o mesmo CNPJ.
-        </p>
       </section>
 
       {dados.abas.map((aba) => (
@@ -52,8 +48,6 @@ export default function Conferencia() {
               { campo: 'sistema', titulo: 'Sistema (mesma conta)', num: true, semOrdem: true, mostrar: (l) => formatarMoeda(l.sistema) },
               { campo: 'diferenca', titulo: 'Diferença', num: true, semOrdem: true,
                 mostrar: (l) => <span className={classeDiferenca(l.diferenca)}>{formatarMoeda(l.diferenca)}</span> },
-              { campo: 'sem_repetir_cnpj', titulo: 'Sistema sem repetir CNPJ', num: true, semOrdem: true,
-                mostrar: (l) => formatarMoeda(l.sem_repetir_cnpj) },
             ]}
           />
         </section>

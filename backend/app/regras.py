@@ -1,11 +1,15 @@
 """Regras do cálculo que o usuário ajusta na tela (aba "Regras do cálculo").
 
+Só o que o documento de requisitos deixa configurável:
+- o que conta como faturamento (seção 6.3): coluna de valor, tipos de nota e RECEITA;
+- como dividir o custo do promotor entre as lojas dele (seção 8, item 7);
+- o limite de % de custo sobre faturamento que destaca a loja (seção 7.1), sem valor fixo.
+
 Ficam gravadas no banco (tabela configuracoes, chave "regras"). Quando ainda não
 foram salvas, valem os valores de REGRAS_PADRAO.
 """
 from . import db
 
-MODOS_REDE = {"cnpj", "rede_total", "rede_dividido"}
 COLUNAS_VALOR = {"total_venda", "vlr_total"}
 MODOS_RATEIO = {"igual", "visitas"}
 ACOES_TIPO = {"soma", "subtrai", "ignora"}
@@ -17,16 +21,10 @@ REGRAS_PADRAO = {
     "tipos_nf": {},
     "tipos_nf_padrao": "soma",            # o que fazer com tipos que não estão na lista acima
     "somente_receita": False,             # True: só linhas com RECEITA = SIM
-    # cnpj: só o CNPJ exato da loja | rede_total: rede inteira (raiz do CNPJ) em cada loja |
-    # rede_dividido: faturamento da rede dividido igualmente entre as lojas dela.
-    "modo_rede": "cnpj",
-    # Como dividir o custo do promotor entre as lojas dele: igual | visitas (proporcional).
-    "rateio_custo": "igual",
-    "encargos_percentual": 0.0,   # % sobre o salário (INSS, FGTS, férias…)
-    "custo_extra_mensal": 0.0,    # R$ por promotor por mês (celular, combustível…)
-    "faixa_alerta": 15.0,         # % de custo sobre faturamento a partir do qual fica amarelo
-    "faixa_critico": 30.0,        # … e vermelho
-    "semanas_por_mes": 4.33,
+    # Como dividir o custo do promotor entre as lojas dele: visitas (proporcional) | igual.
+    "rateio_custo": "visitas",
+    # % de custo sobre faturamento a partir do qual a loja fica destacada. Vazio = sem destaque.
+    "limite_percentual": None,
 }
 
 
@@ -35,23 +33,12 @@ def ler_regras() -> dict:
     if salvas and "tipos_nf_padrao" not in salvas:
         # Regras salvas antes desta opção existir: tipo fora da lista ficava de fora.
         salvas = {**salvas, "tipos_nf_padrao": "ignora"}
-    return {**REGRAS_PADRAO, **salvas}
-
-
-def _numero(dados, campo, minimo, maximo):
-    try:
-        valor = float(dados[campo])
-    except (TypeError, ValueError):
-        raise ValueError(f"'{campo}' precisa ser um número.")
-    if not minimo <= valor <= maximo:
-        raise ValueError(f"'{campo}' precisa ficar entre {minimo} e {maximo}.")
-    return valor
+    # Ignora opções de versões anteriores que não existem mais.
+    return {**REGRAS_PADRAO, **{k: v for k, v in salvas.items() if k in REGRAS_PADRAO}}
 
 
 def validar_regras(dados: dict) -> dict:
     regras = {**REGRAS_PADRAO, **{k: v for k, v in dados.items() if k in REGRAS_PADRAO}}
-    if regras["modo_rede"] not in MODOS_REDE:
-        raise ValueError("Modo de rede inválido.")
     if regras["rateio_custo"] not in MODOS_RATEIO:
         raise ValueError("Forma de rateio inválida.")
     if regras["valor_faturamento"] not in COLUNAS_VALOR:
@@ -62,13 +49,16 @@ def validar_regras(dados: dict) -> dict:
     tipos = regras["tipos_nf"]
     if not isinstance(tipos, dict) or any(a not in ACOES_TIPO for a in tipos.values()):
         raise ValueError("Ação de tipo de nota inválida (use soma, subtrai ou ignora).")
-    regras["encargos_percentual"] = _numero(regras, "encargos_percentual", 0, 300)
-    regras["custo_extra_mensal"] = _numero(regras, "custo_extra_mensal", 0, 1_000_000)
-    regras["faixa_alerta"] = _numero(regras, "faixa_alerta", 0, 1000)
-    regras["faixa_critico"] = _numero(regras, "faixa_critico", 0, 1000)
-    regras["semanas_por_mes"] = _numero(regras, "semanas_por_mes", 1, 6)
-    if regras["faixa_alerta"] >= regras["faixa_critico"]:
-        raise ValueError("A faixa de alerta (amarelo) precisa ser menor que a crítica (vermelho).")
+    limite = regras["limite_percentual"]
+    if limite in (None, ""):
+        regras["limite_percentual"] = None
+    else:
+        try:
+            regras["limite_percentual"] = float(limite)
+        except (TypeError, ValueError):
+            raise ValueError("O limite de % precisa ser um número.")
+        if not 0 < regras["limite_percentual"] <= 1000:
+            raise ValueError("O limite de % precisa ficar entre 0 e 1000.")
     return regras
 
 

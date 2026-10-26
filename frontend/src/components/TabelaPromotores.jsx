@@ -7,10 +7,7 @@ export default function TabelaPromotores({ promotores, regras, aoSelecionar }) {
   return (
     <section className="bloco">
       <h2>Promotores</h2>
-      <p className="dica nao-imprimir">
-        Clique em um promotor para abrir as lojas dele. Clique no título de uma coluna para ordenar. Começa do maior % de
-        custo para o menor.
-      </p>
+      <p className="dica nao-imprimir">Clique em um promotor para abrir as lojas dele.</p>
       <Tabela
         chave="codigo"
         linhas={promotores}
@@ -22,10 +19,7 @@ export default function TabelaPromotores({ promotores, regras, aoSelecionar }) {
           { campo: 'supervisor', titulo: 'Supervisor' },
           { campo: 'municipio', titulo: 'Município' },
           { campo: 'lojas', titulo: 'Lojas', num: true },
-          { campo: 'lojas_sem_compra', titulo: 'Sem compra', num: true,
-            mostrar: (p) => <span className={p.lojas_sem_compra ? 'texto-critico' : ''}>{p.lojas_sem_compra}</span> },
           { campo: 'visitas_semana', titulo: 'Visitas/sem.', num: true, mostrar: (p) => p.visitas_semana ?? '—' },
-          { campo: 'custo_mensal', titulo: 'Custo mensal', num: true, mostrar: (p) => formatarMoeda(p.custo_mensal) },
           { campo: 'custo_periodo', titulo: 'Custo no período', num: true, mostrar: (p) => formatarMoeda(p.custo_periodo) },
           { campo: 'faturamento', titulo: 'Faturamento', num: true, mostrar: (p) => formatarMoeda(p.faturamento) },
           { campo: 'percentual_custo', titulo: '% custo', num: true, mostrar: pct, ordenar: (p) => p.percentual_custo ?? -1 },

@@ -5,8 +5,6 @@ import { formatarCnpj, formatarMes, formatarMoeda } from '../formato.js'
 import { FormularioPdv, PDV_VAZIO } from './cadastros/Pdvs.jsx'
 import { Campo, Modal, Tabela } from './ui.jsx'
 
-const NOMES_IMPORTACAO = { faturamento: 'Faturamento', promotores: 'Promotores', roteiro: 'Roteiro', planilha: 'Planilha' }
-
 function Secao({ titulo, quantidade, explicacao, children }) {
   return (
     <section className="bloco">
@@ -189,16 +187,6 @@ export default function Pendencias({ podeEditar, meses, aoAlterar }) {
           ]} />
       </Secao>
 
-      {Object.entries(dados.importacoes).some(([, i]) => i.avisos.length) && (
-        <Secao titulo="Avisos das últimas importações">
-          {Object.entries(dados.importacoes).filter(([, i]) => i.avisos.length).map(([tipo, info]) => (
-            <div key={tipo}>
-              <p className="dica"><b>{NOMES_IMPORTACAO[tipo] || tipo}</b> — {info.arquivo}, {new Date(info.data_hora).toLocaleString('pt-BR')}</p>
-              <ul className="lista-avisos">{info.avisos.map((a) => <li key={a}>⚠ {a}</li>)}</ul>
-            </div>
-          ))}
-        </Secao>
-      )}
 
       {janela?.tipo === 'colaborador' && <ResolverColaborador pendencia={janela.pendencia} aoFechar={() => setJanela(null)} aoSalvar={concluir} />}
       {janela?.tipo === 'pdv' && (

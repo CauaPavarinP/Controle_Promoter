@@ -17,12 +17,10 @@ export const formatarCnpj = (cnpj) =>
     ? cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
     : cnpj || 'sem CNPJ'
 
-// Cor do "% custo sobre faturamento". As faixas vêm das regras salvas na aba "Regras do cálculo".
+// Destaque do "% custo sobre faturamento": vermelho quando passa do limite das Regras do cálculo.
 export function classePercentual(valor, regras) {
-  if (valor == null) return 'pct-sem'
-  if (valor >= regras.faixa_critico) return 'pct-critico'
-  if (valor >= regras.faixa_alerta) return 'pct-alerta'
-  return 'pct-ok'
+  const limite = regras?.limite_percentual
+  return valor != null && limite != null && valor > limite ? 'pct-critico' : ''
 }
 
 // "2026-03-15" -> "15/03/2026"

@@ -165,8 +165,6 @@ td.pct-critico, .texto-critico { color: var(--critico); font-weight: 600; }
 .legenda span { display: flex; align-items: center; gap: 6px; }
 .legenda i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .cor-sem-compra { background: var(--critico-fundo); border: 1px solid #f3b8b3; }
-.cor-ok { background: var(--ok); }
-.cor-alerta { background: #d99a00; }
 .cor-critico { background: var(--critico); }
 
 /* Regras do cálculo */
@@ -323,7 +321,3 @@ tr.linha-fora td { color: var(--texto-suave); text-decoration: line-through; }
 .grade-mensal th, .grade-mensal td { padding: 6px 6px; }
 .grade-mensal td.quebra { min-width: 80px; max-width: 170px; }
 .grade-mensal .etiqueta { margin-left: 4px; }
-.coluna-fixa { position: sticky; left: 0; z-index: 1; background: var(--superficie); box-shadow: 1px 0 0 var(--borda); }
-th.coluna-fixa { background: var(--primaria-clara); z-index: 2; }
-tfoot td.coluna-fixa { background: #f7f9fc; }
-tr.linha-sem-compra td.coluna-fixa { background: var(--critico-fundo); }

@@ -24,7 +24,7 @@ const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', supervisor: '',
 const ABAS = [
   { id: 'visao-geral', grupo: 'Análise', titulo: 'Visão geral', subtitulo: 'Custo dos promotores × faturamento das lojas' },
   { id: 'lojas', grupo: 'Análise', titulo: 'Lojas', subtitulo: 'Faturamento de cada loja atendida no período' },
-  { id: 'mensal', grupo: 'Análise', titulo: 'Faturamento mês a mês', subtitulo: 'Cada loja mês a mês, como as abas SC, SP, PR… da planilha' },
+  { id: 'mensal', grupo: 'Análise', titulo: 'Faturamento por UF', subtitulo: 'Faturamento de cada PDV mês a mês (substitui as abas SC, SP, PR, MG, RS)' },
   { id: 'pendencias', grupo: 'Análise', titulo: 'Pendências', subtitulo: 'O que falta corrigir para os números ficarem confiáveis' },
   { id: 'promotores', grupo: 'Cadastros', titulo: 'Promotores', subtitulo: 'Promotores, custos por competência e roteiro de cada um' },
   { id: 'supervisores', grupo: 'Cadastros', titulo: 'Supervisores', subtitulo: 'Supervisores e suas equipes' },

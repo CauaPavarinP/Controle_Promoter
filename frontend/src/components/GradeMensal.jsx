@@ -1,4 +1,4 @@
-// Faturamento mês a mês por loja (substitui as abas SC, SP, PR, MG, RS da planilha).
+// Faturamento mês a mês por loja (documento, seção 7.2: substitui as abas SC, SP, PR, MG, RS).
 import { useEffect, useState } from 'react'
 import { http } from '../api.js'
 import { formatarCnpj, formatarData, formatarMes, formatarMoeda } from '../formato.js'
@@ -6,6 +6,7 @@ import { Modal, Tabela } from './ui.jsx'
 
 const NOMES_ACAO = { soma: 'soma', subtrai: 'desconta', ignora: 'fora' }
 
+// Detalhe das NFs/itens daquele PDV naquele mês.
 function DetalheNotas({ linha, mes, aoFechar }) {
   const [dados, setDados] = useState(null)
   const [erro, setErro] = useState('')
@@ -19,11 +20,8 @@ function DetalheNotas({ linha, mes, aoFechar }) {
       {dados && (
         <>
           <p className="dica">
-            {linha.detalhe.rede ? 'Notas de toda a rede (mesma raiz de CNPJ). ' : `CNPJ ${formatarCnpj(linha.cnpj)}. `}
-            {linha.detalhe.cod_cli && `Só o COD CLI ${linha.detalhe.cod_cli} (faturamento separado por loja). `}
-            {linha.compartilhado && 'O CNPJ é compartilhado com outra loja: estas notas valem para todas. '}
-            {linha.detalhe.dividido_por > 1 && `Na grade, o valor está dividido por ${linha.detalhe.dividido_por} lojas da rede. `}
-            Total considerado pelas regras: <b>{formatarMoeda(dados.total_considerado)}</b>.
+            CNPJ {formatarCnpj(linha.cnpj)}{linha.detalhe.cod_cli && ` · COD CLI ${linha.detalhe.cod_cli}`}. Total
+            considerado: <b>{formatarMoeda(dados.total_considerado)}</b>.
           </p>
           {dados.limitado && <p className="aviso-texto">Mostrando os primeiros 5.000 itens.</p>}
           <Tabela
@@ -52,11 +50,7 @@ function DetalheNotas({ linha, mes, aoFechar }) {
 }
 
 export default function GradeMensal({ grade }) {
-  const [busca, setBusca] = useState('')
   const [detalhe, setDetalhe] = useState(null)
-  const termo = busca.trim().toLowerCase()
-  const linhas = grade.linhas.filter((l) => !termo || `${l.loja} ${l.promotor} ${l.cidade} ${l.supervisor}`.toLowerCase().includes(termo))
-  const repetido = grade.soma_das_linhas.total - grade.totais.total
 
   const colunasMeses = grade.meses.map((m) => ({
     campo: m, titulo: formatarMes(m).replace('/', ' '), num: true,
@@ -65,7 +59,7 @@ export default function GradeMensal({ grade }) {
     mostrar: (l) => {
       if (!l.meses) return <b>{formatarMoeda(l[m])}</b>
       const valor = l.meses[m]
-      if (!valor || !l.cnpj) return <span className="texto-suave">{valor ? formatarMoeda(valor) : '—'}</span>
+      if (!valor || !l.cnpj) return valor ? formatarMoeda(valor) : '—'
       return (
         <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => setDetalhe({ linha: l, mes: m })}>
           {formatarMoeda(valor)}
@@ -76,44 +70,28 @@ export default function GradeMensal({ grade }) {
 
   return (
     <section className="bloco">
-      <div className="bloco-cabecalho">
-        <h2>Faturamento mês a mês ({linhas.length} lojas)</h2>
-        <input className="nao-imprimir" placeholder="Buscar loja, promotor, cidade" value={busca} onChange={(e) => setBusca(e.target.value)} />
-      </div>
-      <p className="dica">
-        Uma linha por loja × promotor, como as abas SC, SP, PR… da planilha. Clique num valor para ver as notas. A linha
-        <b> Total</b> conta cada CNPJ uma vez por mês.
-        {repetido > 0.005 && (
-          <> A planilha somaria {formatarMoeda(grade.soma_das_linhas.total)} (linha "Soma das linhas"), porque repete o valor
-            de lojas que dividem o mesmo CNPJ: {formatarMoeda(repetido)} a mais.</>
-        )}
-      </p>
+      <h2>Faturamento PDV ({grade.linhas.length})</h2>
+      <p className="dica nao-imprimir">Clique num valor para ver as notas daquele mês.</p>
       <div className="grade-mensal">
-      <Tabela
-        chave="linha"
-        linhas={linhas}
-        porPagina={100}
-        arquivo="faturamento-mes-a-mes"
-        vazio="Nenhuma loja com esses filtros."
-        rodape={[
-          { loja: 'Total (sem repetir CNPJ)', supervisor: 'Total (sem repetir CNPJ)', ...grade.totais },
-          ...(repetido > 0.005 ? [{ loja: 'Soma das linhas (como a planilha)', supervisor: 'Soma das linhas (como a planilha)',
-            ...grade.soma_das_linhas }] : []),
-        ]}
-        colunas={[
-          { campo: 'loja', titulo: 'PDV', quebra: true, fixa: true,
-            mostrar: (l) => (l.meses
-              ? <>{l.loja}{l.compartilhado && <span className="etiqueta" title="CNPJ compartilhado com outra loja: o valor é do CNPJ inteiro">compartilhado</span>}</>
-              : <b>{l.supervisor}</b>),
-            exportar: (l) => l.loja ?? l.supervisor },
-          { campo: 'promotor', titulo: 'Promotor', quebra: true },
-          { campo: 'supervisor', titulo: 'Supervisor', quebra: true, mostrar: (l) => (l.meses ? l.supervisor : '') },
-          { campo: 'cnpj', titulo: 'CNPJ', mostrar: (l) => (l.meses ? formatarCnpj(l.cnpj) : ''), exportar: (l) => (l.cnpj ? formatarCnpj(l.cnpj) : '') },
-          { campo: 'cidade', titulo: 'Cidade', quebra: true, mostrar: (l) => (l.meses ? `${l.cidade}${l.uf ? ` - ${l.uf}` : ''}` : '') },
-          ...colunasMeses,
-          { campo: 'total', titulo: 'TOTAL', num: true, mostrar: (l) => <b>{formatarMoeda(l.total)}</b> },
-        ]}
-      />
+        <Tabela
+          chave="linha"
+          linhas={grade.linhas}
+          porPagina={100}
+          arquivo="faturamento-pdv"
+          vazio="Nenhuma loja com esses filtros."
+          rodape={[{ supervisor: 'Total', ...grade.totais }]}
+          colunas={[
+            { campo: 'supervisor', titulo: 'Supervisor', quebra: true },
+            { campo: 'promotor', titulo: 'Promotor', quebra: true },
+            { campo: 'cnpj', titulo: 'CNPJ', mostrar: (l) => (l.meses ? formatarCnpj(l.cnpj) : ''), exportar: (l) => (l.cnpj ? formatarCnpj(l.cnpj) : '') },
+            { campo: 'loja', titulo: 'PDV', quebra: true,
+              mostrar: (l) => <>{l.loja}{l.compartilhado && <span className="etiqueta" title="Faturamento compartilhado com outra loja do mesmo CNPJ">compartilhado</span>}</> },
+            { campo: 'cidade', titulo: 'Cidade', quebra: true },
+            { campo: 'uf', titulo: 'UF' },
+            ...colunasMeses,
+            { campo: 'total', titulo: 'TOTAL', num: true, mostrar: (l) => <b>{formatarMoeda(l.total)}</b> },
+          ]}
+        />
       </div>
       {detalhe && <DetalheNotas linha={detalhe.linha} mes={detalhe.mes} aoFechar={() => setDetalhe(null)} />}
     </section>

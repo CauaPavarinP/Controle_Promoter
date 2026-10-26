@@ -15,7 +15,6 @@ def test_previa_mostra_resumo_antes_de_gravar(cliente):
     assert previa["meses"][0] == "2026-01" and previa["meses_existentes"] == []
     assert previa["linhas_com_erro"] == 0 and previa["clientes"] == 7
     assert previa["cnpjs_sem_roteiro"]["quantidade"] == 7
-    assert {t["tipo"] for t in previa["tipos_nf"]} == {"1-Venda", "2-Devolucao", "5-Bonificacao"}
     assert cliente.get("/api/opcoes").json()["meses"] == []   # nada gravado ainda
 
 
@@ -76,8 +75,6 @@ def test_importacao_inicial_da_planilha_e_conferencia(cliente):
     for aba in conferencia["abas"]:
         # Com as regras padrão (TOTAL VENDA, todos os tipos), o sistema bate com a planilha.
         assert aba["total"]["diferenca"] == 0, aba
-    pr = next(a for a in conferencia["abas"] if a["aba"] == "PR")
-    assert pr["total"]["sem_repetir_cnpj"] < pr["total"]["planilha"]   # REDE OMEGA e LAMBDA repetem CNPJ
 
     # Rodar a importação inicial de novo não duplica os cadastros.
     with open(EXEMPLOS / "planilha_completa_exemplo.xlsx", "rb") as arquivo:
@@ -137,9 +134,8 @@ def test_grade_mes_a_mes_e_detalhe_das_notas(cliente):
     grade = painel["grade"]
     assert grade["meses"][0] == "2026-01" and len(grade["meses"]) == 9
     assert {l["uf"] for l in grade["linhas"]} == {"PR"}
-    # Total sem repetir CNPJ = faturamento do resumo; soma das linhas repete REDE OMEGA e LAMBDA.
+    # A linha de totais conta cada CNPJ uma vez: bate com o faturamento do resumo.
     assert grade["totais"]["total"] == painel["resumo"]["faturamento"]
-    assert grade["soma_das_linhas"]["total"] > grade["totais"]["total"]
 
     linha = next(l for l in grade["linhas"] if l["loja"] == "ATACADO SIGMA")
     mes = next(m for m, v in linha["meses"].items() if v)
@@ -152,5 +148,5 @@ def test_grade_mes_a_mes_e_detalhe_das_notas(cliente):
     assert [c["nome"] for c in so_pdv["custos"]] == ["Carla Teste"]
     assert so_pdv["custos"][0]["total"] == 3250.0
     loja = so_pdv["lojas"][0]
-    assert loja["faturamento_por_visita"] == round(loja["faturamento"] / (2 * 4.33 * 9), 2)
+    assert loja["faturamento_por_visita"] == round(loja["faturamento"] / (2 * 52 / 12 * 9), 2)
     assert "pdvs" in cliente.get("/api/opcoes").json()

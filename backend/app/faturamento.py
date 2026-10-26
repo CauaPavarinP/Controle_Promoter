@@ -56,8 +56,6 @@ def preparar_previa(conteudo: bytes, nome: str, usuario: str, cnpjs_no_roteiro: 
                           cidade=("cidade", "first"), uf=("uf", "first"))
                      .reset_index())
     sem_roteiro = por_cnpj[~por_cnpj["cnpj_cpf"].isin(cnpjs_no_roteiro)].sort_values("valor", ascending=False)
-    tipos = (itens.groupby("tipo_nf").agg(linhas=("tipo_nf", "size"), valor=("total_venda", "sum"))
-                  .reset_index().sort_values("valor", ascending=False))
 
     token = secrets.token_urlsafe(16)
     _previas[token] = {"criado": time.time(), "itens": itens, "erros": erros, "avisos": avisos,
@@ -69,7 +67,6 @@ def preparar_previa(conteudo: bytes, nome: str, usuario: str, cnpjs_no_roteiro: 
         "meses": [_rotulo(a, m) for a, m in meses],
         "meses_existentes": [_rotulo(a, m) for a, m in existentes],
         "total_venda": round(float(itens["total_venda"].sum()), 2),
-        "total_vlr_total": round(float(itens["vlr_total"].fillna(0).sum()), 2),
         "notas": int(itens["num_nf"].nunique()),
         "clientes": int(itens["cnpj_cpf"].nunique()),
         "cnpjs_sem_roteiro": {
@@ -77,8 +74,6 @@ def preparar_previa(conteudo: bytes, nome: str, usuario: str, cnpjs_no_roteiro: 
             "exemplos": [{"cnpj": r.cnpj_cpf, "razao_social": r.razao_social, "cidade": r.cidade, "uf": r.uf,
                           "valor": round(float(r.valor), 2)} for r in sem_roteiro.head(20).itertuples()],
         },
-        "tipos_nf": [{"tipo": t.tipo_nf, "linhas": int(t.linhas), "valor": round(float(t.valor), 2)}
-                     for t in tipos.itertuples()],
     }
 
 
@@ -227,9 +222,9 @@ def tem_faturamento_antigo() -> bool:
 
 
 
-def itens_do_cliente(cnpj: str, ano: int, mes: int, cod_cli: str, rede: bool, regras: dict) -> dict:
-    """Itens de nota de um CNPJ (ou de toda a rede, pela raiz) num mês, com o que conta no faturamento."""
-    filtro = FaturamentoItem.cnpj_cpf.like(f"{cnpj}%") if rede else FaturamentoItem.cnpj_cpf == cnpj
+def itens_do_cliente(cnpj: str, ano: int, mes: int, cod_cli: str, regras: dict) -> dict:
+    """Itens de nota de um CNPJ num mês (detalhe da grade), com o que conta no faturamento."""
+    filtro = FaturamentoItem.cnpj_cpf == cnpj
     consulta = (select(FaturamentoItem).where(filtro, FaturamentoItem.ano == ano, FaturamentoItem.mes == mes)
                 .order_by(FaturamentoItem.data_emissao, FaturamentoItem.num_nf, FaturamentoItem.id).limit(5000))
     if cod_cli:

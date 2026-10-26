@@ -1,5 +1,7 @@
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
 
+// Cartões do resumo, como no documento (seção 7.1): custo, faturamento, custo ÷ faturamento,
+// nº de promotores, nº de lojas e total de visitas por semana.
 export default function CardsResumo({ resumo, regras }) {
   return (
     <>
@@ -7,33 +9,33 @@ export default function CardsResumo({ resumo, regras }) {
         <div className="card">
           <span>Custo dos promotores</span>
           <strong>{formatarMoeda(resumo.custo)}</strong>
-          <small>{resumo.promotores} promotor(es) • {resumo.meses} mês(es)</small>
+          <small>{resumo.meses} mês(es)</small>
         </div>
         <div className="card">
           <span>Faturamento das lojas</span>
           <strong>{formatarMoeda(resumo.faturamento)}</strong>
-          <small>{resumo.lojas} loja(s) atendida(s)</small>
         </div>
-        <div className={`card ${classePercentual(resumo.percentual_custo, regras)}`}>
-          <span>Custo sobre faturamento</span>
-          <strong>{formatarPercentual(resumo.percentual_custo)}</strong>
-          <small>quanto do faturamento vai para o promotor</small>
+        <div className="card">
+          <span>Custo ÷ faturamento</span>
+          <strong className={classePercentual(resumo.percentual_custo, regras)}>{formatarPercentual(resumo.percentual_custo)}</strong>
+        </div>
+        <div className="card">
+          <span>Promotores</span>
+          <strong>{resumo.promotores}</strong>
+        </div>
+        <div className="card">
+          <span>Lojas</span>
+          <strong>{resumo.lojas}</strong>
         </div>
         <div className="card">
           <span>Visitas por semana</span>
           <strong>{resumo.visitas_semana ?? '—'}</strong>
-          <small>{resumo.visitas_semana ? 'soma das lojas do filtro' : 'preencha as visitas em Roteiros'}</small>
-        </div>
-        <div className={`card ${resumo.lojas_sem_compra ? 'pct-critico' : ''}`}>
-          <span>Lojas sem compra no período</span>
-          <strong>{resumo.lojas_sem_compra}</strong>
-          <small>de {resumo.lojas} loja(s)</small>
         </div>
       </section>
       {resumo.cnpjs_compartilhados > 0 && (
         <p className="nota">
-          ⚠ {resumo.cnpjs_compartilhados} CNPJ(s) atendem mais de uma loja (rede que compra pela matriz). Nessas lojas o
-          valor mostrado é o do CNPJ inteiro; nos totais ele é contado uma vez só.
+          ⚠ {resumo.cnpjs_compartilhados} CNPJ(s) com mais de uma loja e sem COD CLI para separar: o faturamento é
+          compartilhado entre as lojas e conta uma vez só nos totais.
         </p>
       )}
     </>

@@ -5,8 +5,6 @@ from app.calculos import Filtros, calcular_painel, meses_de_custo
 from app.importacao import converter_numero, normalizar_cnpj
 from app.regras import REGRAS_PADRAO, validar_regras
 
-# Rede com matriz 11111111000100 e duas lojas com CNPJ próprio (filiais da mesma raiz).
-MATRIZ, FILIAL_A, FILIAL_B = "11111111000100", "11111111000200", "11111111000300"
 
 
 def _venda(ano, mes, cnpj, valor, notas=1, tipo="1-Venda"):
@@ -52,7 +50,6 @@ def test_acumulado_conta_cnpj_compartilhado_uma_vez():
     assert ana["faturamento"] == 15000.0          # rede com 2 lojas no mesmo CNPJ conta uma vez
     assert ana["custo_periodo"] == 6000.0         # 6 meses × 1000
     assert ana["lojas"] == 3
-    assert ana["lojas_sem_compra"] == 1
     assert ana["percentual_custo"] == 40.0
     assert painel["resumo"]["faturamento"] == 15000.0
     assert painel["resumo"]["cnpjs_compartilhados"] == 1
@@ -124,50 +121,26 @@ def test_custo_comeca_na_admissao():
     assert meses_de_custo("", 2026 * 12, 2026 * 12 + 8) == 9
 
 
-def test_encargos_e_custo_extra():
-    fat, prom, rot = _dados()
-    regras = {"encargos_percentual": 50, "custo_extra_mensal": 100}
-    painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-01", promotor="1"), regras)
-    assert painel["promotores"][0]["custo_mensal"] == 1000 + 400 + 100
-
-
 def test_rateio_do_custo_por_loja():
     fat, prom, rot = _dados()
     filtros = Filtros("2026-01", "2026-01", promotor="1")
-    igual = calcular_painel(fat, prom, rot, filtros)
+    igual = calcular_painel(fat, prom, rot, filtros, {"rateio_custo": "igual"})
     assert sorted(l["custo_periodo"] for l in igual["lojas"]) == [333.33, 333.33, 333.33]
     # Por visitas só vale quando todas as lojas do promotor têm visitas; aqui falta uma → igual.
     sem_visita = calcular_painel(fat, prom, rot, filtros, {"rateio_custo": "visitas"})
     assert sorted(l["custo_periodo"] for l in sem_visita["lojas"]) == [333.33, 333.33, 333.33]
     rot.loc[rot["loja"] == "SEM COMPRA", "visitas_semana"] = 1
-    por_visita = calcular_painel(fat, prom, rot, filtros, {"rateio_custo": "visitas", "semanas_por_mes": 4})
+    por_visita = calcular_painel(fat, prom, rot, filtros, {"rateio_custo": "visitas"})
     loja_a = next(l for l in por_visita["lojas"] if l["loja"] == "REDE - A")
-    assert loja_a["custo_periodo"] == 600.0                 # 3 das 5 visitas
-    assert loja_a["custo_por_visita"] == 50.0               # 600 / (3 × 4)
+    assert loja_a["custo_periodo"] == 600.0                 # 3 das 5 visitas (exemplo do documento, seção 8.7)
 
 
-def test_modos_de_rede_pela_raiz_do_cnpj():
-    prom = _dados()[1]
-    rot = pd.DataFrame([
-        {"codigo_promotor": "1", "colaborador": "", "cnpj": FILIAL_A, "loja": "REDE - A",
-         "cidade": "X", "uf": "SC", "visitas_semana": None},
-        {"codigo_promotor": "1", "colaborador": "", "cnpj": FILIAL_B, "loja": "REDE - B",
-         "cidade": "X", "uf": "SC", "visitas_semana": None},
-    ])
-    fat = pd.DataFrame([_venda(2026, 1, MATRIZ, 9000.0)])  # a matriz comprou, não as filiais
-    filtros = Filtros("2026-01", "2026-01")
-
-    exato = calcular_painel(fat, prom, rot, filtros, {"modo_rede": "cnpj"})
-    assert exato["resumo"]["faturamento"] == 0 and exato["resumo"]["lojas_sem_compra"] == 2
-
-    total = calcular_painel(fat, prom, rot, filtros, {"modo_rede": "rede_total"})
-    assert total["resumo"]["faturamento"] == 9000.0
-    assert [l["faturamento"] for l in total["lojas"]] == [9000.0, 9000.0]
-
-    dividido = calcular_painel(fat, prom, rot, filtros, {"modo_rede": "rede_dividido"})
-    assert dividido["resumo"]["faturamento"] == 9000.0
-    assert [l["faturamento"] for l in dividido["lojas"]] == [4500.0, 4500.0]
-    assert all(l["percentual_custo"] is not None for l in dividido["lojas"])
+def test_faturamento_por_visita():
+    fat, prom, rot = _dados()
+    rot.loc[rot["loja"] == "SEM COMPRA", "visitas_semana"] = 1
+    painel = calcular_painel(fat, prom, rot, Filtros("2026-02", "2026-02", promotor="2"))
+    outra = next(l for l in painel["lojas"] if l["loja"] == "OUTRA")
+    assert outra["faturamento_por_visita"] == round(8000 / (1 * 52 / 12), 2)
 
 
 def test_filtro_por_uf_mostra_so_promotores_do_local():
@@ -179,10 +152,12 @@ def test_filtro_por_uf_mostra_so_promotores_do_local():
 
 def test_validacao_das_regras():
     assert validar_regras({}) == REGRAS_PADRAO
+    assert REGRAS_PADRAO["limite_percentual"] is None   # o documento pede o limite sem valor fixo
+    assert validar_regras({"limite_percentual": "25"})["limite_percentual"] == 25.0
     with pytest.raises(ValueError):
-        validar_regras({"faixa_alerta": 40, "faixa_critico": 30})
+        validar_regras({"limite_percentual": "abc"})
     with pytest.raises(ValueError):
-        validar_regras({"modo_rede": "outro"})
+        validar_regras({"rateio_custo": "outro"})
     with pytest.raises(ValueError):
         validar_regras({"tipos_nf": {"1 VENDA": "dobra"}})
 
