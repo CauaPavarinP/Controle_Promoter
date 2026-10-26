@@ -4,7 +4,7 @@ export default function TabelaPromotores({ promotores, selecionado, aoSelecionar
   return (
     <section className="bloco">
       <h2>Promotores</h2>
-      <p className="dica">Clique em um promotor para ver só as lojas dele. Ordenado do maior % de custo para o menor.</p>
+      <p className="dica">Clique em um promotor para abrir as lojas dele. Ordenado do maior % de custo para o menor.</p>
       <div className="tabela-rolagem">
         <table>
           <thead>

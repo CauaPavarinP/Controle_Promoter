@@ -51,5 +51,6 @@ def ultimas_importacoes() -> dict:
     if df.empty:
         return {}
     df = df.sort_values("data_hora").groupby("tipo").tail(1)
-    return {r.tipo: {"arquivo": r.arquivo, "data_hora": r.data_hora, "linhas": int(r.linhas)}
+    return {r.tipo: {"arquivo": r.arquivo, "data_hora": r.data_hora, "linhas": int(r.linhas),
+                     "avisos": [a for a in (r.detalhe or "").split("; ") if a]}
             for r in df.itertuples()}

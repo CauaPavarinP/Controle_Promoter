@@ -47,11 +47,30 @@ input, select {
 }
 .login-caixa label { display: grid; gap: 4px; font-size: 14px; }
 
-/* Estrutura */
-.pagina { max-width: 1400px; margin: 0 auto; padding: 16px; }
-.topo { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-.topo-acoes { display: flex; align-items: center; gap: 8px; }
-.usuario { color: var(--texto-suave); font-size: 14px; }
+/* Estrutura: menu lateral + conteúdo */
+.layout { display: flex; min-height: 100vh; }
+.menu-lateral {
+  width: 240px; flex-shrink: 0; background: var(--superficie); border-right: 1px solid var(--borda);
+  display: flex; flex-direction: column; padding: 20px 12px; position: sticky; top: 0; height: 100vh;
+}
+.menu-marca { display: grid; gap: 2px; padding: 0 10px 20px; }
+.menu-marca strong { font-size: 17px; }
+.menu-marca span { color: var(--texto-suave); font-size: 13px; }
+.menu-itens { display: grid; gap: 4px; }
+.menu-itens button {
+  display: flex; justify-content: space-between; align-items: center; text-align: left;
+  background: transparent; color: var(--texto); padding: 10px 12px; border-radius: 8px;
+}
+.menu-itens button:hover { background: #f5f7fb; }
+.menu-itens button.ativo { background: var(--primaria-clara); color: var(--primaria); font-weight: 600; }
+.contador {
+  font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px;
+  background: var(--alerta-fundo); color: var(--alerta);
+}
+.menu-usuario { margin-top: auto; display: grid; gap: 8px; justify-items: start; padding: 0 10px; }
+.conteudo { flex: 1; min-width: 0; padding: 28px 32px; }
+.conteudo-topo { margin-bottom: 18px; }
+.lista-avisos { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; }
 
 /* Filtros */
 .filtros {
@@ -112,6 +131,20 @@ td.pct-critico, .texto-critico { color: var(--critico); font-weight: 600; }
 }
 .sucesso { background: var(--ok-fundo); color: var(--ok); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
 .aviso-texto { color: var(--alerta); margin: 4px 0 0; }
+
+/* Celular: o menu vira uma barra no topo com as abas lado a lado */
+@media (max-width: 860px) {
+  .layout { flex-direction: column; }
+  .menu-lateral {
+    width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--borda);
+    padding: 12px 16px;
+  }
+  .menu-marca { padding: 0 0 10px; }
+  .menu-itens { display: flex; overflow-x: auto; gap: 4px; }
+  .menu-itens button { white-space: nowrap; gap: 8px; }
+  .menu-usuario { margin-top: 10px; padding: 0; grid-auto-flow: column; align-items: center; justify-content: start; gap: 12px; }
+  .conteudo { padding: 16px; }
+}
 
 @media (max-width: 640px) {
   .filtro, .filtro select { min-width: 0; width: 100%; }

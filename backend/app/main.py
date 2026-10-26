@@ -98,6 +98,10 @@ async def importar(tipo: str, arquivo: UploadFile = File(...), _: str = Depends(
     else:
         db.substituir_tabela(tipo, tabela)
 
+    # O histórico guarda só os avisos do próprio arquivo; os colaboradores sem vínculo
+    # são recalculados na aba de avisos, porque mudam quando a outra planilha é importada.
+    db.registrar_importacao(tipo, nome, len(tabela), "; ".join(resumo["avisos"]))
+
     # Roteiro e promotores dependem um do outro: avisa nomes que não bateram.
     roteiro, promotores = db.ler_tabela("roteiro"), db.ler_tabela("promotores")
     if tipo in ("roteiro", "promotores") and not roteiro.empty and not promotores.empty:
@@ -106,8 +110,6 @@ async def importar(tipo: str, arquivo: UploadFile = File(...), _: str = Depends(
             resumo["avisos"].append(
                 f"{len(sem_vinculo)} colaborador(es) do roteiro não encontrados na lista de promotores: "
                 + ", ".join(sem_vinculo[:10]) + (" …" if len(sem_vinculo) > 10 else ""))
-
-    db.registrar_importacao(tipo, nome, len(tabela), "; ".join(resumo["avisos"]))
     return resumo
 
 
