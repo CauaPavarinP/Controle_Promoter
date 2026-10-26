@@ -16,7 +16,7 @@ from sqlalchemy import and_, delete, func, inspect, or_, select, text
 from sqlalchemy.orm import Session
 
 from . import db
-from .importacao import ErroImportacao, ler_faturamento
+from .importacao import ErroImportacao, ler_faturamento, normalizar_texto
 from .modelos import FaturamentoItem, Importacao
 
 VALIDADE_PREVIA = 30 * 60
@@ -225,3 +225,31 @@ def tem_faturamento_antigo() -> bool:
     with db.engine.connect() as conexao:
         return conexao.execute(select(func.count(FaturamentoItem.id))).scalar() == 0
 
+
+
+def itens_do_cliente(cnpj: str, ano: int, mes: int, cod_cli: str, rede: bool, regras: dict) -> dict:
+    """Itens de nota de um CNPJ (ou de toda a rede, pela raiz) num mês, com o que conta no faturamento."""
+    filtro = FaturamentoItem.cnpj_cpf.like(f"{cnpj}%") if rede else FaturamentoItem.cnpj_cpf == cnpj
+    consulta = (select(FaturamentoItem).where(filtro, FaturamentoItem.ano == ano, FaturamentoItem.mes == mes)
+                .order_by(FaturamentoItem.data_emissao, FaturamentoItem.num_nf, FaturamentoItem.id).limit(5000))
+    if cod_cli:
+        consulta = consulta.where(FaturamentoItem.cod_cli == cod_cli)
+    coluna = regras["valor_faturamento"]
+    itens, total = [], 0.0
+    with Session(db.engine) as sessao:
+        for item in sessao.scalars(consulta):
+            acao = regras["tipos_nf"].get(item.tipo_nf_chave, regras["tipos_nf_padrao"])
+            if regras["somente_receita"] and normalizar_texto(item.receita) not in ("SIM", "S"):
+                acao = "ignora"
+            valor = float(getattr(item, coluna) or 0)
+            conta = {"soma": valor, "subtrai": -abs(valor)}.get(acao, 0.0)
+            total += conta
+            itens.append({
+                "data": item.data_emissao.isoformat() if item.data_emissao else None, "num_nf": item.num_nf,
+                "cnpj": item.cnpj_cpf, "cod_cli": item.cod_cli, "razao_social": item.razao_social,
+                "tipo_nf": item.tipo_nf, "receita": item.receita, "cod_item": item.cod_item,
+                "descricao_item": item.descricao_item, "qtde": item.qtde, "total_venda": item.total_venda,
+                "vlr_total": item.vlr_total, "representante": item.representante, "acao": acao,
+                "valor_considerado": round(conta, 2),
+            })
+    return {"itens": itens, "total_considerado": round(total, 2), "limitado": len(itens) == 5000}

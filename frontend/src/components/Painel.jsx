@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
+import { formatarMes } from '../formato.js'
 import Filtros from './Filtros.jsx'
 import CardsResumo from './CardsResumo.jsx'
 import TabelaPromotores from './TabelaPromotores.jsx'
 import TabelaLojas from './TabelaLojas.jsx'
+import GradeMensal from './GradeMensal.jsx'
+import BlocoCustos from './BlocoCustos.jsx'
 import Importar from './Importar.jsx'
 import Pendencias from './Pendencias.jsx'
 import Conferencia from './Conferencia.jsx'
@@ -15,12 +18,13 @@ import Roteiros from './cadastros/Roteiros.jsx'
 import Usuarios from './cadastros/Usuarios.jsx'
 import MeuPerfil from './cadastros/MeuPerfil.jsx'
 
-const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', supervisor: '', promotor: '', uf: '', cidade: '' }
+const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', supervisor: '', promotor: '', uf: '', cidade: '', pdv: '' }
 
 // grupo: título no menu | admin: só administrador vê
 const ABAS = [
   { id: 'visao-geral', grupo: 'Análise', titulo: 'Visão geral', subtitulo: 'Custo dos promotores × faturamento das lojas' },
   { id: 'lojas', grupo: 'Análise', titulo: 'Lojas', subtitulo: 'Faturamento de cada loja atendida no período' },
+  { id: 'mensal', grupo: 'Análise', titulo: 'Faturamento mês a mês', subtitulo: 'Cada loja mês a mês, como as abas SC, SP, PR… da planilha' },
   { id: 'pendencias', grupo: 'Análise', titulo: 'Pendências', subtitulo: 'O que falta corrigir para os números ficarem confiáveis' },
   { id: 'promotores', grupo: 'Cadastros', titulo: 'Promotores', subtitulo: 'Promotores, custos por competência e roteiro de cada um' },
   { id: 'supervisores', grupo: 'Cadastros', titulo: 'Supervisores', subtitulo: 'Supervisores e suas equipes' },
@@ -32,7 +36,21 @@ const ABAS = [
   { id: 'usuarios', grupo: 'Configuração', titulo: 'Usuários', subtitulo: 'Quem acessa o sistema e com qual perfil', admin: true },
   { id: 'perfil', grupo: null, titulo: 'Meu perfil', subtitulo: 'Seus dados de acesso' },
 ]
-const ABAS_DE_ANALISE = ['visao-geral', 'lojas', 'pendencias']
+const ABAS_DE_ANALISE = ['visao-geral', 'lojas', 'mensal', 'pendencias']
+const ABAS_COM_FILTRO = ['visao-geral', 'lojas', 'mensal']
+
+// Texto dos filtros para o cabeçalho da impressão.
+function descreverFiltros(filtros, opcoes) {
+  const fim = filtros.modo === 'mes' ? filtros.inicio : filtros.fim
+  const promotor = opcoes?.promotores.find((p) => p.codigo === filtros.promotor)
+  const partes = [filtros.inicio === fim ? `Mês: ${formatarMes(fim)}` : `Período: ${formatarMes(filtros.inicio)} a ${formatarMes(fim)}`]
+  if (filtros.supervisor) partes.push(`Supervisor: ${filtros.supervisor}`)
+  if (promotor) partes.push(`Promotor: ${promotor.nome}`)
+  if (filtros.uf) partes.push(`UF: ${filtros.uf}`)
+  if (filtros.cidade) partes.push(`Cidade: ${filtros.cidade}`)
+  if (filtros.pdv) partes.push(`PDV: ${filtros.pdv}`)
+  return partes.join(' · ')
+}
 
 // Período padrão: janeiro do último ano com dados até o último mês importado.
 function periodoPadrao(meses) {
@@ -92,8 +110,13 @@ export default function Painel({ usuario, aoSair }) {
     }
   }, [aba, carregarOpcoes])
 
+  // Sem faturamento, o administrador cai direto em "Atualizar dados" — só na abertura do sistema,
+  // para não puxar a pessoa de volta enquanto os dados recém-importados ainda estão carregando.
+  const jaDirecionou = useRef(false)
   useEffect(() => {
-    if (opcoes && !opcoes.meses.length && admin && aba === 'visao-geral') irPara('importar')
+    if (!opcoes || jaDirecionou.current) return
+    jaDirecionou.current = true
+    if (!opcoes.meses.length && admin && aba === 'visao-geral') irPara('importar')
   }, [opcoes, admin, aba])
 
   // Recalcula o painel sempre que um filtro muda.
@@ -158,27 +181,38 @@ export default function Painel({ usuario, aoSair }) {
 
       <main className="conteudo">
         <header className="conteudo-topo">
-          <h1>{abaAtual.titulo}</h1>
-          <p className="subtitulo">{abaAtual.subtitulo}</p>
+          <div>
+            <h1>{abaAtual.titulo}</h1>
+            <p className="subtitulo">{abaAtual.subtitulo}</p>
+          </div>
+          {ABAS_COM_FILTRO.includes(aba) && temDados && (
+            <button className="secundario nao-imprimir" onClick={() => window.print()}>Imprimir</button>
+          )}
         </header>
+        {ABAS_COM_FILTRO.includes(aba) && temDados && filtros.inicio && (
+          <p className="so-impressao cabecalho-impressao">
+            Controle de Promotores — 101 do Brasil · {descreverFiltros(filtros, opcoes)} · Impresso em{' '}
+            {new Date().toLocaleString('pt-BR')}
+          </p>
+        )}
 
         {erro && ABAS_DE_ANALISE.includes(aba) && <div className="erro-caixa">{erro}</div>}
 
-        {opcoes?.reimportar_faturamento && ['visao-geral', 'lojas'].includes(aba) && (
+        {opcoes?.reimportar_faturamento && ABAS_COM_FILTRO.includes(aba) && (
           <div className="aviso">
             O sistema agora guarda o faturamento item a item. O faturamento importado na versão anterior não é usado:
             {admin ? <> importe o arquivo de novo em <a href="#importar">Atualizar dados</a>.</> : ' peça a um administrador para importar de novo.'}
           </div>
         )}
 
-        {(aba === 'visao-geral' || aba === 'lojas') && !temDados && opcoes && (
+        {ABAS_COM_FILTRO.includes(aba) && !temDados && opcoes && (
           <div className="aviso">
             Ainda não há faturamento importado.{' '}
             {admin ? <a href="#importar">Importe as planilhas em Atualizar dados.</a> : 'Peça a um administrador para importar.'}
           </div>
         )}
 
-        {(aba === 'visao-geral' || aba === 'lojas') && temDados && (
+        {ABAS_COM_FILTRO.includes(aba) && temDados && (
           <Filtros
             opcoes={opcoes}
             filtros={filtros}
@@ -196,6 +230,13 @@ export default function Painel({ usuario, aoSair }) {
               selecionado={filtros.promotor}
               aoSelecionar={verLojasDoPromotor}
             />
+            <BlocoCustos custos={dados.custos} fim={formatarMes(filtros.modo === 'mes' ? filtros.inicio : filtros.fim)} />
+          </div>
+        )}
+
+        {aba === 'mensal' && temDados && dados && (
+          <div className={carregando ? 'atualizando' : ''}>
+            <GradeMensal grade={dados.grade} />
           </div>
         )}
 

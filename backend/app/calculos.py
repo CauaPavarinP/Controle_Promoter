@@ -37,6 +37,7 @@ class Filtros:
     promotor: str = ""     # código do promotor
     uf: str = ""
     cidade: str = ""
+    pdv: str = ""          # nome do PDV
 
 
 def indice_mes(ano_mes: str) -> int:
@@ -231,7 +232,9 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         lojas = lojas[lojas["uf"].str.upper() == filtros.uf.upper()]
     if filtros.cidade:
         lojas = lojas[lojas["cidade"].map(normalizar_texto) == normalizar_texto(filtros.cidade)]
-    if filtros.uf or filtros.cidade:
+    if filtros.pdv:
+        lojas = lojas[lojas["loja"].map(normalizar_texto) == normalizar_texto(filtros.pdv)]
+    if filtros.uf or filtros.cidade or filtros.pdv:
         # Filtrando por local, só interessam os promotores que atendem ali.
         proms = proms[proms["codigo"].isin(lojas["codigo_promotor"])]
     ativos = ativos[ativos["linha"].isin(lojas["linha"])]
@@ -280,6 +283,7 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         visitas_l = pd.to_numeric(l.visitas_semana, errors="coerce")
         visitas_mes = 0 if pd.isna(visitas_l) else visitas_l * semanas
         custo_mensal_loja = l.custo_periodo / l.meses_ativos if l.meses_ativos else 0
+        visitas_periodo = visitas_mes * l.meses_ativos
         linhas_lojas.append({
             "loja": l.loja, "cnpj": l.cnpj, "cidade": l.cidade, "uf": l.uf,
             "codigo_promotor": l.codigo_promotor, "promotor": nomes.get(l.codigo_promotor, ""),
@@ -293,6 +297,9 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
             "custo_periodo": _arredondar(l.custo_periodo),
             "percentual_custo": None if l.compartilhado else _percentual(l.custo_periodo, l.faturamento),
             "custo_por_visita": _arredondar(custo_mensal_loja / visitas_mes) if visitas_mes > 0 else None,
+            # Quanto a loja comprou para cada visita do promotor no período.
+            "faturamento_por_visita": (_arredondar(l.faturamento / visitas_periodo)
+                                       if visitas_periodo > 0 and not l.compartilhado else None),
         })
     linhas_lojas.sort(key=lambda l: l["faturamento"])
 
@@ -316,7 +323,64 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         "cnpjs_compartilhados": int(unicas[unicas["compartilhado"]]["chave"].nunique()),
     }
     regras_usadas = {c: regras[c] for c in ("modo_rede", "rateio_custo", "faixa_alerta", "faixa_critico")}
-    return {"resumo": resumo, "promotores": linhas_promotores, "lojas": linhas_lojas, "regras": regras_usadas}
+    return {"resumo": resumo, "promotores": linhas_promotores, "lojas": linhas_lojas, "regras": regras_usadas,
+            "grade": _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados, por_rede, dividido),
+            "custos": _bloco_custos(proms, custos, fim)}
+
+
+def _rotulo_mes(indice: int) -> str:
+    return f"{indice // 12}-{indice % 12 + 1:02d}"
+
+
+def _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados, por_rede, dividido) -> dict:
+    """Faturamento de cada loja × promotor mês a mês, como as abas SC, SP, PR… da planilha.
+
+    "totais" conta cada CNPJ (ou rede) uma vez por mês; "soma_das_linhas" soma linha a linha,
+    como a linha de totais da planilha (lojas com o mesmo CNPJ contam várias vezes).
+    """
+    rotulos = [_rotulo_mes(m) for m in meses]
+    valores = ativos.groupby(["linha", "mes"])["valor"].sum()
+    linhas = []
+    for l in lojas.itertuples():
+        por_mes = {_rotulo_mes(m): round(float(valores.get((l.linha, m), 0.0)), 2) for m in meses}
+        linhas.append({
+            "linha": int(l.linha), "supervisor": supervisores.get(l.codigo_promotor, ""),
+            "promotor": nomes.get(l.codigo_promotor, ""), "cnpj": l.cnpj, "loja": l.loja, "cidade": l.cidade,
+            "uf": l.uf, "meses": por_mes, "total": round(sum(por_mes.values()), 2),
+            "compartilhado": bool(l.compartilhado),
+            # Para abrir as notas do valor: CNPJ (ou raiz da rede) e, se separado, o COD CLI.
+            "detalhe": {"cnpj": raiz_cnpj(l.cnpj) if por_rede else l.cnpj, "rede": por_rede,
+                        "cod_cli": (getattr(l, "cod_cli", "") or "") if l.cnpj in separados else "",
+                        "dividido_por": int(l.lojas_mesma_chave) if dividido else 1},
+        })
+    validas = ativos[ativos["chave"] != ""]
+    unicas = validas.drop_duplicates(["chave", "loja", "mes"] if dividido else ["chave", "mes"])
+    por_mes_total = unicas.groupby("mes")["valor"].sum()
+    por_mes_linhas = ativos.groupby("mes")["valor"].sum()
+    totais = {_rotulo_mes(m): round(float(por_mes_total.get(m, 0.0)), 2) for m in meses}
+    soma_linhas = {_rotulo_mes(m): round(float(por_mes_linhas.get(m, 0.0)), 2) for m in meses}
+    return {"meses": rotulos, "linhas": linhas,
+            "totais": {**totais, "total": round(sum(totais.values()), 2)},
+            "soma_das_linhas": {**soma_linhas, "total": round(sum(soma_linhas.values()), 2)}}
+
+
+def _bloco_custos(proms: pd.DataFrame, custos: pd.DataFrame | None, fim: int) -> list:
+    """Custo de cada promotor vigente no último mês do período, como a aba PROMOTORES BRASIL."""
+    linhas = []
+    for p in proms.sort_values("nome").itertuples():
+        valores = {"salario": float(p.salario or 0), "ajuda_custo": float(p.ajuda_custo or 0),
+                   "vale_transporte": float(p.transporte or 0), "outros": 0.0}
+        if custos is not None:
+            vigencias = custos[(custos["codigo"] == p.codigo)
+                               & (custos["ano"].astype(int) * 12 + custos["mes"].astype(int) - 1 <= fim)]
+            if vigencias.empty:
+                valores = dict.fromkeys(valores, 0.0)
+            else:
+                ultima = vigencias.sort_values(["ano", "mes"]).iloc[-1]
+                valores = {c: float(ultima.get(c, 0) or 0) for c in valores}
+        linhas.append({"codigo": p.codigo, "nome": p.nome, "supervisor": p.supervisor, "municipio": p.municipio,
+                       **{c: round(v, 2) for c, v in valores.items()}, "total": round(sum(valores.values()), 2)})
+    return linhas
 
 
 def tipos_de_nota(faturamento: pd.DataFrame, regras: dict) -> list:
@@ -338,8 +402,10 @@ def opcoes_de_filtro(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteir
     meses = sorted({f"{int(a)}-{int(m):02d}" for a, m in zip(faturamento["ano"], faturamento["mes"])})
     locais = (roteiro[["uf", "cidade"]].replace("", pd.NA).dropna()
               .drop_duplicates().sort_values(["uf", "cidade"]))
+    pdvs = (roteiro[["loja", "cidade", "uf"]].drop_duplicates("loja").sort_values("loja"))
     return {
         "meses": meses,
+        "pdvs": [{"nome": p.loja, "cidade": p.cidade, "uf": p.uf} for p in pdvs.itertuples()],
         "supervisores": sorted(s for s in promotores["supervisor"].unique() if s),
         "promotores": [{"codigo": p.codigo, "nome": p.nome, "supervisor": p.supervisor}
                        for p in promotores.sort_values("nome").itertuples()],

@@ -127,3 +127,30 @@ def test_resolver_colaborador_pendente(cliente, tmp_path):
         "colaborador": "FULANO DE TAL", "promotor_id": ana["id"], "data_inicio": "2026-01-01"})
     assert resposta.json() == {"vinculos_criados": 2}
     assert cliente.get("/api/pendencias").json()["colaboradores_sem_promotor"] == []
+
+
+def test_grade_mes_a_mes_e_detalhe_das_notas(cliente):
+    entrar(cliente)
+    importar_cadastros(cliente)
+    importar_faturamento(cliente)
+    painel = cliente.get("/api/painel", params={**PERIODO, "uf": "PR"}).json()
+    grade = painel["grade"]
+    assert grade["meses"][0] == "2026-01" and len(grade["meses"]) == 9
+    assert {l["uf"] for l in grade["linhas"]} == {"PR"}
+    # Total sem repetir CNPJ = faturamento do resumo; soma das linhas repete REDE OMEGA e LAMBDA.
+    assert grade["totais"]["total"] == painel["resumo"]["faturamento"]
+    assert grade["soma_das_linhas"]["total"] > grade["totais"]["total"]
+
+    linha = next(l for l in grade["linhas"] if l["loja"] == "ATACADO SIGMA")
+    mes = next(m for m, v in linha["meses"].items() if v)
+    detalhe = cliente.get("/api/faturamento/itens", params={**linha["detalhe"], "mes": mes}).json()
+    assert detalhe["itens"] and detalhe["total_considerado"] == linha["meses"][mes]
+
+    # Filtro por PDV e bloco de custos (como a aba PROMOTORES BRASIL).
+    so_pdv = cliente.get("/api/painel", params={**PERIODO, "pdv": "ATACADO SIGMA"}).json()
+    assert [l["loja"] for l in so_pdv["lojas"]] == ["ATACADO SIGMA"]
+    assert [c["nome"] for c in so_pdv["custos"]] == ["Carla Teste"]
+    assert so_pdv["custos"][0]["total"] == 3250.0
+    loja = so_pdv["lojas"][0]
+    assert loja["faturamento_por_visita"] == round(loja["faturamento"] / (2 * 4.33 * 9), 2)
+    assert "pdvs" in cliente.get("/api/opcoes").json()

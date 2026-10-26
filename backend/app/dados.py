@@ -26,7 +26,8 @@ def tabelas_do_calculo(sessao: Session) -> tuple[pd.DataFrame, pd.DataFrame, pd.
             "transporte": atual.vale_transporte if atual else 0.0,
             "custo_mensal": atual.total if atual else 0.0,
         })
-        linhas_custos += [{"codigo": p.codigo, "ano": c.ano, "mes": c.mes, "total": c.total, "salario": c.salario}
+        linhas_custos += [{"codigo": p.codigo, "ano": c.ano, "mes": c.mes, "total": c.total, "salario": c.salario,
+                           "ajuda_custo": c.ajuda_custo, "vale_transporte": c.vale_transporte, "outros": c.outros}
                           for c in p.custos]
 
     roteiros = sessao.execute(
@@ -44,7 +45,8 @@ def tabelas_do_calculo(sessao: Session) -> tuple[pd.DataFrame, pd.DataFrame, pd.
     colunas_roteiro = ["codigo_promotor", "colaborador", "cnpj", "loja", "cidade", "uf", "cod_cli",
                        "visitas_semana", "data_inicio", "data_fim"]
     return (pd.DataFrame(linhas_promotores, columns=colunas_promotores),
-            pd.DataFrame(linhas_custos, columns=["codigo", "ano", "mes", "total", "salario"]),
+            pd.DataFrame(linhas_custos, columns=["codigo", "ano", "mes", "total", "salario", "ajuda_custo",
+                                                 "vale_transporte", "outros"]),
             pd.DataFrame(linhas_roteiro, columns=colunas_roteiro))
 
 

@@ -287,3 +287,43 @@ span.pct-critico { color: var(--critico); font-weight: 600; }
 .caixa-alerta { background: var(--alerta-fundo); color: var(--alerta); padding: 10px 12px; border-radius: 8px; align-items: flex-start; }
 .importar-cartao { min-width: 0; }
 .importar-cartao > input[type=file], .importar-cartao > button { width: 100%; max-width: 100%; min-width: 0; }
+
+/* Fase 3: grade mês a mês, atalhos e impressão */
+.conteudo-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.atalhos { display: flex; gap: 6px; flex-wrap: wrap; flex-basis: 100%; }
+.atalhos button { padding: 4px 10px; font-size: 13px; }
+.filtro-pdv input { min-width: 200px; }
+.valor-clicavel { background: transparent; color: var(--primaria); padding: 0; text-decoration: underline dotted; font-variant-numeric: tabular-nums; }
+.valor-clicavel:hover { text-decoration: underline; }
+.texto-suave { color: var(--texto-suave); }
+tfoot td { font-weight: 600; background: #f7f9fc; border-top: 2px solid var(--borda); }
+tr.linha-fora td { color: var(--texto-suave); text-decoration: line-through; }
+.so-impressao { display: none; }
+
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  body, .layout { background: #fff; }
+  .menu-lateral, .nao-imprimir, .filtros, .tabela-rodape, .etiqueta, .modal-fundo, .aviso { display: none !important; }
+  .so-impressao { display: block !important; }
+  .cabecalho-impressao { font-size: 11px; margin: 0 0 8px; color: #333; }
+  .conteudo { padding: 0; }
+  .conteudo-topo h1 { font-size: 18px; }
+  .conteudo-topo .subtitulo { display: none; }
+  .bloco, .card { border-color: #ccc; break-inside: avoid-page; }
+  .bloco { padding: 8px; margin-bottom: 8px; }
+  .tabela-rolagem { overflow: visible; }
+  table { font-size: 9px; }
+  th, td { padding: 3px 4px; }
+  th { position: static; }
+  .cards { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .card strong { font-size: 14px; }
+  .valor-clicavel { text-decoration: none; color: inherit; }
+}
+.grade-mensal table { font-size: 12.5px; }
+.grade-mensal th, .grade-mensal td { padding: 6px 6px; }
+.grade-mensal td.quebra { min-width: 80px; max-width: 170px; }
+.grade-mensal .etiqueta { margin-left: 4px; }
+.coluna-fixa { position: sticky; left: 0; z-index: 1; background: var(--superficie); box-shadow: 1px 0 0 var(--borda); }
+th.coluna-fixa { background: var(--primaria-clara); z-index: 2; }
+tfoot td.coluna-fixa { background: #f7f9fc; }
+tr.linha-sem-compra td.coluna-fixa { background: var(--critico-fundo); }

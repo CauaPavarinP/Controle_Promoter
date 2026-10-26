@@ -19,6 +19,11 @@ export default function CardsResumo({ resumo, regras }) {
           <strong>{formatarPercentual(resumo.percentual_custo)}</strong>
           <small>quanto do faturamento vai para o promotor</small>
         </div>
+        <div className="card">
+          <span>Visitas por semana</span>
+          <strong>{resumo.visitas_semana ?? '—'}</strong>
+          <small>{resumo.visitas_semana ? 'soma das lojas do filtro' : 'preencha as visitas em Roteiros'}</small>
+        </div>
         <div className={`card ${resumo.lojas_sem_compra ? 'pct-critico' : ''}`}>
           <span>Lojas sem compra no período</span>
           <strong>{resumo.lojas_sem_compra}</strong>

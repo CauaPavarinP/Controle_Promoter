@@ -1,53 +1,36 @@
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
+import { Tabela } from './ui.jsx'
 
-export default function TabelaPromotores({ promotores, regras, selecionado, aoSelecionar }) {
+// Ranking por promotor: faturamento das lojas dele × custo dele no período.
+export default function TabelaPromotores({ promotores, regras, aoSelecionar }) {
+  const pct = (p) => <span className={classePercentual(p.percentual_custo, regras)}>{formatarPercentual(p.percentual_custo)}</span>
   return (
     <section className="bloco">
       <h2>Promotores</h2>
-      <p className="dica">Clique em um promotor para abrir as lojas dele. Ordenado do maior % de custo para o menor.</p>
-      <div className="tabela-rolagem">
-        <table>
-          <thead>
-            <tr>
-              <th>Promotor</th>
-              <th>Supervisor</th>
-              <th>Município</th>
-              <th className="num">Lojas</th>
-              <th className="num">Sem compra</th>
-              <th className="num">Visitas/sem.</th>
-              <th className="num">Custo mensal</th>
-              <th className="num">Custo no período</th>
-              <th className="num">Faturamento</th>
-              <th className="num">% custo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {promotores.map((p) => (
-              <tr
-                key={p.codigo}
-                className={`clicavel ${selecionado === p.codigo ? 'selecionada' : ''}`}
-                onClick={() => aoSelecionar(p.codigo)}
-              >
-                <td>{p.nome}</td>
-                <td>{p.supervisor}</td>
-                <td>{p.municipio}</td>
-                <td className="num">{p.lojas}</td>
-                <td className={`num ${p.lojas_sem_compra ? 'texto-critico' : ''}`}>{p.lojas_sem_compra}</td>
-                <td className="num">{p.visitas_semana ?? '—'}</td>
-                <td className="num">{formatarMoeda(p.custo_mensal)}</td>
-                <td className="num">{formatarMoeda(p.custo_periodo)}</td>
-                <td className="num">{formatarMoeda(p.faturamento)}</td>
-                <td className={`num ${classePercentual(p.percentual_custo, regras)}`}>
-                  {formatarPercentual(p.percentual_custo)}
-                </td>
-              </tr>
-            ))}
-            {!promotores.length && (
-              <tr><td colSpan={10} className="vazio">Nenhum promotor com esses filtros.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <p className="dica nao-imprimir">
+        Clique em um promotor para abrir as lojas dele. Clique no título de uma coluna para ordenar. Começa do maior % de
+        custo para o menor.
+      </p>
+      <Tabela
+        chave="codigo"
+        linhas={promotores}
+        arquivo="promotores-custo-x-faturamento"
+        aoClicar={(p) => aoSelecionar(p.codigo)}
+        vazio="Nenhum promotor com esses filtros."
+        colunas={[
+          { campo: 'nome', titulo: 'Promotor', quebra: true },
+          { campo: 'supervisor', titulo: 'Supervisor' },
+          { campo: 'municipio', titulo: 'Município' },
+          { campo: 'lojas', titulo: 'Lojas', num: true },
+          { campo: 'lojas_sem_compra', titulo: 'Sem compra', num: true,
+            mostrar: (p) => <span className={p.lojas_sem_compra ? 'texto-critico' : ''}>{p.lojas_sem_compra}</span> },
+          { campo: 'visitas_semana', titulo: 'Visitas/sem.', num: true, mostrar: (p) => p.visitas_semana ?? '—' },
+          { campo: 'custo_mensal', titulo: 'Custo mensal', num: true, mostrar: (p) => formatarMoeda(p.custo_mensal) },
+          { campo: 'custo_periodo', titulo: 'Custo no período', num: true, mostrar: (p) => formatarMoeda(p.custo_periodo) },
+          { campo: 'faturamento', titulo: 'Faturamento', num: true, mostrar: (p) => formatarMoeda(p.faturamento) },
+          { campo: 'percentual_custo', titulo: '% custo', num: true, mostrar: pct, ordenar: (p) => p.percentual_custo ?? -1 },
+        ]}
+      />
     </section>
   )
 }

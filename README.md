@@ -7,10 +7,17 @@ Pedido do Maurício (Comercial • 101 do Brasil), a validar com o Rayan.
 
 ## O que o sistema faz
 
-- **Filtros únicos** para custo e faturamento: período (acumulado ou um mês), supervisor, promotor, UF e cidade.
+- **Filtros únicos** para custo e faturamento: período (acumulado ou um mês, com atalhos "ano até hoje" e
+  "últimos 3/6/12 meses"), supervisor, promotor, UF, cidade e PDV.
 - **Resumo:** custo dos promotores no período, faturamento das lojas, % do custo sobre o faturamento e lojas sem compra.
 - **Tabela de promotores:** lojas, visitas/semana, custo, faturamento e % de custo. Clicar num promotor filtra as lojas dele.
-- **Tabela de lojas:** faturamento no período, meses com compra, custo da loja, % de custo e custo por visita.
+- **Tabela de lojas:** faturamento no período, meses com compra, custo da loja, % de custo, faturamento por
+  visita e custo por visita.
+- **Faturamento mês a mês** (substitui as abas SC, SP, PR…): grade JAN…DEZ + TOTAL por loja × promotor, com
+  linha de total (sem repetir CNPJ) e "soma das linhas" (como a planilha). Clicar num valor abre as notas.
+- **Custo dos promotores** como a aba PROMOTORES BRASIL (salário, ajuda de custo, VT, total), com linha de total.
+- Todas as tabelas **ordenam por coluna** e **exportam para Excel**; botão **Imprimir** (A4 paisagem, com os
+  filtros no cabeçalho e todas as linhas).
 - **Avisos dos dados:** problemas encontrados nas planilhas (nomes que não batem, CNPJ faltando…).
 - **Atualização dos dados** por upload das planilhas, sem mexer no código.
 - **Regras do cálculo** ajustadas pelo próprio usuário na tela, sem mexer no código.
@@ -23,8 +30,8 @@ Pedido do Maurício (Comercial • 101 do Brasil), a validar com o Rayan.
 |---|---|
 | 1 — Base: banco com migrations, login com usuários, cadastros | ✅ Entregue |
 | 2 — Dados: faturamento item a item, desfazer importação, importação inicial com conferência, pendências | ✅ Entregue |
-| 3 — Consulta: grade mês a mês, tela por UF, detalhe da NF, imprimir, exportar | Próxima |
-| 4 — Extras: gráficos, auditoria, visão restrita do supervisor | Depois |
+| 3 — Consulta: grade mês a mês, tela por UF, detalhe da NF, imprimir, exportar | ✅ Entregue |
+| 4 — Extras: gráficos, auditoria, visão restrita do supervisor | Próxima |
 
 ## Estrutura
 

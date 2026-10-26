@@ -70,9 +70,13 @@ export function exportarCsv(nomeArquivo, colunas, linhas) {
  * colunas: [{ campo, titulo, num, mostrar(linha), ordenar(linha), exportar(linha) }]
  * Clicar no título ordena; a lista é paginada e pode ser exportada para Excel (CSV).
  */
-export function Tabela({ colunas, linhas, chave = 'id', aoClicar, vazio = 'Nada encontrado.', arquivo, porPagina = 50 }) {
+export function Tabela({
+  colunas, linhas, chave = 'id', aoClicar, vazio = 'Nada encontrado.', arquivo, porPagina = 50, rodape = [],
+  classeLinha,
+}) {
   const [ordem, setOrdem] = useState(null)
   const [pagina, setPagina] = useState(0)
+  const imprimindo = useImprimindo()
 
   useEffect(() => setPagina(0), [linhas])
 
@@ -91,8 +95,10 @@ export function Tabela({ colunas, linhas, chave = 'id', aoClicar, vazio = 'Nada 
     })
   }, [linhas, ordem, colunas])
 
+  // Na impressão saem todas as linhas, não só a página atual.
+  const tamanho = imprimindo ? Infinity : porPagina
   const paginas = Math.max(1, Math.ceil(ordenadas.length / porPagina))
-  const visiveis = ordenadas.slice(pagina * porPagina, (pagina + 1) * porPagina)
+  const visiveis = imprimindo ? ordenadas : ordenadas.slice(pagina * tamanho, (pagina + 1) * tamanho)
 
   function ordenarPor(campo) {
     setOrdem((atual) => (atual?.campo === campo ? { campo, crescente: !atual.crescente } : { campo, crescente: true }))
@@ -107,7 +113,7 @@ export function Tabela({ colunas, linhas, chave = 'id', aoClicar, vazio = 'Nada 
               {colunas.map((c) => (
                 <th
                   key={c.campo}
-                  className={`${c.num ? 'num' : ''} ${c.semOrdem ? '' : 'ordenavel'}`}
+                  className={`${c.num ? 'num' : ''} ${c.semOrdem ? '' : 'ordenavel'} ${c.fixa ? 'coluna-fixa' : ''}`}
                   onClick={c.semOrdem ? undefined : () => ordenarPor(c.campo)}
                 >
                   {c.titulo}
@@ -118,9 +124,10 @@ export function Tabela({ colunas, linhas, chave = 'id', aoClicar, vazio = 'Nada 
           </thead>
           <tbody>
             {visiveis.map((l) => (
-              <tr key={l[chave]} className={aoClicar ? 'clicavel' : ''} onClick={aoClicar ? () => aoClicar(l) : undefined}>
+              <tr key={l[chave]} className={`${aoClicar ? 'clicavel' : ''} ${classeLinha ? classeLinha(l) : ''}`}
+                onClick={aoClicar ? () => aoClicar(l) : undefined}>
                 {colunas.map((c) => (
-                  <td key={c.campo} className={`${c.num ? 'num' : ''} ${c.quebra ? 'quebra' : ''}`}>
+                  <td key={c.campo} className={`${c.num ? 'num' : ''} ${c.quebra ? 'quebra' : ''} ${c.fixa ? 'coluna-fixa' : ''}`}>
                     {c.mostrar ? c.mostrar(l) : l[c.campo]}
                   </td>
                 ))}
@@ -130,9 +137,20 @@ export function Tabela({ colunas, linhas, chave = 'id', aoClicar, vazio = 'Nada 
               <tr><td colSpan={colunas.length} className="vazio">{vazio}</td></tr>
             )}
           </tbody>
+          {rodape.length > 0 && linhas.length > 0 && (
+            <tfoot>
+              {rodape.map((l, i) => (
+                <tr key={i}>
+                  {colunas.map((c) => (
+                    <td key={c.campo} className={`${c.num ? 'num' : ''} ${c.fixa ? 'coluna-fixa' : ''}`}>{c.mostrar && l[c.campo] !== undefined ? c.mostrar(l) : l[c.campo]}</td>
+                  ))}
+                </tr>
+              ))}
+            </tfoot>
+          )}
         </table>
       </div>
-      <div className="tabela-rodape">
+      <div className="tabela-rodape nao-imprimir">
         <span className="dica">{linhas.length} registro(s)</span>
         {paginas > 1 && (
           <div className="paginacao">
@@ -142,13 +160,29 @@ export function Tabela({ colunas, linhas, chave = 'id', aoClicar, vazio = 'Nada 
           </div>
         )}
         {arquivo && (
-          <button className="secundario" onClick={() => exportarCsv(arquivo, colunas.filter((c) => !c.semExportar), ordenadas)}>
+          <button className="secundario" onClick={() => exportarCsv(arquivo, colunas.filter((c) => !c.semExportar), [...ordenadas, ...rodape])}>
             Exportar Excel
           </button>
         )}
       </div>
     </>
   )
+}
+
+/** true enquanto o navegador está imprimindo (para mostrar todas as linhas das tabelas). */
+export function useImprimindo() {
+  const [imprimindo, setImprimindo] = useState(false)
+  useEffect(() => {
+    const antes = () => setImprimindo(true)
+    const depois = () => setImprimindo(false)
+    window.addEventListener('beforeprint', antes)
+    window.addEventListener('afterprint', depois)
+    return () => {
+      window.removeEventListener('beforeprint', antes)
+      window.removeEventListener('afterprint', depois)
+    }
+  }, [])
+  return imprimindo
 }
 
 /** Lista de escolha com busca (para listas longas, como os PDVs). */

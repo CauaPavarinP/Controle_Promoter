@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { classePercentual, formatarCnpj, formatarMoeda, formatarPercentual } from '../formato.js'
+import { Tabela } from './ui.jsx'
 
 const TEXTO_MODO_REDE = {
   cnpj: 'Faturamento pelo CNPJ da própria loja.',
@@ -7,6 +8,7 @@ const TEXTO_MODO_REDE = {
   rede_dividido: 'O faturamento da rede está dividido igualmente entre as lojas dela.',
 }
 
+// Detalhe por loja: o ponto principal do pedido (achar as lojas que não compensam).
 export default function TabelaLojas({ lojas, regras }) {
   const [busca, setBusca] = useState('')
   const [soSemCompra, setSoSemCompra] = useState(false)
@@ -18,11 +20,28 @@ export default function TabelaLojas({ lojas, regras }) {
       (!termo || `${l.loja} ${l.cidade} ${l.promotor}`.toLowerCase().includes(termo)),
   )
 
+  const etiquetas = (l) => (
+    <>
+      {l.separado_por_cod_cli && (
+        <span className="etiqueta etiqueta-ok" title="Outras lojas usam o mesmo CNPJ; o faturamento foi separado pelo COD CLI de cada uma">
+          separado pelo COD CLI
+        </span>
+      )}
+      {l.compartilhado && (
+        <span className="etiqueta" title="O ERP fatura por CNPJ: o valor é do CNPJ inteiro e conta uma vez só nos totais">
+          {regras.modo_rede === 'cnpj'
+            ? `faturamento compartilhado com outra loja (${l.lojas_mesmo_cnpj} lojas no CNPJ)`
+            : `valor da rede (${l.lojas_mesmo_cnpj} lojas)`}
+        </span>
+      )}
+    </>
+  )
+
   return (
     <section className="bloco">
       <div className="bloco-cabecalho">
         <h2>Lojas ({visiveis.length})</h2>
-        <div className="bloco-ferramentas">
+        <div className="bloco-ferramentas nao-imprimir">
           <input placeholder="Buscar loja, cidade ou promotor" value={busca} onChange={(e) => setBusca(e.target.value)} />
           <label className="marcar">
             <input type="checkbox" checked={soSemCompra} onChange={(e) => setSoSemCompra(e.target.checked)} />
@@ -39,64 +58,37 @@ export default function TabelaLojas({ lojas, regras }) {
       <p className="dica">
         {TEXTO_MODO_REDE[regras.modo_rede]} Custo da loja = parte do custo do promotor
         ({regras.rateio_custo === 'visitas' ? 'proporcional às visitas' : 'dividido igual entre as lojas dele'}).
-        Ordenado do menor faturamento para o maior. As regras ficam em "Regras do cálculo".
+        Começa do menor faturamento; clique no título de uma coluna para ordenar.
       </p>
-      <div className="tabela-rolagem">
-        <table>
-          <thead>
-            <tr>
-              <th>Loja</th>
-              <th>CNPJ</th>
-              <th>Cidade</th>
-              <th>Promotor</th>
-              <th className="num">Visitas/<br />semana</th>
-              <th className="num">Meses c/<br />compra</th>
-              <th className="num">Faturamento</th>
-              <th className="num">Custo da loja</th>
-              <th className="num">% custo</th>
-              <th className="num">Custo/visita</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visiveis.map((l) => (
-              <tr key={`${l.codigo_promotor}-${l.cnpj}-${l.loja}`} className={l.faturamento <= 0 ? 'linha-sem-compra' : ''}>
-                <td className="quebra">
-                  {l.loja}
-                  {l.separado_por_cod_cli && (
-                    <span className="etiqueta etiqueta-ok" title="Outras lojas usam o mesmo CNPJ; o faturamento foi separado pelo COD CLI de cada uma">
-                      separado pelo COD CLI
-                    </span>
-                  )}
-                  {l.compartilhado && (
-                    <span className="etiqueta" title="O ERP fatura por CNPJ: o valor é do CNPJ inteiro e conta uma vez só nos totais">
-                      {regras.modo_rede === 'cnpj'
-                        ? `faturamento compartilhado com outra loja (${l.lojas_mesmo_cnpj} lojas no CNPJ)`
-                        : `valor da rede (${l.lojas_mesmo_cnpj} lojas)`}
-                    </span>
-                  )}
-                </td>
-                <td>{formatarCnpj(l.cnpj)}</td>
-                <td className="quebra">{l.cidade}{l.uf && ` - ${l.uf}`}</td>
-                <td className="quebra">{l.promotor}</td>
-                <td className="num">{l.visitas_semana ?? '—'}</td>
-                <td className="num">{l.meses_com_compra}</td>
-                <td className="num">{formatarMoeda(l.faturamento)}</td>
-                <td className="num">{formatarMoeda(l.custo_periodo)}</td>
-                <td
-                  className={`num ${classePercentual(l.percentual_custo, regras)}`}
-                  title={l.compartilhado ? 'Não calculado: o faturamento mostrado é da rede inteira' : undefined}
-                >
-                  {formatarPercentual(l.percentual_custo)}
-                </td>
-                <td className="num">{formatarMoeda(l.custo_por_visita)}</td>
-              </tr>
-            ))}
-            {!visiveis.length && (
-              <tr><td colSpan={10} className="vazio">Nenhuma loja com esses filtros.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <Tabela
+        chave="chave"
+        linhas={visiveis.map((l) => ({ ...l, chave: `${l.codigo_promotor}-${l.cnpj}-${l.loja}` }))}
+        arquivo="lojas-custo-x-faturamento"
+        classeLinha={(l) => (l.faturamento <= 0 ? 'linha-sem-compra' : '')}
+        vazio="Nenhuma loja com esses filtros."
+        colunas={[
+          { campo: 'loja', titulo: 'Loja', quebra: true, mostrar: (l) => <>{l.loja}{etiquetas(l)}</> },
+          { campo: 'cnpj', titulo: 'CNPJ', mostrar: (l) => formatarCnpj(l.cnpj), exportar: (l) => formatarCnpj(l.cnpj) },
+          { campo: 'cidade', titulo: 'Cidade', quebra: true, mostrar: (l) => `${l.cidade}${l.uf ? ` - ${l.uf}` : ''}`,
+            exportar: (l) => `${l.cidade}${l.uf ? ` - ${l.uf}` : ''}` },
+          { campo: 'promotor', titulo: 'Promotor', quebra: true },
+          { campo: 'visitas_semana', titulo: 'Visitas/ semana', num: true, mostrar: (l) => l.visitas_semana ?? '—' },
+          { campo: 'meses_com_compra', titulo: 'Meses c/ compra', num: true },
+          { campo: 'faturamento', titulo: 'Faturamento', num: true, mostrar: (l) => formatarMoeda(l.faturamento) },
+          { campo: 'custo_periodo', titulo: 'Custo da loja', num: true, mostrar: (l) => formatarMoeda(l.custo_periodo) },
+          { campo: 'percentual_custo', titulo: '% custo', num: true, ordenar: (l) => l.percentual_custo ?? -1,
+            mostrar: (l) => (
+              <span className={classePercentual(l.percentual_custo, regras)}
+                title={l.compartilhado ? 'Não calculado: o faturamento mostrado é do CNPJ/rede inteiro' : undefined}>
+                {formatarPercentual(l.percentual_custo)}
+              </span>
+            ) },
+          { campo: 'faturamento_por_visita', titulo: 'Faturamento por visita', num: true, ordenar: (l) => l.faturamento_por_visita ?? -1,
+            mostrar: (l) => formatarMoeda(l.faturamento_por_visita) },
+          { campo: 'custo_por_visita', titulo: 'Custo por visita', num: true, ordenar: (l) => l.custo_por_visita ?? -1,
+            mostrar: (l) => formatarMoeda(l.custo_por_visita) },
+        ]}
+      />
     </section>
   )
 }

@@ -184,9 +184,10 @@ def opcoes(sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
 
 @app.get("/api/painel")
 def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: str = "", cidade: str = "",
-           sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
+           pdv: str = "", sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     try:
-        filtros = Filtros(inicio=inicio, fim=fim, supervisor=supervisor, promotor=promotor, uf=uf, cidade=cidade)
+        filtros = Filtros(inicio=inicio, fim=fim, supervisor=supervisor, promotor=promotor, uf=uf, cidade=cidade,
+                          pdv=pdv)
         indice_inicio = int(inicio[:4]) * 12 + int(inicio[5:7])
         indice_fim = int(fim[:4]) * 12 + int(fim[5:7])
     except (ValueError, IndexError) as erro:
@@ -195,6 +196,18 @@ def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: 
         _erro("Escolha um período de até 5 anos.")
     promotores, custos, roteiro = tabelas_do_calculo(sessao)
     return calcular_painel(faturamento.faturamento_mensal(), promotores, roteiro, filtros, ler_regras(), custos)
+
+
+@app.get("/api/faturamento/itens")
+def itens_de_um_mes(cnpj: str, mes: str, cod_cli: str = "", rede: bool = False, _=Depends(usuario_logado)):
+    """Notas (itens) de um PDV num mês: o detalhe de um valor da grade mês a mês."""
+    try:
+        ano, numero = int(mes[:4]), int(mes[5:7])
+    except (ValueError, IndexError):
+        _erro("Mês inválido. Use AAAA-MM.")
+    if len(cnpj) < 8:
+        _erro("CNPJ inválido.")
+    return faturamento.itens_do_cliente(cnpj, ano, numero, cod_cli, rede, ler_regras())
 
 
 # ---------------------------------------------------------------------------
