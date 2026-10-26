@@ -9,11 +9,12 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db
-from .calculos import Filtros, calcular_painel, opcoes_de_filtro
+from .calculos import Filtros, calcular_painel, opcoes_de_filtro, tipos_de_nota
 from .config import (APP_SENHA, APP_USUARIO, ARQUIVO_ENV, FRONTEND_DIST, PRODUCAO,
                      SECRET_KEY, SESSAO_HORAS)
 from .importacao import (ErroImportacao, importar_faturamento, importar_promotores,
                          importar_roteiro, vincular_roteiro)
+from .regras import gravar_regras, ler_regras
 
 log = logging.getLogger("uvicorn.error")
 
@@ -104,6 +105,14 @@ async def importar(tipo: str, arquivo: UploadFile = File(...), _: str = Depends(
 
     # O histórico guarda só os avisos do próprio arquivo; os colaboradores sem vínculo
     # são recalculados na aba de avisos, porque mudam quando a outra planilha é importada.
+    if tipo == "faturamento":
+        regras = ler_regras()
+        sem_regra = [t["tipo"] for t in resumo["tipos_nf"] if t["chave"] not in regras["tipos_nf"]]
+        if sem_regra:
+            resumo["avisos"].append(
+                "Tipos de nota sem regra definida (ficam fora do faturamento até você escolher em "
+                "Regras do cálculo): " + ", ".join(sem_regra))
+
     db.registrar_importacao(tipo, nome, len(tabela), "; ".join(resumo["avisos"]))
 
     # Roteiro e promotores dependem um do outro: avisa nomes que não bateram.
@@ -136,9 +145,28 @@ def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: 
         filtros = Filtros(inicio=inicio, fim=fim, supervisor=supervisor, promotor=promotor,
                           uf=uf, cidade=cidade)
         return calcular_painel(db.ler_tabela("faturamento"), db.ler_tabela("promotores"),
-                               db.ler_tabela("roteiro"), filtros)
+                               db.ler_tabela("roteiro"), filtros, ler_regras())
     except ValueError as erro:
         raise HTTPException(status_code=400, detail="Período inválido. Use AAAA-MM.") from erro
+
+
+# ---------------------------------------------------------------------------
+# Regras do cálculo (ajustadas pelo usuário)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/regras")
+def obter_regras(_: str = Depends(exigir_login)):
+    regras = ler_regras()
+    return {"regras": regras, "tipos_nf": tipos_de_nota(db.ler_tabela("faturamento"), regras)}
+
+
+@app.put("/api/regras")
+def salvar_regras(dados: dict, _: str = Depends(exigir_login)):
+    try:
+        regras = gravar_regras(dados)
+    except ValueError as erro:
+        raise HTTPException(status_code=400, detail=str(erro)) from erro
+    return {"regras": regras, "tipos_nf": tipos_de_nota(db.ler_tabela("faturamento"), regras)}
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,13 @@ export const api = {
   logout: () => requisitar('/api/logout', { method: 'POST' }),
   opcoes: () => requisitar('/api/opcoes'),
   painel: (filtros) => requisitar('/api/painel?' + new URLSearchParams(filtros)),
+  regras: () => requisitar('/api/regras'),
+  salvarRegras: (regras) =>
+    requisitar('/api/regras', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(regras),
+    }),
   importar: (tipo, arquivo) => {
     const corpo = new FormData()
     corpo.append('arquivo', arquivo)

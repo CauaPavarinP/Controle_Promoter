@@ -9,7 +9,7 @@ import unicodedata
 
 import pandas as pd
 
-from .config import TIPOS_NF_CONSIDERADOS
+SEM_TIPO = "Sem tipo"
 
 
 class ErroImportacao(Exception):
@@ -184,16 +184,14 @@ def importar_faturamento(conteudo: bytes, nome_arquivo: str):
         avisos.append(f"{int(sem_data.sum())} linha(s) sem data válida foram ignoradas.")
     df = df[~sem_data]
 
-    if "tipo_nf" in df:
-        considerar = df["tipo_nf"].map(normalizar_texto).isin(TIPOS_NF_CONSIDERADOS)
-        if (~considerar).any():
-            avisos.append(f"{int((~considerar).sum())} linha(s) de outros tipos de nota "
-                          "(não '1-Venda') ficaram de fora.")
-        df = df[considerar]
-
     if df.empty:
-        raise ErroImportacao("O arquivo não tem nenhuma linha de venda válida.")
+        raise ErroImportacao("O arquivo não tem nenhuma linha válida (com CNPJ e data).")
 
+    # Todos os tipos de nota são guardados; o que cada tipo faz (soma, desconta ou
+    # fica de fora) é escolhido na aba "Regras do cálculo", sem precisar reimportar.
+    if "tipo_nf" not in df:
+        df["tipo_nf"] = SEM_TIPO
+    df["tipo_nf"] = df["tipo_nf"].fillna("").astype(str).str.strip().replace("", SEM_TIPO)
     for campo in ("cod_cliente", "razao_social", "cidade", "uf", "num_nota"):
         if campo not in df:
             df[campo] = ""
@@ -201,17 +199,24 @@ def importar_faturamento(conteudo: bytes, nome_arquivo: str):
     df["num_nota"] = df["num_nota"].map(normalizar_codigo)
     df["ano"] = df["ano"].astype(int)
     df["mes"] = df["mes"].astype(int)
+    df["chave_tipo"] = df["tipo_nf"].map(normalizar_texto)
 
-    agregado = (df.groupby(["ano", "mes", "cnpj"], as_index=False)
-                  .agg(cod_cliente=("cod_cliente", "first"),
+    agregado = (df.groupby(["ano", "mes", "cnpj", "chave_tipo"], as_index=False)
+                  .agg(tipo_nf=("tipo_nf", "first"),
+                       cod_cliente=("cod_cliente", "first"),
                        razao_social=("razao_social", "first"),
                        cidade=("cidade", "first"),
                        uf=("uf", "first"),
                        valor=("valor", "sum"),
                        notas=("num_nota", "nunique")))
+    tipos = (df.groupby("chave_tipo")
+               .agg(tipo=("tipo_nf", "first"), linhas=("valor", "size"), valor=("valor", "sum"))
+               .reset_index())
     meses = sorted({f"{a}-{m:02d}" for a, m in zip(agregado["ano"], agregado["mes"])})
     resumo = {"aba": aba, "linhas_lidas": linhas_lidas, "linhas_consideradas": len(df),
-              "clientes": int(agregado["cnpj"].nunique()), "meses": meses, "avisos": avisos}
+              "clientes": int(agregado["cnpj"].nunique()), "meses": meses, "avisos": avisos,
+              "tipos_nf": [{"chave": t.chave_tipo, "tipo": t.tipo, "linhas": int(t.linhas),
+                            "valor": round(float(t.valor), 2)} for t in tipos.itertuples()]}
     return agregado, resumo
 
 

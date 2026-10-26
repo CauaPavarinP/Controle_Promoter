@@ -1,6 +1,6 @@
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
 
-export default function CardsResumo({ resumo }) {
+export default function CardsResumo({ resumo, regras }) {
   return (
     <>
       <section className="cards">
@@ -14,7 +14,7 @@ export default function CardsResumo({ resumo }) {
           <strong>{formatarMoeda(resumo.faturamento)}</strong>
           <small>{resumo.lojas} loja(s) atendida(s)</small>
         </div>
-        <div className={`card ${classePercentual(resumo.percentual_custo)}`}>
+        <div className={`card ${classePercentual(resumo.percentual_custo, regras)}`}>
           <span>Custo sobre faturamento</span>
           <strong>{formatarPercentual(resumo.percentual_custo)}</strong>
           <small>quanto do faturamento vai para o promotor</small>

@@ -65,3 +65,25 @@ def test_importacao_com_arquivo_errado(cliente):
         resposta = cliente.post("/api/importar/faturamento", files={"arquivo": ("p.xlsx", arquivo)})
     assert resposta.status_code == 400
     assert "faturamento" in resposta.json()["detail"]
+
+
+def test_regras_salvas_mudam_o_painel(cliente):
+    _entrar(cliente)
+    for tipo in ("promotores", "roteiro", "faturamento"):
+        with open(EXEMPLOS / f"{tipo}_exemplo.xlsx", "rb") as arquivo:
+            resposta = cliente.post(f"/api/importar/{tipo}", files={"arquivo": (f"{tipo}.xlsx", arquivo)})
+    assert any("sem regra" in a for a in resposta.json()["avisos"])  # a devolução do exemplo
+
+    dados = cliente.get("/api/regras").json()
+    assert {t["tipo"]: t["acao"] for t in dados["tipos_nf"]} == {"1-Venda": "soma", "2-Devolucao": "ignora"}
+    parametros = {"inicio": "2026-01", "fim": "2026-09"}
+    antes = cliente.get("/api/painel", params=parametros).json()["resumo"]["faturamento"]
+
+    regras = dados["regras"]
+    regras["tipos_nf"]["2 DEVOLUCAO"] = "subtrai"
+    assert cliente.put("/api/regras", json=regras).status_code == 200
+    depois = cliente.get("/api/painel", params=parametros).json()["resumo"]["faturamento"]
+    assert depois == antes - 500
+
+    regras["faixa_alerta"] = 99
+    assert cliente.put("/api/regras", json=regras).status_code == 400

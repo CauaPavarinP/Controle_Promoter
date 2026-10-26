@@ -6,6 +6,7 @@ import TabelaPromotores from './TabelaPromotores.jsx'
 import TabelaLojas from './TabelaLojas.jsx'
 import Importar from './Importar.jsx'
 import Avisos from './Avisos.jsx'
+import Regras from './Regras.jsx'
 
 const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', supervisor: '', promotor: '', uf: '', cidade: '' }
 
@@ -14,6 +15,7 @@ const ABAS = [
   { id: 'lojas', titulo: 'Lojas', subtitulo: 'Faturamento de cada loja atendida no período' },
   { id: 'avisos', titulo: 'Avisos dos dados', subtitulo: 'Problemas encontrados nas planilhas importadas' },
   { id: 'importar', titulo: 'Atualizar dados', subtitulo: 'Importe as planilhas para atualizar o sistema' },
+  { id: 'regras', titulo: 'Regras do cálculo', subtitulo: 'Defina como o sistema calcula custo e faturamento' },
 ]
 
 // Período padrão: janeiro do último ano com dados até o último mês importado.
@@ -37,6 +39,8 @@ export default function Painel({ usuario, aoSair }) {
   const [dados, setDados] = useState(null)
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
+  // Muda quando as regras são salvas, para o painel recalcular.
+  const [versaoRegras, setVersaoRegras] = useState(0)
 
   useEffect(() => {
     const aoMudarEndereco = () => setAba(abaDoEndereco())
@@ -80,7 +84,7 @@ export default function Painel({ usuario, aoSair }) {
     return () => {
       cancelado = true
     }
-  }, [filtros])
+  }, [filtros, versaoRegras])
 
   const alterarFiltro = (campo, valor) => setFiltros((atual) => ({ ...atual, [campo]: valor }))
 
@@ -141,9 +145,10 @@ export default function Painel({ usuario, aoSair }) {
 
         {aba === 'visao-geral' && temDados && dados && (
           <div className={carregando ? 'atualizando' : ''}>
-            <CardsResumo resumo={dados.resumo} />
+            <CardsResumo resumo={dados.resumo} regras={dados.regras} />
             <TabelaPromotores
               promotores={dados.promotores}
+              regras={dados.regras}
               selecionado={filtros.promotor}
               aoSelecionar={verLojasDoPromotor}
             />
@@ -152,7 +157,7 @@ export default function Painel({ usuario, aoSair }) {
 
         {aba === 'lojas' && temDados && dados && (
           <div className={carregando ? 'atualizando' : ''}>
-            <TabelaLojas lojas={dados.lojas} />
+            <TabelaLojas lojas={dados.lojas} regras={dados.regras} />
           </div>
         )}
 
@@ -161,6 +166,8 @@ export default function Painel({ usuario, aoSair }) {
         {aba === 'importar' && (
           <Importar importacoes={opcoes?.importacoes || {}} aoImportar={carregarOpcoes} />
         )}
+
+        {aba === 'regras' && <Regras aoSalvar={() => setVersaoRegras((v) => v + 1)} />}
       </main>
     </div>
   )

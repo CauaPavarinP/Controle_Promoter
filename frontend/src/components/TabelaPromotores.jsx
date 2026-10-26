@@ -1,6 +1,6 @@
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
 
-export default function TabelaPromotores({ promotores, selecionado, aoSelecionar }) {
+export default function TabelaPromotores({ promotores, regras, selecionado, aoSelecionar }) {
   return (
     <section className="bloco">
       <h2>Promotores</h2>
@@ -37,7 +37,7 @@ export default function TabelaPromotores({ promotores, selecionado, aoSelecionar
                 <td className="num">{formatarMoeda(p.custo_mensal)}</td>
                 <td className="num">{formatarMoeda(p.custo_periodo)}</td>
                 <td className="num">{formatarMoeda(p.faturamento)}</td>
-                <td className={`num ${classePercentual(p.percentual_custo)}`}>
+                <td className={`num ${classePercentual(p.percentual_custo, regras)}`}>
                   {formatarPercentual(p.percentual_custo)}
                 </td>
               </tr>

@@ -1,5 +1,6 @@
 """Acesso ao banco. As tabelas são pequenas (faturamento já vem agregado por mês),
 então lemos e gravamos tabelas inteiras com o pandas."""
+import json
 from datetime import datetime
 
 import pandas as pd
@@ -10,18 +11,37 @@ from .config import DATABASE_URL
 engine = create_engine(DATABASE_URL)
 
 COLUNAS = {
-    "faturamento": ["ano", "mes", "cnpj", "cod_cliente", "razao_social", "cidade", "uf", "valor", "notas"],
+    "faturamento": ["ano", "mes", "cnpj", "chave_tipo", "tipo_nf", "cod_cliente", "razao_social",
+                    "cidade", "uf", "valor", "notas"],
     "promotores": ["codigo", "nome", "admissao", "municipio", "supervisor",
                    "salario", "ajuda_custo", "transporte", "custo_mensal"],
     "roteiro": ["codigo_promotor", "colaborador", "cnpj", "loja", "cidade", "uf", "visitas_semana"],
     "importacoes": ["tipo", "arquivo", "data_hora", "linhas", "detalhe"],
+    "configuracoes": ["chave", "valor"],
 }
 
 
 def ler_tabela(nome: str) -> pd.DataFrame:
     if not inspect(engine).has_table(nome):
         return pd.DataFrame(columns=COLUNAS[nome])
-    return pd.read_sql_table(nome, engine)
+    df = pd.read_sql_table(nome, engine)
+    if nome == "faturamento" and "chave_tipo" not in df:
+        # Faturamento importado antes das regras configuráveis só tinha "1-Venda".
+        df["chave_tipo"], df["tipo_nf"] = "1 VENDA", "1-Venda"
+    return df
+
+
+def ler_configuracao(chave: str, padrao=None):
+    df = ler_tabela("configuracoes")
+    linha = df[df["chave"] == chave]
+    return padrao if linha.empty else json.loads(linha["valor"].iloc[0])
+
+
+def gravar_configuracao(chave: str, valor) -> None:
+    df = ler_tabela("configuracoes")
+    df = df[df["chave"] != chave]
+    df = pd.concat([df, pd.DataFrame([{"chave": chave, "valor": json.dumps(valor)}])], ignore_index=True)
+    substituir_tabela("configuracoes", df)
 
 
 def substituir_tabela(nome: str, df: pd.DataFrame) -> None:

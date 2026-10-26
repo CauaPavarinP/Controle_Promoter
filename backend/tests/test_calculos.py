@@ -1,13 +1,24 @@
 import pandas as pd
+import pytest
 
 from app.calculos import Filtros, calcular_painel, meses_de_custo
 from app.importacao import converter_numero, normalizar_cnpj
+from app.regras import REGRAS_PADRAO, validar_regras
+
+# Rede com matriz 11111111000100 e duas lojas com CNPJ próprio (filiais da mesma raiz).
+MATRIZ, FILIAL_A, FILIAL_B = "11111111000100", "11111111000200", "11111111000300"
+
+
+def _venda(ano, mes, cnpj, valor, notas=1, tipo="1-Venda"):
+    from app.importacao import normalizar_texto
+    return {"ano": ano, "mes": mes, "cnpj": cnpj, "chave_tipo": normalizar_texto(tipo), "tipo_nf": tipo,
+            "cod_cliente": "", "razao_social": "", "cidade": "", "uf": "", "valor": valor, "notas": notas}
 
 
 def _dados():
     promotores = pd.DataFrame([
         {"codigo": "1", "nome": "Ana", "admissao": "2025-01-10", "municipio": "TIJUCAS - SC",
-         "supervisor": "Vanessa", "salario": 0, "ajuda_custo": 0, "transporte": 0, "custo_mensal": 1000.0},
+         "supervisor": "Vanessa", "salario": 800.0, "ajuda_custo": 0, "transporte": 0, "custo_mensal": 1000.0},
         {"codigo": "2", "nome": "Bruno", "admissao": "2026-03-15", "municipio": "CURITIBA - PR",
          "supervisor": "Lionis", "salario": 0, "ajuda_custo": 0, "transporte": 0, "custo_mensal": 2000.0},
     ])
@@ -15,21 +26,18 @@ def _dados():
         {"codigo_promotor": "", "colaborador": "ANA", "cnpj": "111", "loja": "REDE - A",
          "cidade": "TIJUCAS", "uf": "SC", "visitas_semana": 3},
         {"codigo_promotor": "", "colaborador": "ANA", "cnpj": "111", "loja": "REDE - B",
-         "cidade": "TIJUCAS", "uf": "SC", "visitas_semana": 2},
+         "cidade": "TIJUCAS", "uf": "SC", "visitas_semana": 1},
         {"codigo_promotor": "1", "colaborador": "", "cnpj": "222", "loja": "SEM COMPRA",
          "cidade": "PORTO BELO", "uf": "SC", "visitas_semana": None},
         {"codigo_promotor": "2", "colaborador": "", "cnpj": "333", "loja": "OUTRA",
          "cidade": "CURITIBA", "uf": "PR", "visitas_semana": 1},
     ])
     faturamento = pd.DataFrame([
-        {"ano": 2026, "mes": 1, "cnpj": "111", "cod_cliente": "", "razao_social": "", "cidade": "", "uf": "",
-         "valor": 10000.0, "notas": 2},
-        {"ano": 2026, "mes": 4, "cnpj": "111", "cod_cliente": "", "razao_social": "", "cidade": "", "uf": "",
-         "valor": 5000.0, "notas": 1},
-        {"ano": 2026, "mes": 2, "cnpj": "333", "cod_cliente": "", "razao_social": "", "cidade": "", "uf": "",
-         "valor": 8000.0, "notas": 1},
-        {"ano": 2025, "mes": 1, "cnpj": "111", "cod_cliente": "", "razao_social": "", "cidade": "", "uf": "",
-         "valor": 99999.0, "notas": 9},
+        _venda(2026, 1, "111", 10000.0, 2),
+        _venda(2026, 4, "111", 5000.0),
+        _venda(2026, 2, "333", 8000.0),
+        _venda(2025, 1, "111", 99999.0, 9),
+        _venda(2026, 4, "111", 2000.0, tipo="Devolucao"),
     ])
     return faturamento, promotores, roteiro
 
@@ -46,7 +54,15 @@ def test_acumulado_conta_cnpj_compartilhado_uma_vez():
     assert painel["resumo"]["faturamento"] == 15000.0
     assert painel["resumo"]["cnpjs_compartilhados"] == 1
     lojas_rede = [l for l in painel["lojas"] if l["cnpj"] == "111"]
-    assert all(l["faturamento"] == 15000.0 and l["lojas_mesmo_cnpj"] == 2 for l in lojas_rede)
+    assert all(l["faturamento"] == 15000.0 and l["compartilhado"] for l in lojas_rede)
+    assert all(l["percentual_custo"] is None for l in lojas_rede)  # % não faz sentido com valor da rede
+
+
+def test_devolucao_descontada_quando_configurado():
+    fat, prom, rot = _dados()
+    regras = {"tipos_nf": {"1 VENDA": "soma", "DEVOLUCAO": "subtrai"}}
+    painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-06", supervisor="Vanessa"), regras)
+    assert painel["resumo"]["faturamento"] == 13000.0
 
 
 def test_mes_unico_e_outro_ano_nao_entram():
@@ -62,11 +78,67 @@ def test_custo_comeca_na_admissao():
     assert meses_de_custo("", 2026 * 12, 2026 * 12 + 8) == 9
 
 
+def test_encargos_e_custo_extra():
+    fat, prom, rot = _dados()
+    regras = {"encargos_percentual": 50, "custo_extra_mensal": 100}
+    painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-01", promotor="1"), regras)
+    assert painel["promotores"][0]["custo_mensal"] == 1000 + 400 + 100
+
+
+def test_rateio_do_custo_por_loja():
+    fat, prom, rot = _dados()
+    filtros = Filtros("2026-01", "2026-01", promotor="1")
+    igual = calcular_painel(fat, prom, rot, filtros)
+    assert sorted(l["custo_periodo"] for l in igual["lojas"]) == [333.33, 333.33, 333.33]
+    # Por visitas só vale quando todas as lojas do promotor têm visitas; aqui falta uma → igual.
+    sem_visita = calcular_painel(fat, prom, rot, filtros, {"rateio_custo": "visitas"})
+    assert sorted(l["custo_periodo"] for l in sem_visita["lojas"]) == [333.33, 333.33, 333.33]
+    rot.loc[rot["loja"] == "SEM COMPRA", "visitas_semana"] = 1
+    por_visita = calcular_painel(fat, prom, rot, filtros, {"rateio_custo": "visitas", "semanas_por_mes": 4})
+    loja_a = next(l for l in por_visita["lojas"] if l["loja"] == "REDE - A")
+    assert loja_a["custo_periodo"] == 600.0                 # 3 das 5 visitas
+    assert loja_a["custo_por_visita"] == 50.0               # 600 / (3 × 4)
+
+
+def test_modos_de_rede_pela_raiz_do_cnpj():
+    prom = _dados()[1]
+    rot = pd.DataFrame([
+        {"codigo_promotor": "1", "colaborador": "", "cnpj": FILIAL_A, "loja": "REDE - A",
+         "cidade": "X", "uf": "SC", "visitas_semana": None},
+        {"codigo_promotor": "1", "colaborador": "", "cnpj": FILIAL_B, "loja": "REDE - B",
+         "cidade": "X", "uf": "SC", "visitas_semana": None},
+    ])
+    fat = pd.DataFrame([_venda(2026, 1, MATRIZ, 9000.0)])  # a matriz comprou, não as filiais
+    filtros = Filtros("2026-01", "2026-01")
+
+    exato = calcular_painel(fat, prom, rot, filtros, {"modo_rede": "cnpj"})
+    assert exato["resumo"]["faturamento"] == 0 and exato["resumo"]["lojas_sem_compra"] == 2
+
+    total = calcular_painel(fat, prom, rot, filtros, {"modo_rede": "rede_total"})
+    assert total["resumo"]["faturamento"] == 9000.0
+    assert [l["faturamento"] for l in total["lojas"]] == [9000.0, 9000.0]
+
+    dividido = calcular_painel(fat, prom, rot, filtros, {"modo_rede": "rede_dividido"})
+    assert dividido["resumo"]["faturamento"] == 9000.0
+    assert [l["faturamento"] for l in dividido["lojas"]] == [4500.0, 4500.0]
+    assert all(l["percentual_custo"] is not None for l in dividido["lojas"])
+
+
 def test_filtro_por_uf_mostra_so_promotores_do_local():
     fat, prom, rot = _dados()
     painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-09", uf="PR"))
     assert [p["nome"] for p in painel["promotores"]] == ["Bruno"]
     assert painel["promotores"][0]["custo_periodo"] == 14000.0  # mar a set = 7 meses
+
+
+def test_validacao_das_regras():
+    assert validar_regras({}) == REGRAS_PADRAO
+    with pytest.raises(ValueError):
+        validar_regras({"faixa_alerta": 40, "faixa_critico": 30})
+    with pytest.raises(ValueError):
+        validar_regras({"modo_rede": "outro"})
+    with pytest.raises(ValueError):
+        validar_regras({"tipos_nf": {"1 VENDA": "dobra"}})
 
 
 def test_conversoes():

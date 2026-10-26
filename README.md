@@ -10,14 +10,17 @@ Pedido do Maurício (Comercial • 101 do Brasil), a validar com o Rayan.
 - **Filtros únicos** para custo e faturamento: período (acumulado ou um mês), supervisor, promotor, UF e cidade.
 - **Resumo:** custo dos promotores no período, faturamento das lojas, % do custo sobre o faturamento e lojas sem compra.
 - **Tabela de promotores:** lojas, visitas/semana, custo, faturamento e % de custo. Clicar num promotor filtra as lojas dele.
-- **Tabela de lojas:** faturamento no período, meses com compra e quantidade de notas.
+- **Tabela de lojas:** faturamento no período, meses com compra, custo da loja, % de custo e custo por visita.
+- **Avisos dos dados:** problemas encontrados nas planilhas (nomes que não batem, CNPJ faltando…).
 - **Atualização dos dados** por upload das planilhas, sem mexer no código.
+- **Regras do cálculo** ajustadas pelo próprio usuário na tela, sem mexer no código.
 
 ## Estrutura
 
 ```
 backend/            API em Python (FastAPI + pandas)
-  app/config.py       variáveis de ambiente e regras provisórias
+  app/config.py       variáveis de ambiente
+  app/regras.py       regras do cálculo (padrões e validação)
   app/importacao.py   leitura das planilhas (Excel/CSV)
   app/calculos.py     cálculos do painel
   app/db.py           banco (SQLite local / Postgres no Render)
@@ -42,26 +45,34 @@ frontend/           tela em React (Vite)
 - Dá para enviar o arquivo inteiro (com todas as abas): cada importação procura a aba certa.
 - **Faturamento:** os meses do arquivo substituem os meses iguais já importados; os outros meses ficam.
   Promotores e roteiro substituem a lista inteira.
-- O sistema guarda o faturamento **agregado por mês e CNPJ**, não os itens de nota.
+- O sistema guarda o faturamento **agregado por mês, CNPJ e tipo de nota**, não os itens de nota.
 
-## Regras de cálculo (PROVISÓRIAS — confirmar com Maurício/Rayan)
+## Regras do cálculo (ajustáveis na aba "Regras do cálculo")
 
-1. **Faturamento** = soma de `VLR TOT` das notas do tipo "1-Venda". Devoluções e outros tipos ficam de fora
-   (`TIPOS_NF_CONSIDERADOS` em `app/config.py`).
-2. **Custo do promotor no período** = custo mensal (TOTAL) × meses do período a partir do mês de admissão.
-   Usa o custo atual; não há histórico de salário.
-3. **Lojas de rede com o mesmo CNPJ:** o ERP fatura pelo CNPJ que comprou (muitas vezes a matriz).
-   Cada loja mostra o valor do CNPJ inteiro, com a etiqueta "CNPJ da rede", e os totais contam cada CNPJ uma vez.
-4. **Loja com mais de um promotor:** o faturamento conta inteiro para cada promotor.
-5. **Cores do % de custo:** verde abaixo de 15%, amarelo de 15% a 30%, vermelho acima de 30%
-   (`FAIXAS_PERCENTUAL` em `frontend/src/formato.js`).
+O usuário escolhe cada regra na tela; elas ficam gravadas no banco (tabela `configuracoes`).
+Os valores padrão estão em `REGRAS_PADRAO` (`app/regras.py`).
+
+| Regra | Opções | Padrão |
+|---|---|---|
+| **Tipos de nota** | cada tipo soma, desconta ou fica de fora do faturamento | só "1-Venda" soma |
+| **Lojas de rede** | CNPJ exato da loja · rede inteira (raiz do CNPJ) em cada loja · rede dividida igualmente entre as lojas | CNPJ exato |
+| **Custo do promotor** | + encargos (% do salário) + custo extra fixo por mês | 0% e R$ 0 |
+| **Divisão do custo entre lojas** | igual · proporcional às visitas por semana | igual |
+| **Semanas por mês** | usado no custo por visita | 4,33 |
+| **Faixas de cor do % de custo** | amarelo a partir de X% · vermelho a partir de Y% | 15% e 30% |
+
+Regras fixas:
+- O custo conta a partir do mês de admissão e usa o custo atual (ainda não há histórico de salário).
+- Quando várias lojas mostram o mesmo valor (CNPJ ou rede inteira), os totais contam esse valor uma vez só,
+  e o % de custo da loja não é calculado.
+- Loja com mais de um promotor: o faturamento conta inteiro para cada promotor.
+- Tipos de nota novos ficam de fora até o usuário escolher o que fazer com eles.
 
 ## Pendências com o Maurício / Rayan
 
 - Cada loja de rede tem código de cliente próprio no ERP, ou tudo é faturado na matriz?
 - Existe planilha de roteiro com a frequência de visitas por loja?
-- Bonificação e devolução entram no faturamento?
-- O custo mensal (salário + ajuda de custo + transporte) está completo?
+- Quais valores usar nas Regras do cálculo (o próprio Maurício pode ajustar na tela).
 - Quem vai usar o sistema? Cada supervisor vê só a própria equipe?
 
 ## Rodar no computador (desenvolvimento)

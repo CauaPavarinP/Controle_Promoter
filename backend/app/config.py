@@ -40,10 +40,5 @@ SESSAO_HORAS = int(os.getenv("SESSAO_HORAS", "12"))
 # Pasta do front (React) já compilado com "npm run build".
 FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
 
-# ---------------------------------------------------------------------------
-# Regras de negócio PROVISÓRIAS — confirmar com Maurício/Rayan.
-# ---------------------------------------------------------------------------
-
-# Tipos de nota que contam como faturamento (comparados sem acento/maiúsculas).
-# Na exportação do ERP aparece "1-Venda".
-TIPOS_NF_CONSIDERADOS = {"1 VENDA"}
+# As regras de negócio (tipos de nota, redes, rateio, faixas…) ficam em app/regras.py
+# e são ajustadas pelo usuário na aba "Regras do cálculo".

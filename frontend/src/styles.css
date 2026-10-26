@@ -113,7 +113,8 @@ input, select {
 .marcar { display: flex; gap: 6px; align-items: center; font-size: 14px; }
 .tabela-rolagem { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { padding: 8px 10px; border-bottom: 1px solid var(--borda); text-align: left; white-space: nowrap; }
+th, td { padding: 8px; border-bottom: 1px solid var(--borda); text-align: left; white-space: nowrap; }
+td.quebra { white-space: normal; min-width: 120px; }
 th { background: var(--primaria-clara); color: var(--primaria); font-weight: 600; position: sticky; top: 0; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .vazio { text-align: center; color: var(--texto-suave); padding: 20px; }
@@ -158,3 +159,33 @@ td.pct-critico, .texto-critico { color: var(--critico); font-weight: 600; }
   .filtros > * { flex: 1 1 100%; }
   .limpar { margin-left: 0; }
 }
+
+/* Legenda de cores (aba Lojas) */
+.legenda { display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0 4px; font-size: 13px; color: var(--texto-suave); }
+.legenda span { display: flex; align-items: center; gap: 6px; }
+.legenda i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.cor-sem-compra { background: var(--critico-fundo); border: 1px solid #f3b8b3; }
+.cor-ok { background: var(--ok); }
+.cor-alerta { background: #d99a00; }
+.cor-critico { background: var(--critico); }
+
+/* Regras do cálculo */
+.regras .bloco h2 { font-size: 18px; margin-bottom: 4px; }
+.opcoes { display: grid; gap: 8px; margin-top: 8px; }
+.opcao {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--borda); border-radius: 8px;
+}
+.opcao.escolhida { border-color: var(--primaria); background: var(--primaria-clara); }
+.opcao input { margin-top: 3px; }
+.opcao p { margin: 2px 0 0; font-size: 13px; color: var(--texto-suave); }
+.campos-linha { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
+.campos-linha .filtro { max-width: 320px; }
+.campo-numero { display: flex; align-items: center; gap: 6px; }
+.campo-numero input { width: 140px; }
+.barra-salvar {
+  position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 12px;
+  background: var(--superficie); border: 1px solid var(--borda); border-radius: 10px; padding: 12px 14px;
+}
+.texto-ok { color: var(--ok); font-size: 14px; }
+.regras { padding-bottom: 8px; }
