@@ -114,3 +114,29 @@ def test_exportar_excel_formatado(cliente):
     assert aba["A7"].font.bold and aba.freeze_panes == "A5"
     cliente.post("/api/logout")
     assert cliente.post("/api/exportar", json=dados).status_code == 401
+
+
+def test_colaboradores_nao_encontrados(cliente, tmp_path):
+    entrar(cliente)
+    importar_cadastros(cliente, "promotores")
+    arquivo = tmp_path / "roteiro.csv"
+    arquivo.write_text("Colaborador;CPF/CNPJ;Razão Social;Cidade;UF\n"
+                       "ANA TESTES;11.222.333/0001-81;LOJA X;TIJUCAS;SC\n"      # erro de digitação de "Ana Teste"
+                       "ANA TESTES;11.444.777/0001-61;LOJA Y;TIJUCAS;SC\n"
+                       "JOAO NINGUEM;11.444.777/0001-61;LOJA Z;ITAJAI;SC\n", encoding="utf-8")
+    with open(arquivo, "rb") as conteudo:
+        cliente.post("/api/importacoes/roteiro", files={"arquivo": ("roteiro.csv", conteudo)})
+    dados = cliente.get("/api/colaboradores-pendentes").json()
+    por_nome = {c["colaborador"]: c for c in dados["colaboradores"]}
+    assert por_nome["ANA TESTES"]["quantidade"] == 2 and por_nome["ANA TESTES"]["ufs"] == ["SC"]
+    assert por_nome["ANA TESTES"]["sugestao"]["nome"] == "Ana Teste"
+    assert por_nome["JOAO NINGUEM"]["sugestao"] is None
+    assert any(p["nome"] == "Ana Teste" for p in dados["promotores_sem_loja"])
+
+    resposta = cliente.post("/api/pendencias/colaborador", json={
+        "colaborador": "ANA TESTES", "promotor_id": por_nome["ANA TESTES"]["sugestao"]["id"], "data_inicio": "2026-01-01"})
+    assert resposta.json() == {"vinculos_criados": 2}
+    assert cliente.delete("/api/colaboradores-pendentes", params={"colaborador": "JOAO NINGUEM"}).json() == {"descartadas": 1}
+    dados = cliente.get("/api/colaboradores-pendentes").json()
+    assert dados["colaboradores"] == []
+    assert not any(p["nome"] == "Ana Teste" for p in dados["promotores_sem_loja"])

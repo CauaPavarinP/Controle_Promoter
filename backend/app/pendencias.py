@@ -1,5 +1,6 @@
 """Pendências / qualidade dos dados e conferência com a planilha (documento, seções 6.1 e 7.8)."""
 from datetime import date
+from difflib import SequenceMatcher
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,7 @@ from .cadastros import documento_valido, vigente_em
 from .calculos import aplicar_tipos_de_nota, indice_mes
 from .carga import obter_pdv
 from .faturamento import codigos_por_cnpj, faturamento_mensal
+from .importacao import normalizar_texto
 from .modelos import FaturamentoItem, Pdv, Promotor, Roteiro, RoteiroPendente
 from .regras import ler_regras
 
@@ -190,6 +192,58 @@ def resolver_colaborador(dados: ResolverColaborador, sessao: Session = Depends(d
         sessao.delete(item)
     sessao.commit()
     return {"vinculos_criados": criados}
+
+
+def _sugerir_promotor(nome: str, promotores: list) -> dict | None:
+    """Promotor com o nome mais parecido (erro de digitação, acento, nome do meio a mais ou a menos)."""
+    alvo = normalizar_texto(nome)
+    palavras = set(alvo.split())
+    melhor, nota_melhor = None, 0.0
+    for p in promotores:
+        candidato = normalizar_texto(p.nome)
+        nota = SequenceMatcher(None, alvo, candidato).ratio()
+        # Mesmo primeiro nome e algum sobrenome em comum também conta ("Ana Silva" x "Ana Maria Silva").
+        comuns = palavras & set(candidato.split())
+        if alvo.split()[:1] == candidato.split()[:1] and len(comuns) >= 2:
+            nota = max(nota, 0.85)
+        if nota > nota_melhor:
+            melhor, nota_melhor = p, nota
+    if melhor is None or nota_melhor < 0.75:
+        return None
+    return {"id": melhor.id, "nome": melhor.nome, "codigo": melhor.codigo}
+
+
+@rotas.get("/colaboradores-pendentes")
+def colaboradores_pendentes_da_importacao(sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
+    """Nomes da coluna "Colaborador" das abas por UF que não bateram com nenhum promotor, com as lojas de
+    cada um, e os promotores ativos que ficaram sem nenhuma loja (o nome certo costuma estar entre eles)."""
+    grupos = {}
+    for item in sessao.scalars(select(RoteiroPendente).order_by(RoteiroPendente.colaborador, RoteiroPendente.loja)):
+        grupo = grupos.setdefault(item.colaborador, {"colaborador": item.colaborador, "lojas": [], "ufs": set()})
+        grupo["lojas"].append({"loja": item.loja, "cidade": item.cidade, "uf": item.uf})
+        if item.uf:
+            grupo["ufs"].add(item.uf)
+    ativos = sessao.scalars(select(Promotor).where(Promotor.ativo.is_(True))
+                            .options(selectinload(Promotor.roteiros))).all()
+    hoje = date.today()
+    sem_loja = [{"id": p.id, "nome": p.nome, "codigo": p.codigo, "uf": p.uf}
+                for p in ativos if not any(vigente_em(r, hoje) or r.data_fim is None for r in p.roteiros)]
+    colaboradores = [{**g, "ufs": sorted(g["ufs"]), "quantidade": len(g["lojas"]),
+                      "sugestao": _sugerir_promotor(g["colaborador"], ativos)} for g in grupos.values()]
+    colaboradores.sort(key=lambda g: -g["quantidade"])
+    return {"colaboradores": colaboradores, "promotores_sem_loja": sorted(sem_loja, key=lambda p: p["nome"])}
+
+
+@rotas.delete("/colaboradores-pendentes")
+def descartar_colaborador(colaborador: str, sessao: Session = Depends(db.sessao_db), _=Depends(exigir_admin)):
+    """Descarta as lojas de um nome que não é promotor (ex.: célula vazia, #N/A). Reimportar traz de volta."""
+    pendentes = sessao.scalars(select(RoteiroPendente).where(RoteiroPendente.colaborador == colaborador)).all()
+    if not pendentes:
+        raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+    for item in pendentes:
+        sessao.delete(item)
+    sessao.commit()
+    return {"descartadas": len(pendentes)}
 
 
 # ---------------------------------------------------------------------------

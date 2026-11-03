@@ -152,6 +152,9 @@ export default function Painel({ usuario, aoSair }) {
               {abasPermitidas.filter((a) => a.grupo === grupo).map((a) => (
                 <button key={a.id} className={aba === a.id ? 'ativo' : ''} onClick={() => irPara(a.id)}>
                   {a.titulo}
+                  {a.id === 'lojas' && opcoes?.roteiro_sem_vinculo?.length > 0 && (
+                    <span className="contador" title="Colaboradores não encontrados">{opcoes.roteiro_sem_vinculo.length}</span>
+                  )}
                 </button>
               ))}
             </div>

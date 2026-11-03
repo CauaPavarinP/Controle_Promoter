@@ -360,3 +360,10 @@ table.arvore .seta { display: inline-block; width: 18px; color: var(--primaria);
 table.arvore tfoot td { font-weight: 700; border-top: 2px solid var(--borda); }
 .cards-4 { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 
+
+/* Colaboradores não encontrados (aba Lojas por UF) */
+details.colaboradores-pendentes { border-left: 5px solid var(--alerta, #b54708); }
+details.colaboradores-pendentes > summary { color: var(--alerta, #b54708); }
+.ligar-colaborador { flex-wrap: nowrap; }
+.ligar-colaborador select { max-width: 260px; }
+.sublinha { display: block; font-size: 12px; }

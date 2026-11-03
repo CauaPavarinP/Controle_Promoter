@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { http } from '../api.js'
 import { mascararDocumento, UFS } from '../formato.js'
+import ColaboradoresPendentes from './ColaboradoresPendentes.jsx'
 import GradeMensal from './GradeMensal.jsx'
 import { Envio, ResultadoCadastro } from './Importar.jsx'
 import { FormularioPdv } from './cadastros/Pdvs.jsx'
@@ -196,6 +197,8 @@ function ImportarAbas({ aoImportar }) {
 
 export default function LojasUf({ admin, uf, aoMudarUf, ufs, grade, aoAlterar, children }) {
   const [novaLoja, setNovaLoja] = useState(false)
+  // Muda depois de importar as abas, para o quadro de colaboradores não encontrados recarregar.
+  const [versaoPendentes, setVersaoPendentes] = useState(0)
   const { acoes, janelas, promotores, recarregar } = useAcoesDaLoja(aoAlterar)
   const outras = ufs.filter((u) => !UFS_DA_PLANILHA.includes(u))
 
@@ -210,7 +213,8 @@ export default function LojasUf({ admin, uf, aoMudarUf, ufs, grade, aoAlterar, c
           <button className="nova-loja" onClick={() => setNovaLoja(true)} disabled={!promotores}>+ Cadastrar loja</button>
         )}
       </nav>
-      {admin && <ImportarAbas aoImportar={recarregar} />}
+      {admin && <ImportarAbas aoImportar={() => { recarregar(); setVersaoPendentes((v) => v + 1) }} />}
+      <ColaboradoresPendentes key={versaoPendentes} admin={admin} aoAlterar={recarregar} />
       {children}
       {grade && <GradeMensal grade={grade} acoes={admin ? acoes : undefined} />}
       {admin && janelas}
