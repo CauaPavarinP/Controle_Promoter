@@ -10,11 +10,22 @@ export default function NaoCompensa({ lojas, promotores, regras, aoAbrirPromotor
   const [verTodasLojas, setVerTodasLojas] = useState(false)
   const [verTodosPromotores, setVerTodosPromotores] = useState(false)
 
-  // Lojas com visita, da que menos compra por visita para a que mais compra. Loja que divide o CNPJ
-  // com outra fica de fora: o faturamento dela é do CNPJ inteiro.
-  const lojasVisitadas = lojas
-    .filter((l) => l.visitas_semana > 0 && !l.compartilhado)
-    .sort((a, b) => (a.faturamento_por_visita ?? 0) - (b.faturamento_por_visita ?? 0))
+  // Loja que divide o CNPJ com outra fica de fora (o faturamento dela é do CNPJ inteiro), e loja sem CNPJ
+  // também (não dá para achar o faturamento).
+  const candidatas = lojas.filter((l) => l.cnpj && !l.compartilhado)
+  const semVisitas = candidatas.filter((l) => !(l.visitas_semana > 0)).length
+  // A planilha não tem visitas por semana: sem elas, a lista ordena pelo faturamento.
+  const [criterio, setCriterio] = useState(null)
+  const porVisita = (criterio ?? (semVisitas <= candidatas.length / 2 ? 'visita' : 'faturamento')) === 'visita'
+  const lojasOrdenadas = [...candidatas].sort((a, b) => {
+    if (porVisita) {
+      const comA = a.visitas_semana > 0
+      const comB = b.visitas_semana > 0
+      if (comA !== comB) return comA ? -1 : 1
+      if (comA) return (a.faturamento_por_visita ?? 0) - (b.faturamento_por_visita ?? 0)
+    }
+    return a.faturamento - b.faturamento
+  })
   // Promotor com custo e sem nenhuma compra nas lojas vem primeiro; depois, do maior % para o menor.
   const peso = (p) => p.percentual_custo ?? Number.MAX_VALUE
   const piorPromotores = promotores.filter((p) => p.custo_periodo > 0).sort((a, b) => peso(b) - peso(a))
@@ -24,28 +35,39 @@ export default function NaoCompensa({ lojas, promotores, regras, aoAbrirPromotor
       <h2>Onde o custo não compensa</h2>
       <div className="duas-colunas">
         <div>
-          <h3>Lojas que compram pouco para as visitas que recebem</h3>
-          <p className="dica">Ordenadas pelo faturamento por visita (o que a loja comprou ÷ visitas do promotor no período).</p>
+          <h3>{porVisita ? 'Lojas que compram pouco para as visitas que recebem' : 'Lojas que menos compram'}</h3>
+          <div className="alternar alternar-pequeno nao-imprimir">
+            <button className={porVisita ? 'ativo' : ''} onClick={() => setCriterio('visita')}>Por visita</button>
+            <button className={!porVisita ? 'ativo' : ''} onClick={() => setCriterio('faturamento')}>Por faturamento</button>
+          </div>
+          <p className="dica">
+            {porVisita
+              ? 'Ordenadas pelo faturamento por visita (o que a loja comprou ÷ visitas do promotor no período).'
+              : 'Ordenadas pelo que a loja comprou no período, da que menos comprou para a que mais comprou.'}
+            {semVisitas > 0 && (
+              <> {semVisitas} loja(s) sem visitas por semana informadas: preencha em Lojas por UF → Alterar… → Visitas por semana.</>
+            )}
+          </p>
           <Tabela
             chave="chave"
-            linhas={(verTodasLojas ? lojasVisitadas : lojasVisitadas.slice(0, QUANTIDADE))
+            linhas={(verTodasLojas ? lojasOrdenadas : lojasOrdenadas.slice(0, QUANTIDADE))
               .map((l) => ({ ...l, chave: `${l.codigo_promotor}-${l.cnpj}-${l.loja}` }))}
             porPagina={verTodasLojas ? 20 : QUANTIDADE}
             arquivo="lojas-que-compram-pouco"
-            vazio="Nenhuma loja com visitas por semana informadas."
+            vazio="Nenhuma loja com esses filtros."
             classeLinha={(l) => (l.faturamento <= 0 ? 'linha-sem-compra' : '')}
             colunas={[
               { campo: 'loja', titulo: 'Loja', quebra: true,
                 mostrar: (l) => <>{l.loja}<small className="dica sublinha">{l.cidade}{l.uf ? ` - ${l.uf}` : ''} · {l.promotor}</small></> },
-              { campo: 'visitas_semana', titulo: 'Visitas/sem.', num: true },
+              { campo: 'visitas_semana', titulo: 'Visitas/sem.', num: true, mostrar: (l) => l.visitas_semana ?? '—' },
               { campo: 'faturamento', titulo: 'Comprou', num: true, mostrar: (l) => formatarMoeda(l.faturamento) },
-              { campo: 'faturamento_por_visita', titulo: 'Por visita', num: true, ordenar: (l) => l.faturamento_por_visita ?? 0,
-                mostrar: (l) => <b>{formatarMoeda(l.faturamento_por_visita ?? 0)}</b> },
+              { campo: 'faturamento_por_visita', titulo: 'Por visita', num: true, ordenar: (l) => l.faturamento_por_visita ?? Infinity,
+                mostrar: (l) => (l.faturamento_por_visita == null ? '—' : <b>{formatarMoeda(l.faturamento_por_visita)}</b>) },
             ]}
           />
-          {lojasVisitadas.length > QUANTIDADE && (
+          {lojasOrdenadas.length > QUANTIDADE && (
             <button className="secundario" onClick={() => setVerTodasLojas((v) => !v)}>
-              {verTodasLojas ? 'Mostrar só as 10 primeiras' : `Ver todas (${lojasVisitadas.length})`}
+              {verTodasLojas ? 'Mostrar só as 10 primeiras' : `Ver todas (${lojasOrdenadas.length})`}
             </button>
           )}
         </div>

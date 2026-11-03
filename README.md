@@ -20,7 +20,12 @@ Versão simplificada (branch `versao-simplificada`), com 4 abas:
   cidade, PDV e atalhos de período em "Mais filtros". Os filtros escolhidos aparecem como etiquetas com ✕.
 - O **faturamento das lojas vem do ERP**: o sistema soma as notas do CNPJ de cada loja, mês a mês (como o
   SOMASE da planilha), mas **CNPJ que aparece em mais de uma loja conta uma vez só** nos totais.
-- Todas as tabelas ordenam por coluna e exportam para Excel; botão **Imprimir** no Resumo e em Lojas por UF.
+- Todas as tabelas ordenam por coluna e exportam para **Excel (.xlsx) formatado** (`app/exportar.py`): título, filtros
+  em uso, cabeçalho colorido e fixo, filtro nas colunas, R$ e % já formatados (zero aparece como "-"), linhas
+  alternadas e total em negrito. Botão **Imprimir** no Resumo e em Lojas por UF.
+- **Visitas por semana:** a planilha não tem essa informação. Enquanto não for preenchida (Lojas por UF → Alterar…
+  → Visitas por semana), toda loja do roteiro conta como visitada, a lista "Onde o custo não compensa" ordena pelo
+  faturamento e o custo do promotor é dividido em partes iguais entre as lojas.
 - **Usuários** com perfis (administrador, consulta, supervisor), senha criptografada e bloqueio após 5 tentativas.
 - Só o administrador importa e cadastra; os outros perfis consultam.
 

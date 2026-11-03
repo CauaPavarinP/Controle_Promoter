@@ -18,6 +18,7 @@ def recarregar_app():
     import app.carga
     import app.config
     import app.dados
+    import app.exportar
     import app.db
     import app.faturamento
     import app.main
@@ -25,7 +26,7 @@ def recarregar_app():
     import app.regras
     import app.usuarios
     for modulo in (app.config, app.db, app.regras, app.faturamento, app.carga, app.dados, app.autenticacao,
-                   app.usuarios, app.cadastros, app.pendencias, app.main):
+                   app.usuarios, app.cadastros, app.pendencias, app.exportar, app.main):
         importlib.reload(modulo)
     return app
 

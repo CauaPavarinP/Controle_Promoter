@@ -48,27 +48,64 @@ export function Situacao({ ativo, textoAtivo = 'Ativo', textoInativo = 'Inativo'
   return <span className={`situacao ${ativo ? 'ativa' : 'inativa'}`}>{ativo ? textoAtivo : textoInativo}</span>
 }
 
-// Texto seguro para CSV: aspas escapadas e sem virar fórmula no Excel (=, +, -, @).
-function celulaCsv(valor) {
-  let texto = valor == null ? '' : String(valor)
-  if (/^[=+\-@]/.test(texto)) texto = `'${texto}`
-  return `"${texto.replace(/"/g, '""')}"`
+// Exportação para Excel (.xlsx) formatado, montado no back-end (app/exportar.py).
+// O subtítulo (filtros em uso) é definido pela tela que está aberta.
+let subtituloExportacao = ''
+export function definirSubtituloExportacao(texto) {
+  subtituloExportacao = texto || ''
 }
 
-export function exportarCsv(nomeArquivo, colunas, linhas) {
-  const cabecalho = colunas.map((c) => celulaCsv(c.titulo)).join(';')
-  const corpo = linhas.map((l) => colunas.map((c) => celulaCsv(c.exportar ? c.exportar(l) : l[c.campo])).join(';'))
-  const conteudo = '﻿' + [cabecalho, ...corpo].join('\r\n')
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(new Blob([conteudo], { type: 'text/csv;charset=utf-8' }))
-  link.download = `${nomeArquivo}.csv`
-  link.click()
-  URL.revokeObjectURL(link.href)
+const CAMPOS_EM_REAIS = /custo|faturamento|valor|total|salario|ajuda|vale|transporte|outros|comprou|preco|venda|considerado/
+
+/** moeda, percentual, numero ou texto: pelo "formato" da coluna ou pelo nome do campo. */
+function formatoDaColuna(coluna) {
+  if (coluna.formato) return coluna.formato
+  if (/percentual/.test(coluna.campo)) return 'percentual'
+  if (/^\d{4}-\d{2}$/.test(coluna.campo) || CAMPOS_EM_REAIS.test(coluna.campo)) return 'moeda'
+  return coluna.num ? 'numero' : 'texto'
+}
+
+const tituloDoArquivo = (nome) => {
+  const texto = nome.replace(/[-_]+/g, ' ').trim()
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
+}
+
+/** Gera o .xlsx: linhas na ordem da tela e as linhas de total (rodapé) em negrito no fim. */
+export async function exportarExcel(nomeArquivo, colunas, linhas, totais = []) {
+  const valores = (l) => colunas.map((c) => {
+    const v = c.exportar ? c.exportar(l) : l[c.campo]
+    return v === undefined ? null : v
+  })
+  try {
+    const resposta = await fetch('/api/exportar', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        titulo: tituloDoArquivo(nomeArquivo),
+        subtitulo: subtituloExportacao,
+        colunas: colunas.map((c) => ({ titulo: c.titulo, formato: formatoDaColuna(c) })),
+        linhas: linhas.map(valores),
+        totais: totais.map(valores),
+      }),
+    })
+    if (!resposta.ok) {
+      const erro = await resposta.json().catch(() => ({}))
+      throw new Error(typeof erro.detail === 'string' ? erro.detail : 'Não foi possível gerar o Excel.')
+    }
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(await resposta.blob())
+    link.download = `${nomeArquivo}.xlsx`
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000)
+  } catch (e) {
+    window.alert(e.message)
+  }
 }
 
 /**
  * colunas: [{ campo, titulo, num, mostrar(linha), ordenar(linha), exportar(linha) }]
- * Clicar no título ordena; a lista é paginada e pode ser exportada para Excel (CSV).
+ * Clicar no título ordena; a lista é paginada e pode ser exportada para Excel.
  */
 export function Tabela({
   colunas, linhas, chave = 'id', aoClicar, vazio = 'Nada encontrado.', arquivo, porPagina = 50, rodape = [],
@@ -160,7 +197,7 @@ export function Tabela({
           </div>
         )}
         {arquivo && (
-          <button className="secundario" onClick={() => exportarCsv(arquivo, colunas.filter((c) => !c.semExportar), [...ordenadas, ...rodape])}>
+          <button className="secundario" onClick={() => exportarExcel(arquivo, colunas.filter((c) => !c.semExportar), ordenadas, rodape)}>
             Exportar Excel
           </button>
         )}

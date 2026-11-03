@@ -4,7 +4,7 @@ import { http } from '../api.js'
 import { formatarCnpj, formatarMes, formatarMoeda } from '../formato.js'
 import { DetalheNotas } from './GradeMensal.jsx'
 import { Envio, Historico, PreviaFaturamento } from './Importar.jsx'
-import { Tabela } from './ui.jsx'
+import { definirSubtituloExportacao, Tabela } from './ui.jsx'
 
 function Importacao({ aoImportar }) {
   const [previa, setPrevia] = useState(null)
@@ -93,6 +93,7 @@ export default function Faturamento({ admin, meses, aoImportar }) {
 
   useEffect(() => {
     if (!periodo.inicio) return
+    definirSubtituloExportacao(`Período: ${formatarMes(periodo.inicio)} a ${formatarMes(periodo.fim)}`)
     let cancelado = false
     setErro('')
     setCarregando(true)

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { http } from '../api.js'
 import { formatarCnpj, formatarMoeda, formatarMes } from '../formato.js'
-import { exportarCsv, Tabela, useLista } from './ui.jsx'
+import { exportarExcel, Tabela, useLista } from './ui.jsx'
 
 const NOMES_TIPO = { faturamento: 'Faturamento', promotores: 'Promotores', roteiro: 'Roteiro', planilha: 'Planilha completa' }
 
@@ -145,7 +145,7 @@ export function Historico({ versao, aoDesfazer, tipos }) {
 
   async function baixarErros(item) {
     const erros = await http.get(`/api/importacoes/${item.id}/erros`)
-    exportarCsv(`erros-${item.arquivo}`, [{ campo: 'linha', titulo: 'Linha no Excel' }, { campo: 'motivo', titulo: 'Motivo' }], erros)
+    exportarExcel(`erros-${item.arquivo}`, [{ campo: 'linha', titulo: 'Linha no Excel' }, { campo: 'motivo', titulo: 'Motivo' }], erros)
   }
 
   if (!lista) return <p>Carregando…</p>

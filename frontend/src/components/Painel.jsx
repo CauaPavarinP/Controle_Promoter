@@ -9,6 +9,7 @@ import Faturamento from './Faturamento.jsx'
 import LojasUf from './LojasUf.jsx'
 import PromotoresAba from './PromotoresAba.jsx'
 import Usuarios from './cadastros/Usuarios.jsx'
+import { definirSubtituloExportacao } from './ui.jsx'
 import MeuPerfil from './cadastros/MeuPerfil.jsx'
 
 const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', supervisor: '', promotor: '', uf: '', cidade: '', pdv: '' }
@@ -120,6 +121,11 @@ export default function Painel({ usuario, aoSair }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtros, versaoDados])
+
+  // Os filtros em uso vão no subtítulo do Excel exportado.
+  useEffect(() => {
+    definirSubtituloExportacao(ABAS_COM_FILTRO.includes(aba) && filtros.inicio ? descreverFiltros(filtros, opcoes) : '')
+  }, [aba, filtros, opcoes])
 
   const alterarFiltro = (campo, valor) => setFiltros((atual) => ({ ...atual, [campo]: valor }))
 

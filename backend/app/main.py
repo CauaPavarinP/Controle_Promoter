@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import cadastros, db, faturamento, pendencias, usuarios
+from . import cadastros, db, exportar, faturamento, pendencias, usuarios
 from .autenticacao import exigir_admin, usuario_logado
 from .calculos import Filtros, calcular_painel, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
 from .carga import aplicar_promotores, aplicar_roteiro, preparar_banco
@@ -38,6 +38,7 @@ app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=SESSAO_HORA
 app.include_router(usuarios.rotas)
 app.include_router(cadastros.rotas)
 app.include_router(pendencias.rotas)
+app.include_router(exportar.rotas)
 
 
 @app.get("/health")

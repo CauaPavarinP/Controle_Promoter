@@ -2,7 +2,7 @@
 // Junta os blocos Monitoramento, Custo e Faturamento PDV da aba RESUMO da planilha.
 import { useState } from 'react'
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
-import { exportarCsv, useImprimindo } from './ui.jsx'
+import { exportarExcel, useImprimindo } from './ui.jsx'
 
 const COLUNAS = [
   { campo: 'nome', titulo: 'UF / Supervisor / Promotor' },
@@ -69,11 +69,15 @@ export default function ResumoArvore({ porUf, promotores, resumo, regras, aoAbri
   }
 
   function exportar() {
+    // No Excel o nível aparece pelo recuo do nome.
     const todas = arvore.flatMap((u) => [
       { ...u, tipo: 'UF' },
-      ...u.filhos.flatMap((s) => [{ ...s, tipo: 'Supervisor' }, ...s.filhos.map((p) => ({ ...p, tipo: 'Promotor' }))]),
+      ...u.filhos.flatMap((s) => [
+        { ...s, tipo: 'Supervisor', nome: `    ${s.nome}` },
+        ...s.filhos.map((p) => ({ ...p, tipo: 'Promotor', nome: `        ${p.nome}` })),
+      ]),
     ])
-    exportarCsv('resumo', [{ campo: 'tipo', titulo: 'Nível' }, ...COLUNAS], [...todas, { ...total, tipo: 'Total' }])
+    exportarExcel('resumo-custo-x-faturamento', [{ campo: 'tipo', titulo: 'Nível' }, ...COLUNAS], todas, [{ ...total, tipo: 'Total' }])
   }
 
   return (

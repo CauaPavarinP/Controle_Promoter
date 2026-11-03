@@ -28,7 +28,7 @@ def test_resumo_por_uf_e_supervisor(cliente):
         da_uf_p = [p for p in painel["promotores"] if p["uf"] == uf["uf"]]
         assert round(sum(p["custo_periodo"] for p in da_uf_p), 2) == uf["custo_periodo"]
     # Lojas que recebem visita e não compraram nada no período.
-    sem_compra = {(l["cnpj"], l["loja"]) for l in painel["lojas"] if l["faturamento"] <= 0 and (l["visitas_semana"] or 0) > 0}
+    sem_compra = {(l["cnpj"], l["loja"]) for l in painel["lojas"] if l["faturamento"] <= 0 and l["cnpj"]}
     assert painel["resumo"]["lojas_sem_compra"] == len(sem_compra)
 
 
@@ -76,3 +76,25 @@ def test_aba_pr_sem_estado_usa_o_nome_da_aba(cliente):
     assert resposta.status_code == 200, resposta.text
     pdv = next(p for p in cliente.get("/api/pdvs").json() if p["nome_fantasia"] == "Loja do PR")
     assert (pdv["cidade"], pdv["uf"]) == ("CURITIBA", "PR")
+
+
+def test_exportar_excel_formatado(cliente):
+    from openpyxl import load_workbook
+    entrar(cliente)
+    dados = {"titulo": "Lojas por UF", "subtitulo": "Período: jan/2026 a set/2026",
+             "colunas": [{"titulo": "Loja", "formato": "texto"}, {"titulo": "Faturamento", "formato": "moeda"},
+                         {"titulo": "% custo", "formato": "percentual"}],
+             "linhas": [["=HYPERLINK(\"x\")", 1500.5, 8.1], ["Loja B", None, None]],
+             "totais": [["Total", 1500.5, 8.1]]}
+    resposta = cliente.post("/api/exportar", json=dados)
+    assert resposta.status_code == 200, resposta.text
+    assert resposta.headers["content-type"].startswith("application/vnd.openxmlformats")
+    aba = load_workbook(io.BytesIO(resposta.content)).active
+    assert aba["A1"].value == "Lojas por UF"
+    assert [c.value for c in aba[4]] == ["Loja", "Faturamento", "% custo"]
+    assert aba["A5"].data_type == "s" and aba["A5"].value.startswith("=")  # texto, não fórmula
+    assert aba["B5"].value == 1500.5 and "R$" in aba["B5"].number_format
+    assert abs(aba["C5"].value - 0.081) < 1e-9 and aba["C5"].number_format.startswith("0.0%")
+    assert aba["A7"].font.bold and aba.freeze_panes == "A5"
+    cliente.post("/api/logout")
+    assert cliente.post("/api/exportar", json=dados).status_code == 401
