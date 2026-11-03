@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import cadastros, db, faturamento, pendencias, usuarios
 from .autenticacao import exigir_admin, usuario_logado
-from .calculos import Filtros, calcular_painel, opcoes_de_filtro, tipos_de_nota
+from .calculos import Filtros, calcular_painel, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
 from .carga import aplicar_promotores, aplicar_roteiro, preparar_banco
 from .config import FRONTEND_DIST, PRODUCAO, SECRET_KEY, SESSAO_HORAS
 from .dados import colaboradores_pendentes, tabelas_do_calculo
@@ -196,6 +196,23 @@ def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: 
         _erro("Escolha um período de até 5 anos.")
     promotores, custos, roteiro = tabelas_do_calculo(sessao)
     return calcular_painel(faturamento.faturamento_mensal(), promotores, roteiro, filtros, ler_regras(), custos)
+
+
+def _ano_mes(texto: str) -> tuple[int, int]:
+    try:
+        ano, mes = int(texto[:4]), int(texto[5:7])
+    except (ValueError, IndexError):
+        _erro("Mês inválido. Use AAAA-MM.")
+    if not 1 <= mes <= 12:
+        _erro("Mês inválido. Use AAAA-MM.")
+    return ano, mes
+
+
+@app.get("/api/faturamento")
+def faturamento_do_erp(inicio: str, fim: str, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
+    """Aba Faturamento: o que veio do ERP no período, por UF e por cliente."""
+    dados = faturamento.mensal_por_cliente(_ano_mes(inicio), _ano_mes(fim))
+    return resumo_faturamento(dados, ler_regras(), _cnpjs_no_roteiro(sessao))
 
 
 @app.get("/api/faturamento/itens")

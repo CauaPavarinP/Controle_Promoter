@@ -67,6 +67,7 @@ def aplicar_promotores(sessao: Session, df: pd.DataFrame) -> dict:
     for linha in df.itertuples():
         promotor = sessao.scalar(select(Promotor).where(Promotor.codigo == linha.codigo))
         municipio, uf = separar_municipio(linha.municipio)
+        uf = uf or str(getattr(linha, "uf", "") or "").strip().upper()[:2]
         dados = {"nome": linha.nome, "municipio": municipio, "uf": uf,
                  "data_admissao": _data(linha.admissao)}
         supervisor = obter_supervisor(sessao, linha.supervisor)

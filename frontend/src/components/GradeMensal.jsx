@@ -1,4 +1,4 @@
-// Faturamento mês a mês por loja (documento, seção 7.2: substitui as abas SC, SP, PR, MG, RS).
+// Faturamento mês a mês por loja (substitui as abas SC, SP, PR, MG, RS da planilha).
 import { useEffect, useState } from 'react'
 import { http } from '../api.js'
 import { formatarCnpj, formatarData, formatarMes, formatarMoeda } from '../formato.js'
@@ -7,7 +7,7 @@ import { Modal, Tabela } from './ui.jsx'
 const NOMES_ACAO = { soma: 'soma', subtrai: 'desconta', ignora: 'fora' }
 
 // Detalhe das NFs/itens daquele PDV naquele mês.
-function DetalheNotas({ linha, mes, aoFechar }) {
+export function DetalheNotas({ linha, mes, aoFechar }) {
   const [dados, setDados] = useState(null)
   const [erro, setErro] = useState('')
   useEffect(() => {
@@ -49,7 +49,7 @@ function DetalheNotas({ linha, mes, aoFechar }) {
   )
 }
 
-export default function GradeMensal({ grade }) {
+export default function GradeMensal({ grade, acoes }) {
   const [detalhe, setDetalhe] = useState(null)
 
   const colunasMeses = grade.meses.map((m) => ({
@@ -90,6 +90,7 @@ export default function GradeMensal({ grade }) {
             { campo: 'uf', titulo: 'UF' },
             ...colunasMeses,
             { campo: 'total', titulo: 'TOTAL', num: true, mostrar: (l) => <b>{formatarMoeda(l.total)}</b> },
+            ...(acoes ? [{ campo: 'acoes', titulo: '', semOrdem: true, semExportar: true, mostrar: (l) => (l.meses ? acoes(l) : null) }] : []),
           ]}
         />
       </div>

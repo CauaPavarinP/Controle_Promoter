@@ -186,6 +186,30 @@ def faturamento_mensal() -> pd.DataFrame:
     return df
 
 
+def mensal_por_cliente(inicio: tuple[int, int], fim: tuple[int, int]) -> pd.DataFrame:
+    """Faturamento do período somado por mês, CNPJ e tipo de nota, com razão social, cidade e UF do cliente."""
+    indice = FaturamentoItem.ano * 12 + FaturamentoItem.mes
+    consulta = (select(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf,
+                       FaturamentoItem.tipo_nf_chave, func.coalesce(FaturamentoItem.receita, ""),
+                       func.coalesce(func.sum(FaturamentoItem.total_venda), 0),
+                       func.coalesce(func.sum(FaturamentoItem.vlr_total), 0),
+                       func.count(FaturamentoItem.num_nf.distinct()),
+                       func.max(FaturamentoItem.razao_social), func.max(FaturamentoItem.cidade),
+                       func.max(FaturamentoItem.uf))
+                .where(indice >= inicio[0] * 12 + inicio[1], indice <= fim[0] * 12 + fim[1])
+                .group_by(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf,
+                          FaturamentoItem.tipo_nf_chave, func.coalesce(FaturamentoItem.receita, "")))
+    with db.engine.connect() as conexao:
+        linhas = conexao.execute(consulta).all()
+    df = pd.DataFrame(linhas, columns=["ano", "mes", "cnpj", "chave_tipo", "receita", "total_venda", "vlr_total",
+                                       "notas", "razao_social", "cidade", "uf"])
+    for coluna in ("total_venda", "vlr_total"):
+        df[coluna] = df[coluna].astype(float)
+    for coluna in ("razao_social", "cidade", "uf"):
+        df[coluna] = df[coluna].fillna("")
+    return df
+
+
 def dados_do_cliente(cnpj: str) -> dict:
     """Razão social, cidade, UF e códigos de cliente de um CNPJ no faturamento."""
     with db.engine.connect() as conexao:

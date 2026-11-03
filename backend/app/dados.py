@@ -20,7 +20,7 @@ def tabelas_do_calculo(sessao: Session) -> tuple[pd.DataFrame, pd.DataFrame, pd.
             "codigo": p.codigo, "nome": p.nome, "admissao": _texto_data(p.data_admissao),
             "desligamento": _texto_data(p.data_desligamento),
             "municipio": f"{p.municipio} - {p.uf}" if p.uf else p.municipio,
-            "supervisor": p.supervisor.nome if p.supervisor else "",
+            "uf": p.uf or "", "supervisor": p.supervisor.nome if p.supervisor else "",
             "salario": atual.salario if atual else 0.0,
             "ajuda_custo": atual.ajuda_custo if atual else 0.0,
             "transporte": atual.vale_transporte if atual else 0.0,
@@ -34,15 +34,15 @@ def tabelas_do_calculo(sessao: Session) -> tuple[pd.DataFrame, pd.DataFrame, pd.
         select(Roteiro, Promotor.codigo, Pdv).join(Promotor, Roteiro.promotor_id == Promotor.id)
         .join(Pdv, Roteiro.pdv_id == Pdv.id)).all()
     linhas_roteiro = [{
-        "codigo_promotor": codigo, "colaborador": "", "cnpj": pdv.cnpj_cpf, "loja": pdv.nome_fantasia,
+        "roteiro_id": r.id, "codigo_promotor": codigo, "colaborador": "", "cnpj": pdv.cnpj_cpf, "loja": pdv.nome_fantasia,
         "cidade": pdv.cidade, "uf": pdv.uf, "cod_cli": pdv.cod_cli_erp,
         "visitas_semana": r.visitas_por_semana,
         "data_inicio": _texto_data(r.data_inicio), "data_fim": _texto_data(r.data_fim),
     } for r, codigo, pdv in roteiros]
 
-    colunas_promotores = ["codigo", "nome", "admissao", "desligamento", "municipio", "supervisor",
+    colunas_promotores = ["codigo", "nome", "admissao", "desligamento", "municipio", "uf", "supervisor",
                           "salario", "ajuda_custo", "transporte", "custo_mensal"]
-    colunas_roteiro = ["codigo_promotor", "colaborador", "cnpj", "loja", "cidade", "uf", "cod_cli",
+    colunas_roteiro = ["roteiro_id", "codigo_promotor", "colaborador", "cnpj", "loja", "cidade", "uf", "cod_cli",
                        "visitas_semana", "data_inicio", "data_fim"]
     return (pd.DataFrame(linhas_promotores, columns=colunas_promotores),
             pd.DataFrame(linhas_custos, columns=["codigo", "ano", "mes", "total", "salario", "ajuda_custo",

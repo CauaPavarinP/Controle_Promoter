@@ -310,6 +310,7 @@ APELIDOS_PROMOTORES = {
     "nome": ["COLABORADOR", "NOME", "PROMOTOR"],
     "admissao": ["ADMISSAO", "DATA ADMISSAO"],
     "municipio": ["MUNICIPIO", "CIDADE"],
+    "uf": ["UF", "ESTADO"],
     "supervisor": ["SUPERVISOR"],
     "salario": ["SALARIO"],
     "ajuda_custo": ["AJUD CUSTO", "AJUDA CUSTO", "AJUDA DE CUSTO"],
@@ -341,7 +342,7 @@ def importar_promotores(conteudo: bytes, nome_arquivo: str):
 
     if "admissao" in df:
         df["admissao"] = pd.to_datetime(df["admissao"], errors="coerce", dayfirst=True).dt.strftime("%Y-%m-%d")
-    for campo in ("admissao", "municipio", "supervisor"):
+    for campo in ("admissao", "municipio", "uf", "supervisor"):
         if campo not in df:
             df[campo] = ""
         df[campo] = df[campo].fillna("").astype(str).str.strip()
@@ -369,7 +370,8 @@ APELIDOS_ROTEIRO = {
     "colaborador": ["COLABORADOR", "PROMOTOR"],
     "cnpj": ["CPF CNPJ", "CNPJ CPF", "CPFCNPJ", "CNPJ"],
     "loja": ["RAZAO SOCIAL", "LOJA"],
-    "cidade": ["CIDADE", "MUNICIPIO"],
+    # Na aba PR a cidade está numa coluna sem título ("Coluna1").
+    "cidade": ["CIDADE", "MUNICIPIO", "COLUNA1"],
     "uf": ["UF", "ESTADO"],
     "visitas_semana": ["VISITAS SEMANA", "VISITAS POR SEMANA", "FREQUENCIA", "FREQUENCIA SEMANAL"],
 }
@@ -400,6 +402,10 @@ def importar_roteiro(conteudo: bytes, nome_arquivo: str):
     for campo in ("colaborador", "loja", "cidade", "uf"):
         df[campo] = df[campo].fillna("").astype(str).str.strip()
     df["uf"] = df["uf"].str.upper()
+    # Coluna UF/Estado vazia (aba PR): a UF é o nome da aba (SC, SP, PR, MG, RS).
+    uf_da_aba = df["aba"].astype(str).str.strip().str.upper()
+    vazia = (df["uf"] == "") & uf_da_aba.str.fullmatch(r"[A-Z]{2}")
+    df.loc[vazia, "uf"] = uf_da_aba[vazia]
     df["visitas_semana"] = pd.to_numeric(df["visitas_semana"], errors="coerce")
     df = df[(df["loja"] != "") & ((df["codigo_promotor"] != "") | (df["colaborador"] != ""))]
     df = df.drop_duplicates(["codigo_promotor", "colaborador", "cnpj", "loja"])

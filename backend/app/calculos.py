@@ -289,9 +289,45 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         "cnpjs_compartilhados": int(unicas[unicas["compartilhado"]]["chave"].nunique()),
     }
     regras_usadas = {c: regras[c] for c in ("rateio_custo", "limite_percentual")}
+    bloco_custos = _bloco_custos(proms, custos, fim)
     return {"resumo": resumo, "promotores": linhas_promotores, "lojas": linhas_lojas, "regras": regras_usadas,
             "grade": _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados),
-            "custos": _bloco_custos(proms, custos, fim)}
+            "custos": bloco_custos,
+            "por_uf": _resumo_por_uf(proms, lojas, ativos, custo_mes, bloco_custos, somar_faturamento)}
+
+
+def _resumo_por_uf(proms, lojas, ativos, custo_mes, bloco_custos, somar_faturamento) -> list:
+    """Os 3 blocos da aba RESUMO (monitoramento, custo e faturamento) por UF e supervisor do promotor.
+
+    Uma linha por UF (subtotal) seguida das linhas dos supervisores daquela UF.
+    """
+    custo_mensal = {c["codigo"]: c for c in bloco_custos}
+    proms = proms.assign(uf=proms["uf"].fillna("").str.upper() if "uf" in proms else "")
+
+    def linha(nivel, uf, supervisor, grupo):
+        codigos = set(grupo["codigo"])
+        lojas_g = lojas[lojas["codigo_promotor"].isin(codigos)]
+        visitas = pd.to_numeric(lojas_g["visitas_semana"], errors="coerce").dropna()
+        custo = sum(sum(custo_mes[c].values()) for c in codigos)
+        fat = somar_faturamento(ativos[ativos["codigo_promotor"].isin(codigos)])
+        mensal = {campo: _arredondar(sum(custo_mensal[c][campo] for c in codigos if c in custo_mensal))
+                  for campo in ("salario", "ajuda_custo", "vale_transporte", "outros", "total")}
+        return {"nivel": nivel, "uf": uf or "—", "supervisor": supervisor or "(sem supervisor)",
+                "promotores": len(codigos), "lojas": int(lojas_g.drop_duplicates(["chave", "loja"]).shape[0]),
+                "visitas_semana": _arredondar(visitas.sum()) if not visitas.empty else None,
+                "custo_mensal": mensal, "custo_periodo": _arredondar(custo), "faturamento": _arredondar(fat),
+                "percentual_custo": _percentual(custo, fat)}
+
+    linhas = []
+    for uf, grupo_uf in sorted(proms.groupby("uf"), key=lambda g: (g[0] == "", g[0])):
+        linhas.append(linha("uf", uf, "", grupo_uf))
+        for supervisor, grupo in sorted(grupo_uf.groupby("supervisor"), key=lambda g: (g[0] == "", g[0])):
+            linhas.append(linha("supervisor", uf, supervisor, grupo))
+    return linhas
+
+
+def _inteiro_ou_nada(valor):
+    return None if valor is None or pd.isna(valor) else int(valor)
 
 
 def _rotulo_mes(indice: int) -> str:
@@ -309,7 +345,8 @@ def _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados) -> di
     for l in lojas.itertuples():
         por_mes = {_rotulo_mes(m): round(float(valores.get((l.linha, m), 0.0)), 2) for m in meses}
         linhas.append({
-            "linha": int(l.linha), "supervisor": supervisores.get(l.codigo_promotor, ""),
+            "linha": int(l.linha), "roteiro_id": _inteiro_ou_nada(getattr(l, "roteiro_id", None)),
+            "supervisor": supervisores.get(l.codigo_promotor, ""),
             "promotor": nomes.get(l.codigo_promotor, ""), "cnpj": l.cnpj, "loja": l.loja, "cidade": l.cidade,
             "uf": l.uf, "meses": por_mes, "total": round(sum(por_mes.values()), 2),
             "compartilhado": bool(l.compartilhado),
@@ -371,3 +408,37 @@ def opcoes_de_filtro(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteir
         "cidades": [{"uf": l.uf, "cidade": l.cidade} for l in locais.itertuples()],
         "roteiro_sem_vinculo": sem_vinculo if pendentes is None else pendentes,
     }
+
+
+def resumo_faturamento(faturamento: pd.DataFrame, regras: dict, cnpjs_no_roteiro: set[str]) -> dict:
+    """Aba Faturamento: tudo o que veio do ERP no período, por UF e por cliente, mês a mês.
+
+    Mostra todos os clientes, atendidos por promotor ou não (coluna "no_roteiro").
+    """
+    fat = aplicar_tipos_de_nota(faturamento, regras)
+    if fat.empty:
+        return {"meses": [], "por_uf": [], "totais": {"total": 0.0}, "clientes": []}
+    fat["rotulo"] = [f"{int(a)}-{int(m):02d}" for a, m in zip(fat["ano"], fat["mes"])]
+    meses = sorted(fat["rotulo"].unique())
+    fat["uf"] = fat["uf"].str.upper().replace("", "—")
+
+    def por_mes(grupo):
+        valores = grupo.groupby("rotulo")["valor"].sum()
+        linha = {m: _arredondar(valores.get(m, 0.0)) for m in meses}
+        return linha, _arredondar(valores.sum())
+
+    por_uf = []
+    for uf, grupo in sorted(fat.groupby("uf"), key=lambda g: (g[0] == "—", g[0])):
+        valores, total = por_mes(grupo)
+        por_uf.append({"uf": uf, "meses": valores, "total": total, "clientes": int(grupo["cnpj"].nunique())})
+    totais, total = por_mes(fat)
+
+    clientes = []
+    for cnpj, grupo in fat.groupby("cnpj"):
+        valores, total_c = por_mes(grupo)
+        ultimo = grupo.sort_values(["ano", "mes"]).iloc[-1]
+        clientes.append({"cnpj": cnpj, "razao_social": ultimo["razao_social"], "cidade": ultimo["cidade"],
+                         "uf": ultimo["uf"], "meses": valores, "total": total_c,
+                         "notas": int(grupo["notas"].sum()), "no_roteiro": cnpj in cnpjs_no_roteiro})
+    clientes.sort(key=lambda c: -c["total"])
+    return {"meses": meses, "por_uf": por_uf, "totais": {**totais, "total": total}, "clientes": clientes}

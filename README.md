@@ -7,31 +7,21 @@ Pedido do Maurício (Comercial • 101 do Brasil), a validar com o Rayan.
 
 ## O que o sistema faz
 
-- **Filtros únicos** para custo e faturamento: período (acumulado ou um mês, com atalhos "ano até hoje" e
-  "últimos 3/6/12 meses"), supervisor, promotor, UF, cidade e PDV.
-- **Resumo:** custo dos promotores no período, faturamento das lojas, % do custo sobre o faturamento e lojas sem compra.
-- **Tabela de promotores:** lojas, visitas/semana, custo, faturamento e % de custo. Clicar num promotor filtra as lojas dele.
-- **Detalhe por loja:** loja, cidade, promotor, visitas/semana, faturamento, custo do promotor atribuído à
-  loja, % e faturamento por visita; destaque das lojas sem faturamento e com visitas, e das que passam do limite.
-- **Faturamento por UF** (substitui as abas SC, SP, PR…): supervisor, promotor, CNPJ, PDV, cidade, UF,
-  JAN…DEZ e TOTAL, com linha de total por mês. Clicar num valor abre as notas daquele mês.
-- **Custo dos promotores** como a aba PROMOTORES BRASIL (salário, ajuda de custo, VT, total), com linha de total.
-- Todas as tabelas **ordenam por coluna** e **exportam para Excel**; botão **Imprimir** (A4 paisagem, com os
-  filtros no cabeçalho e todas as linhas).
-- **Avisos dos dados:** problemas encontrados nas planilhas (nomes que não batem, CNPJ faltando…).
-- **Atualização dos dados** por upload das planilhas, sem mexer no código.
-- **Regras do cálculo** ajustadas pelo próprio usuário na tela, sem mexer no código.
-- **Cadastros** de supervisores, promotores (com custo por competência), PDVs e roteiros (com datas e visitas).
-- **Usuários** com perfis (administrador, consulta, supervisor), senha criptografada e bloqueio após 5 tentativas erradas.
+Versão simplificada (branch `versao-simplificada`), com 4 abas:
 
-## Fases (documento de requisitos)
+| Aba | O que mostra | Como atualiza |
+|---|---|---|
+| **Resumo** | Cartões (custo, faturamento, custo ÷ faturamento, promotores, lojas, visitas/semana) e os 3 blocos da aba RESUMO da planilha — **Monitoramento**, **Custo** e **Faturamento PDV** — por UF e supervisor | Calculado a partir das outras abas |
+| **Faturamento** | Tudo o que o ERP faturou no período, por UF e por cliente, mês a mês (inclusive clientes fora do roteiro). Clicar num valor abre as notas | **Importar faturamento do ERP** (arquivo no layout da aba FATURAMENTO ou a própria planilha), com pré-visualização, confirmação e desfazer |
+| **Promotores** | Promotores e repositores com custo por competência e as lojas de cada um; supervisores | Importar a aba PROMOTORES BRASIL ou cadastrar/editar na tela |
+| **Lojas por UF** | Substitui as abas SC, SP, PR, MG e RS: supervisor, promotor, CNPJ, PDV, cidade, UF, JAN…DEZ e TOTAL. Botões por UF | Importar as abas da planilha ou **cadastrar loja na tela** (promotor, CNPJ, nome, cidade, UF, visitas/semana). Cada loja tem o menu **Alterar…** (editar dados, visitas, trocar promotor, encerrar) |
 
-| Fase | Situação |
-|---|---|
-| 1 — Base: banco com migrations, login com usuários, cadastros | ✅ Entregue |
-| 2 — Dados: faturamento item a item, desfazer importação, importação inicial com conferência, pendências | ✅ Entregue |
-| 3 — Consulta: grade mês a mês, tela por UF, detalhe da NF, imprimir, exportar | ✅ Entregue |
-| 4 — Extras: gráficos, auditoria, visão restrita do supervisor | Próxima |
+- **Filtros** no Resumo e em Lojas por UF: período (acumulado ou um mês), supervisor, promotor, UF, cidade e PDV.
+- O **faturamento das lojas vem do ERP**: o sistema soma as notas do CNPJ de cada loja, mês a mês (como o
+  SOMASE da planilha), mas **CNPJ que aparece em mais de uma loja conta uma vez só** nos totais.
+- Todas as tabelas ordenam por coluna e exportam para Excel; botão **Imprimir** no Resumo e em Lojas por UF.
+- **Usuários** com perfis (administrador, consulta, supervisor), senha criptografada e bloqueio após 5 tentativas.
+- Só o administrador importa e cadastra; os outros perfis consultam.
 
 ## Estrutura
 
@@ -55,19 +45,20 @@ backend/            API em Python (FastAPI + pandas)
   exemplos/           planilhas fictícias geradas
   tests/              testes automatizados (pytest)
 frontend/           tela em React (Vite)
-  src/components/     Login, Painel (menu), análise, Importar, Regras
-  src/components/cadastros/  Promotores, Supervisores, PDVs, Roteiros, Usuários, Meu perfil
+  src/components/     Login, Painel (menu), Resumo, Faturamento, Promotores, Lojas por UF
+  src/components/cadastros/  formulários de promotores, supervisores, PDVs, roteiros, usuários e perfil
 ```
 
-## Importações (tela "Atualizar dados", só administrador)
+## Importações (só administrador)
 
-| Cartão | Arquivo | O que faz |
+| Onde | Arquivo | O que faz |
 |---|---|---|
-| **Importação inicial** | "ROTEIROS X FATURAMENTOS" inteiro | Cadastra promotores, supervisores, PDVs e roteiros; guarda os totais das abas por UF para a **Conferência**; mostra o faturamento para confirmar. Pode rodar de novo sem duplicar. |
-| **Faturamento do ERP** | Exportação no layout da aba FATURAMENTO | Mostra a **pré-visualização** (período, linhas, TOTAL VENDA, notas, clientes, linhas com erro, CNPJs sem roteiro, tipos de nota) e só grava ao confirmar. |
-| **Promotores** | Aba PROMOTORES BRASIL | Cria ou atualiza pelo código; custo diferente vira reajuste a partir do mês corrente. |
-| **Roteiro** | Abas SC, SP, PR… | Cria PDVs (CNPJ + nome) e vínculos novos; colaborador sem promotor vira pendência. |
+| **Faturamento** | Exportação do ERP no layout da aba FATURAMENTO (ou a planilha inteira) | Mostra a **pré-visualização** (período, linhas, TOTAL VENDA, notas, clientes, linhas com erro, CNPJs sem roteiro) e só grava ao confirmar. |
+| **Promotores** | Planilha com a aba PROMOTORES BRASIL | Cria ou atualiza pelo código; custo diferente vira reajuste a partir do mês corrente. |
+| **Lojas por UF** | Planilha com as abas SC, SP, PR, MG, RS | Cria PDVs (CNPJ + nome) e vínculos novos; colaborador sem promotor fica pendente. Importe os promotores antes. |
 
+- Aba sem coluna UF/Estado preenchida (caso da aba PR): a UF é o nome da aba. Na aba PR a cidade está na
+  coluna "Coluna1", que também é reconhecida.
 - Colunas reconhecidas **pelo nome do cabeçalho** (sem diferenciar acento ou maiúscula), em qualquer uma das
   30 primeiras linhas e em qualquer aba. Nomes aceitos: listas `APELIDOS_*` de `app/importacao.py`.
 - **Faturamento item a item:** todas as colunas da aba FATURAMENTO são guardadas (tabela `faturamento_itens`).
@@ -78,21 +69,11 @@ frontend/           tela em React (Vite)
 - **Histórico** com **desfazer** (apaga os itens daquela importação). Meses que ela substituiu não voltam.
 - Promotores e roteiro **não apagam nada** (rodar de novo não duplica). O primeiro custo de um promotor vale
   desde a admissão; o vínculo do roteiro começa em 01/01 do ano corrente.
-- **Conferência:** compara, por aba e mês, a soma das linhas da planilha com a mesma conta feita pelo sistema
-  (faturamento do CNPJ de cada linha) e mostra quanto a planilha soma em dobro por causa de CNPJ repetido.
 
-## Regras do cálculo (ajustáveis na aba "Regras do cálculo")
+## Regras do cálculo
 
-O usuário escolhe cada regra na tela; elas ficam gravadas no banco (tabela `configuracoes`).
-Os valores padrão estão em `REGRAS_PADRAO` (`app/regras.py`).
-
-| Regra | Opções | Padrão |
-|---|---|---|
-| **Coluna de valor** (6.3) | TOTAL VENDA (AL) · VLR TOTAL (AD) | TOTAL VENDA, como a planilha |
-| **Tipos de nota** (6.3) | cada tipo soma, desconta ou fica de fora; e o que fazer com tipos fora da lista | todos somam, como a planilha |
-| **Só RECEITA = SIM** (6.3) | sim · não | não, como a planilha |
-| **Custo atribuído a cada loja** (8.7) | proporcional às visitas por semana · partes iguais | por visitas (sugestão do documento) |
-| **Limite de % de custo** (7.1) | número ou vazio | vazio (o documento pede sem valor fixo) |
+Valores padrão em `REGRAS_PADRAO` (`app/regras.py`): valor = TOTAL VENDA, todos os tipos de nota somam (como a
+planilha), custo de cada loja proporcional às visitas por semana. Nesta versão não há tela para mudar as regras.
 
 Regras fixas:
 - **Custo por competência:** em cada mês vale o último reajuste até aquele mês. Conta a partir do mês de
@@ -103,16 +84,15 @@ Regras fixas:
   1. se cada loja tem o seu **COD CLI** no cadastro e eles são diferentes, o faturamento é separado pelo COD CLI;
   2. se não, o faturamento do CNPJ conta **uma vez só** nos totais e as lojas aparecem com o aviso
      "faturamento compartilhado com outra loja";
-  3. essas lojas são listadas em **Pendências**, para confirmar se são lojas diferentes ou erro de digitação.
 - Loja com faturamento compartilhado: o % de custo da loja não é calculado.
 - PDV com mais de um promotor ao mesmo tempo: o faturamento aparece cheio para cada um (opção "a" do
-  documento, seção 5.5), sinalizado na tela de Roteiros.
+  documento, seção 5.5).
 
 ## Pendências com o Maurício / Rayan
 
 - Cada loja de rede tem código de cliente próprio no ERP, ou tudo é faturado na matriz?
 - Existe planilha de roteiro com a frequência de visitas por loja?
-- Quais valores usar nas Regras do cálculo (o próprio Maurício pode ajustar na tela).
+- A integração direta com o ERP (sem exportar arquivo) depende de acesso ao banco ou à API do ERP, a combinar com a TI.
 - Quem vai usar o sistema? Cada supervisor vê só a própria equipe?
 
 ## Rodar no computador (desenvolvimento)
@@ -135,8 +115,9 @@ npm install
 npm run dev
 ```
 
-Abra http://localhost:5173, entre com o usuário/senha do `.env` e, em **Atualizar dados**, importe as três
-planilhas de `backend/exemplos/`.
+Abra http://localhost:5173, entre com o usuário/senha do `.env` e importe, nesta ordem, os arquivos de
+`backend/exemplos/`: `promotores_exemplo.xlsx` na aba **Promotores**, `roteiro_exemplo.xlsx` em **Lojas por UF** e
+`faturamento_exemplo.xlsx` em **Faturamento**.
 
 **Banco e usuários**
 - As migrations rodam sozinhas quando o back-end inicia. Para rodar à mão: `cd backend && alembic upgrade head`.

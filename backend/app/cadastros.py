@@ -489,6 +489,36 @@ def vincular(dados: RoteiroNovo, sessao: Session = Depends(db.sessao_db), _=Depe
     return {"id": roteiro.id}
 
 
+class LojaNova(BaseModel):
+    """Loja cadastrada direto na aba das UFs: o PDV e o vínculo com o promotor de uma vez."""
+    pdv: PdvEntrada
+    promotor_id: int
+    data_inicio: date
+    visitas_por_semana: int | None = Field(default=None, ge=1, le=7)
+
+
+@rotas.post("/lojas")
+def cadastrar_loja(dados: LojaNova, sessao: Session = Depends(db.sessao_db), _=Depends(exigir_admin)):
+    """Usa o PDV que já existe com esse CNPJ e nome; senão, cria. Depois vincula ao promotor."""
+    _promotor_ativo(sessao, dados.promotor_id)
+    cnpj, chave = normalizar_cnpj(dados.pdv.cnpj_cpf), normalizar_texto(dados.pdv.nome_fantasia)
+    pdv = sessao.scalar(select(Pdv).where(Pdv.cnpj_cpf == cnpj, Pdv.nome_chave == chave))
+    if pdv is None:
+        pdv = Pdv()
+        _preencher_pdv(sessao, pdv, dados.pdv)
+        sessao.add(pdv)
+        sessao.flush()
+    elif not pdv.ativo:
+        pdv.ativo = True
+    if _sobreposto(sessao, dados.promotor_id, pdv.id, dados.data_inicio):
+        _erro("Este promotor já atende essa loja nessa data.")
+    roteiro = Roteiro(promotor_id=dados.promotor_id, pdv_id=pdv.id, data_inicio=dados.data_inicio,
+                      visitas_por_semana=dados.visitas_por_semana)
+    sessao.add(roteiro)
+    sessao.commit()
+    return {"pdv_id": pdv.id, "roteiro_id": roteiro.id}
+
+
 @rotas.put("/roteiros/{ident}")
 def alterar_roteiro(ident: int, dados: RoteiroAlteracao, sessao: Session = Depends(db.sessao_db),
                     _=Depends(exigir_admin)):

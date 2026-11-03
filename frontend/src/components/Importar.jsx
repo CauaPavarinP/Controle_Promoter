@@ -1,3 +1,4 @@
+// Peças da importação de arquivos, usadas nas abas Faturamento, Promotores e Lojas por UF.
 import { useEffect, useState } from 'react'
 import { http } from '../api.js'
 import { formatarCnpj, formatarMoeda, formatarMes } from '../formato.js'
@@ -5,7 +6,7 @@ import { exportarCsv, Tabela, useLista } from './ui.jsx'
 
 const NOMES_TIPO = { faturamento: 'Faturamento', promotores: 'Promotores', roteiro: 'Roteiro', planilha: 'Planilha completa' }
 
-function ResultadoCadastro({ titulo, resultado }) {
+export function ResultadoCadastro({ titulo, resultado }) {
   if (!resultado) return null
   if (resultado.erro) return <p className="dica"><b>{titulo}:</b> não encontrado no arquivo ({resultado.erro})</p>
   const c = resultado.cadastros || {}
@@ -22,7 +23,7 @@ function ResultadoCadastro({ titulo, resultado }) {
 }
 
 /** Resumo do arquivo de faturamento antes de gravar, com o botão de confirmar. */
-function PreviaFaturamento({ previa, aoConcluir, aoCancelar }) {
+export function PreviaFaturamento({ previa, aoConcluir, aoCancelar }) {
   const [substituir, setSubstituir] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
@@ -93,7 +94,7 @@ function PreviaFaturamento({ previa, aoConcluir, aoCancelar }) {
   )
 }
 
-function Envio({ titulo, descricao, rotulo = 'Enviar', aoEnviar }) {
+export function Envio({ titulo, descricao, rotulo = 'Enviar', aoEnviar }) {
   const [arquivo, setArquivo] = useState(null)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
@@ -124,7 +125,7 @@ function Envio({ titulo, descricao, rotulo = 'Enviar', aoEnviar }) {
   )
 }
 
-function Historico({ versao, aoDesfazer }) {
+export function Historico({ versao, aoDesfazer, tipos }) {
   const [lista, recarregar] = useLista(() => http.get('/api/importacoes'))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (versao) recarregar() }, [versao])
@@ -152,7 +153,7 @@ function Historico({ versao, aoDesfazer }) {
     <section className="bloco">
       <h2>Histórico de importações</h2>
       <Tabela
-        linhas={lista}
+        linhas={tipos ? lista.filter((i) => tipos.includes(i.tipo)) : lista}
         porPagina={15}
         vazio="Nenhuma importação ainda."
         colunas={[
@@ -180,117 +181,5 @@ function Historico({ versao, aoDesfazer }) {
         ]}
       />
     </section>
-  )
-}
-
-export default function Importar({ aoImportar }) {
-  const [previa, setPrevia] = useState(null)
-  const [inicial, setInicial] = useState(null)          // resultado da importação da planilha completa
-  const [cadastro, setCadastro] = useState({})           // { promotores: resultado, roteiro: resultado }
-  const [concluido, setConcluido] = useState(null)
-  const [versao, setVersao] = useState(0)
-
-  const atualizar = () => {
-    setVersao((v) => v + 1)
-    aoImportar()
-  }
-
-  async function enviarPlanilha(arquivo) {
-    setConcluido(null)
-    const resultado = await http.enviarArquivo('/api/importacoes/planilha', arquivo)
-    setInicial(resultado)
-    if (resultado.faturamento?.token) setPrevia(resultado.faturamento)
-    atualizar()
-  }
-
-  async function enviarFaturamento(arquivo) {
-    setConcluido(null)
-    setInicial(null)
-    setPrevia(await http.enviarArquivo('/api/importacoes/faturamento/previa', arquivo))
-  }
-
-  async function enviarCadastro(tipo, arquivo) {
-    const resultado = await http.enviarArquivo(`/api/importacoes/${tipo}`, arquivo)
-    setCadastro((c) => ({ ...c, [tipo]: resultado }))
-    atualizar()
-  }
-
-  return (
-    <>
-      {previa && (
-        <section className="bloco">
-          {inicial && (
-            <div className="previa-cadastros">
-              <ResultadoCadastro titulo="Promotores" resultado={inicial.promotores} />
-              <ResultadoCadastro titulo="Roteiro" resultado={inicial.roteiro} />
-              {inicial.conferencia && (
-                <p className="dica">
-                  Totais das abas {inicial.conferencia.abas.join(', ')} guardados. Depois de gravar o faturamento, compare em{' '}
-                  <a href="#conferencia">Conferência</a>.
-                </p>
-              )}
-            </div>
-          )}
-          <PreviaFaturamento
-            previa={previa}
-            aoCancelar={() => setPrevia(null)}
-            aoConcluir={(resultado) => { setPrevia(null); setConcluido(resultado); atualizar() }}
-          />
-        </section>
-      )}
-      {!previa && inicial && (
-        <section className="bloco">
-          <ResultadoCadastro titulo="Promotores" resultado={inicial.promotores} />
-          <ResultadoCadastro titulo="Roteiro" resultado={inicial.roteiro} />
-          {inicial.faturamento?.erro && <p className="dica"><b>Faturamento:</b> {inicial.faturamento.erro}</p>}
-        </section>
-      )}
-      {concluido && (
-        <div className="sucesso">
-          Faturamento gravado: {concluido.linhas_importadas} linhas de {concluido.meses.map(formatarMes).join(', ')}.
-          {concluido.meses_substituidos.length > 0 && <> Meses substituídos: {concluido.meses_substituidos.map(formatarMes).join(', ')}.</>}
-          {concluido.aviso && <p className="aviso-texto">⚠ {concluido.aviso}</p>}
-        </div>
-      )}
-
-      <section className="importar">
-        <div className="importar-cartao destaque">
-          <Envio
-            titulo="Importação inicial (planilha completa)"
-            descricao={'O arquivo "ROTEIROS X FATURAMENTOS" inteiro. Cadastra promotores, supervisores, PDVs e roteiros, ' +
-              'guarda os totais das abas por UF para a conferência e mostra o faturamento para você confirmar. ' +
-              'Pode rodar de novo: não duplica nada.'}
-            rotulo="Ler planilha"
-            aoEnviar={enviarPlanilha}
-          />
-        </div>
-        <div className="importar-cartao">
-          <Envio
-            titulo="Faturamento do ERP (todo mês)"
-            descricao="Exportação do ERP no layout da aba FATURAMENTO. Você confere o resumo antes de gravar; meses que já existem só são substituídos se você confirmar."
-            rotulo="Ler arquivo"
-            aoEnviar={enviarFaturamento}
-          />
-        </div>
-        <div className="importar-cartao">
-          <Envio
-            titulo="Promotores (atualização em massa)"
-            descricao="Aba PROMOTORES BRASIL. Cria ou atualiza pelo código; custo diferente vira reajuste a partir deste mês. Não apaga nada."
-            aoEnviar={(arquivo) => enviarCadastro('promotores', arquivo)}
-          />
-          <ResultadoCadastro titulo="Promotores" resultado={cadastro.promotores} />
-        </div>
-        <div className="importar-cartao">
-          <Envio
-            titulo="Roteiro (atualização em massa)"
-            descricao="Abas SC, SP, PR… (Colaborador + Razão Social). Cria PDVs e vínculos novos; colaborador não encontrado vira pendência. Não apaga nada."
-            aoEnviar={(arquivo) => enviarCadastro('roteiro', arquivo)}
-          />
-          <ResultadoCadastro titulo="Roteiro" resultado={cadastro.roteiro} />
-        </div>
-      </section>
-
-      <Historico versao={versao} aoDesfazer={atualizar} />
-    </>
   )
 }
