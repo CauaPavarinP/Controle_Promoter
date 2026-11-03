@@ -140,3 +140,29 @@ def test_colaboradores_nao_encontrados(cliente, tmp_path):
     dados = cliente.get("/api/colaboradores-pendentes").json()
     assert dados["colaboradores"] == []
     assert not any(p["nome"] == "Ana Teste" for p in dados["promotores_sem_loja"])
+
+
+def test_ligacao_fica_lembrada_na_proxima_importacao(cliente, tmp_path):
+    entrar(cliente)
+    importar_cadastros(cliente, "promotores")
+    arquivo = tmp_path / "roteiro.csv"
+    arquivo.write_text("Colaborador;CPF/CNPJ;Razão Social;Cidade;UF\n"
+                       "ANA TESTES;11.222.333/0001-81;LOJA X;TIJUCAS;SC\n", encoding="utf-8")
+
+    def importar():
+        with open(arquivo, "rb") as conteudo:
+            return cliente.post("/api/importacoes/roteiro", files={"arquivo": ("roteiro.csv", conteudo)}).json()
+
+    assert importar()["cadastros"]["pendentes"] == 1
+    ana = next(p for p in cliente.get("/api/promotores").json() if p["nome"] == "Ana Teste")
+    cliente.post("/api/pendencias/colaborador", json={"colaborador": "ANA TESTES", "promotor_id": ana["id"],
+                                                      "data_inicio": "2026-01-01"})
+    lembrados = cliente.get("/api/colaboradores-pendentes").json()["lembrados"]
+    assert [(l["nome"], l["promotor"]) for l in lembrados] == [("ANA TESTES", "Ana Teste")]
+
+    # Reimportar: o nome já vai direto para a Ana, sem pendência e sem duplicar a loja.
+    resultado = importar()["cadastros"]
+    assert (resultado["pendentes"], resultado["criados"], resultado["mantidos"]) == (0, 0, 1)
+    # Ao esquecer a ligação, a próxima importação volta a pedir.
+    assert cliente.delete(f"/api/colaboradores-pendentes/lembrados/{lembrados[0]['id']}").status_code == 200
+    assert importar()["cadastros"]["pendentes"] == 1

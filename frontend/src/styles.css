@@ -367,3 +367,4 @@ details.colaboradores-pendentes > summary { color: var(--alerta, #b54708); }
 .ligar-colaborador { flex-wrap: nowrap; }
 .ligar-colaborador select { max-width: 260px; }
 .sublinha { display: block; font-size: 12px; }
+details.lembrados > summary { cursor: pointer; color: var(--primaria); font-weight: 600; margin-top: 10px; }

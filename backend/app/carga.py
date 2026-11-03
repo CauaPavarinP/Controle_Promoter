@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 from . import db
 from .config import APP_SENHA, APP_USUARIO
 from .importacao import normalizar_texto
-from .modelos import CustoPromotor, Pdv, Promotor, Roteiro, RoteiroPendente, Supervisor, Usuario
+from .modelos import (ApelidoColaborador, CustoPromotor, Pdv, Promotor, Roteiro, RoteiroPendente, Supervisor,
+                      Usuario)
 from .seguranca import gerar_hash
 
 log = logging.getLogger("uvicorn.error")
@@ -133,12 +134,14 @@ def aplicar_roteiro(sessao: Session, df: pd.DataFrame, origem: str = "importaç�
     inicio = date(date.today().year, 1, 1)
     por_codigo = {p.codigo: p for p in sessao.scalars(select(Promotor))}
     por_nome = _indice_promotores(sessao)
+    # Nomes já ligados antes no quadro "Colaboradores não encontrados".
+    apelidos = {a.nome_chave: a.promotor for a in sessao.scalars(select(ApelidoColaborador))}
     sessao.query(RoteiroPendente).delete()
     criados = mantidos = pendentes = 0
     for linha in df.itertuples():
         nome = normalizar_texto(linha.colaborador)
         promotor = (por_codigo.get(linha.codigo_promotor) or por_nome.get(nome)
-                    or por_nome.get(nome.replace(" ", "")))
+                    or por_nome.get(nome.replace(" ", "")) or apelidos.get(nome))
         visitas = None if pd.isna(linha.visitas_semana) else int(linha.visitas_semana)
         if promotor is None:
             sessao.add(RoteiroPendente(colaborador=linha.colaborador or linha.codigo_promotor, cnpj_cpf=linha.cnpj,

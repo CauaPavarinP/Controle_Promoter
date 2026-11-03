@@ -48,7 +48,8 @@ function Ligar({ item, promotores, aoConcluir }) {
 export default function ColaboradoresPendentes({ admin, aoAlterar }) {
   const [dados, recarregar] = useLista(() => http.get('/api/colaboradores-pendentes'))
   const [todosPromotores] = useLista(() => http.get('/api/promotores'))
-  if (!dados || !dados.colaboradores.length) return null
+  if (!dados || (!dados.colaboradores.length && !dados.lembrados.length)) return null
+  if (!dados.colaboradores.length) return <Lembrados lembrados={dados.lembrados} admin={admin} aoAlterar={recarregar} />
 
   const semLoja = new Set(dados.promotores_sem_loja.map((p) => p.id))
   // Promotores sem loja primeiro: o nome certo costuma estar entre eles.
@@ -66,7 +67,7 @@ export default function ColaboradoresPendentes({ admin, aoAlterar }) {
       <p className="dica">
         Estes nomes da coluna "Colaborador" das abas SC, SP, PR, MG e RS não batem com nenhum promotor da aba
         Promotores (nome escrito diferente, abreviado, sem acento…). As lojas deles <b>não entram no Resumo</b> até
-        serem ligadas.{admin && ' Escolha o promotor certo e clique em Ligar: todas as lojas daquele nome passam para ele (a partir de 01/01 deste ano). Quando o sistema acha um nome parecido, ele já vem escolhido — confira antes de ligar.'}
+        serem ligadas.{admin && ' Escolha o promotor certo e clique em Ligar: todas as lojas daquele nome passam para ele (a partir de 01/01 deste ano) e o sistema lembra a ligação para as próximas importações. Quando acha um nome parecido, ele já vem escolhido — confira antes de ligar.'}
       </p>
       {dados.promotores_sem_loja.length > 0 && (
         <p className="dica">
@@ -90,6 +91,43 @@ export default function ColaboradoresPendentes({ admin, aoAlterar }) {
             exportar: (c) => c.lojas.map((l) => l.loja).join(' · ') },
           ...(admin ? [{ campo: 'acoes', titulo: 'Ligar ao promotor', semOrdem: true, semExportar: true,
             mostrar: (c) => <Ligar key={c.colaborador} item={c} promotores={promotores} aoConcluir={concluir} /> }] : []),
+        ]}
+      />
+      <Lembrados lembrados={dados.lembrados} admin={admin} aoAlterar={recarregar} dentro />
+    </details>
+  )
+}
+
+/** Nomes já ligados antes: as próximas importações usam essas ligações sozinhas. */
+function Lembrados({ lembrados, admin, aoAlterar, dentro = false }) {
+  if (!lembrados.length) return null
+  async function esquecer(item) {
+    if (!window.confirm(`Esquecer que "${item.nome}" é ${item.promotor}? As lojas já ligadas continuam com ele; ` +
+      'só a próxima importação volta a perguntar.')) return
+    try {
+      await http.delete(`/api/colaboradores-pendentes/lembrados/${item.id}`)
+      aoAlterar()
+    } catch (e) {
+      window.alert(e.message)
+    }
+  }
+  return (
+    <details className={dentro ? 'lembrados' : 'bloco lembrados'}>
+      <summary>Ligações lembradas ({lembrados.length})</summary>
+      <p className="dica">
+        Nomes da planilha que você já ligou a um promotor. Nas próximas importações das abas por UF, as lojas desses
+        nomes vão direto para o promotor, sem passar por aqui.
+      </p>
+      <Tabela
+        linhas={lembrados}
+        porPagina={20}
+        arquivo="ligacoes-lembradas"
+        colunas={[
+          { campo: 'nome', titulo: 'Nome na planilha', quebra: true },
+          { campo: 'promotor', titulo: 'Promotor cadastrado', quebra: true },
+          { campo: 'codigo', titulo: 'Código' },
+          ...(admin ? [{ campo: 'acoes', titulo: '', semOrdem: true, semExportar: true,
+            mostrar: (l) => <button className="secundario perigo" onClick={() => esquecer(l)}>Esquecer</button> }] : []),
         ]}
       />
     </details>

@@ -15,7 +15,7 @@ from .calculos import aplicar_tipos_de_nota, indice_mes
 from .carga import obter_pdv
 from .faturamento import codigos_por_cnpj, faturamento_mensal
 from .importacao import normalizar_texto
-from .modelos import FaturamentoItem, Pdv, Promotor, Roteiro, RoteiroPendente
+from .modelos import ApelidoColaborador, FaturamentoItem, Pdv, Promotor, Roteiro, RoteiroPendente
 from .regras import ler_regras
 
 rotas = APIRouter(prefix="/api")
@@ -190,6 +190,13 @@ def resolver_colaborador(dados: ResolverColaborador, sessao: Session = Depends(d
                                visitas_por_semana=item.visitas_por_semana))
             criados += 1
         sessao.delete(item)
+    # Guarda a ligação: nas próximas importações esse nome já vai direto para o promotor.
+    chave = normalizar_texto(dados.colaborador)
+    apelido = sessao.scalar(select(ApelidoColaborador).where(ApelidoColaborador.nome_chave == chave))
+    if apelido is None:
+        sessao.add(ApelidoColaborador(nome_chave=chave, nome=dados.colaborador.strip(), promotor_id=promotor.id))
+    else:
+        apelido.promotor_id = promotor.id
     sessao.commit()
     return {"vinculos_criados": criados}
 
@@ -231,7 +238,23 @@ def colaboradores_pendentes_da_importacao(sessao: Session = Depends(db.sessao_db
     colaboradores = [{**g, "ufs": sorted(g["ufs"]), "quantidade": len(g["lojas"]),
                       "sugestao": _sugerir_promotor(g["colaborador"], ativos)} for g in grupos.values()]
     colaboradores.sort(key=lambda g: -g["quantidade"])
-    return {"colaboradores": colaboradores, "promotores_sem_loja": sorted(sem_loja, key=lambda p: p["nome"])}
+    lembrados = [{"id": a.id, "nome": a.nome, "promotor": a.promotor.nome, "codigo": a.promotor.codigo}
+                 for a in sessao.scalars(select(ApelidoColaborador).options(selectinload(ApelidoColaborador.promotor))
+                                         .order_by(ApelidoColaborador.nome))]
+    return {"colaboradores": colaboradores, "promotores_sem_loja": sorted(sem_loja, key=lambda p: p["nome"]),
+            "lembrados": lembrados}
+
+
+@rotas.delete("/colaboradores-pendentes/lembrados/{ident}")
+def esquecer_ligacao(ident: int, sessao: Session = Depends(db.sessao_db), _=Depends(exigir_admin)):
+    """Esquece uma ligação feita por engano. As lojas já ligadas continuam com o promotor até serem trocadas
+    ou encerradas em Lojas por UF; só a próxima importação deixa de usar essa ligação."""
+    apelido = sessao.get(ApelidoColaborador, ident)
+    if apelido is None:
+        raise HTTPException(status_code=404, detail="Ligação não encontrada.")
+    sessao.delete(apelido)
+    sessao.commit()
+    return {"ok": True}
 
 
 @rotas.delete("/colaboradores-pendentes")

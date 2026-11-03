@@ -119,6 +119,18 @@ class RoteiroPendente(Carimbo, Base):
     origem: Mapped[str] = mapped_column(String(60), default="")
 
 
+class ApelidoColaborador(Carimbo, Base):
+    """Nome da coluna "Colaborador" das abas por UF que é outro jeito de escrever um promotor cadastrado
+    (ex.: "ANDRE TEIXEIRA" = "Andre Luiz Teixeira"). As próximas importações já ligam sozinhas."""
+    __tablename__ = "apelidos_colaborador"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome_chave: Mapped[str] = mapped_column(String(150), unique=True)  # sem acento/maiúsculo
+    nome: Mapped[str] = mapped_column(String(150), default="")
+    promotor_id: Mapped[int] = mapped_column(ForeignKey("promotores.id", ondelete="CASCADE"))
+
+    promotor: Mapped[Promotor] = relationship()
+
+
 class Usuario(Carimbo, Base):
     __tablename__ = "usuarios"
     id: Mapped[int] = mapped_column(primary_key=True)
