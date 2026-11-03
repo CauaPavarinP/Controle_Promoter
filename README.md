@@ -11,12 +11,13 @@ Versão simplificada (branch `versao-simplificada`), com 4 abas:
 
 | Aba | O que mostra | Como atualiza |
 |---|---|---|
-| **Resumo** | Cartões (custo, faturamento, custo ÷ faturamento, promotores, lojas, visitas/semana) e os 3 blocos da aba RESUMO da planilha — **Monitoramento**, **Custo** e **Faturamento PDV** — por UF e supervisor | Calculado a partir das outras abas |
+| **Resumo** | 4 cartões (custo, faturamento, custo ÷ faturamento, lojas visitadas sem compra); **Onde o custo não compensa** (lojas que compram pouco por visita e promotores com maior % de custo); e uma tabela que abre em níveis **UF → supervisor → promotor** (promotores, lojas, visitas, custo, faturamento, %). Clicar no promotor abre as lojas dele | Calculado a partir das outras abas |
 | **Faturamento** | Tudo o que o ERP faturou no período, por UF e por cliente, mês a mês (inclusive clientes fora do roteiro). Clicar num valor abre as notas | **Importar faturamento do ERP** (arquivo no layout da aba FATURAMENTO ou a própria planilha), com pré-visualização, confirmação e desfazer |
 | **Promotores** | Promotores e repositores com custo por competência e as lojas de cada um; supervisores | Importar a aba PROMOTORES BRASIL ou cadastrar/editar na tela |
 | **Lojas por UF** | Substitui as abas SC, SP, PR, MG e RS: supervisor, promotor, CNPJ, PDV, cidade, UF, JAN…DEZ e TOTAL. Botões por UF | Importar as abas da planilha ou **cadastrar loja na tela** (promotor, CNPJ, nome, cidade, UF, visitas/semana). Cada loja tem o menu **Alterar…** (editar dados, visitas, trocar promotor, encerrar) |
 
-- **Filtros** no Resumo e em Lojas por UF: período (acumulado ou um mês), supervisor, promotor, UF, cidade e PDV.
+- **Filtros** no Resumo e em Lojas por UF, numa barra que fica fixa ao rolar: período, supervisor e UF; promotor,
+  cidade, PDV e atalhos de período em "Mais filtros". Os filtros escolhidos aparecem como etiquetas com ✕.
 - O **faturamento das lojas vem do ERP**: o sistema soma as notas do CNPJ de cada loja, mês a mês (como o
   SOMASE da planilha), mas **CNPJ que aparece em mais de uma loja conta uma vez só** nos totais.
 - Todas as tabelas ordenam por coluna e exportam para Excel; botão **Imprimir** no Resumo e em Lojas por UF.

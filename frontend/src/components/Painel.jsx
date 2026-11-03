@@ -3,7 +3,8 @@ import { api } from '../api.js'
 import { formatarMes } from '../formato.js'
 import Filtros from './Filtros.jsx'
 import CardsResumo from './CardsResumo.jsx'
-import BlocosResumo from './BlocosResumo.jsx'
+import NaoCompensa from './NaoCompensa.jsx'
+import ResumoArvore from './ResumoArvore.jsx'
 import Faturamento from './Faturamento.jsx'
 import LojasUf from './LojasUf.jsx'
 import PromotoresAba from './PromotoresAba.jsx'
@@ -122,6 +123,12 @@ export default function Painel({ usuario, aoSair }) {
 
   const alterarFiltro = (campo, valor) => setFiltros((atual) => ({ ...atual, [campo]: valor }))
 
+  // Clicar num promotor no Resumo abre as lojas dele.
+  function verLojasDoPromotor(codigo) {
+    alterarFiltro('promotor', codigo)
+    irPara('lojas')
+  }
+
   const temDados = opcoes && opcoes.meses.length > 0
   const abaAtual = ABAS.find((a) => a.id === aba)
   const grupos = [...new Set(abasPermitidas.map((a) => a.grupo).filter(Boolean))]
@@ -204,8 +211,10 @@ export default function Painel({ usuario, aoSair }) {
         {aba === 'resumo' && temDados && dados && (
           <div className={carregando ? 'atualizando' : ''}>
             <CardsResumo resumo={dados.resumo} regras={dados.regras} />
-            <BlocosResumo linhas={dados.por_uf} resumo={dados.resumo} regras={dados.regras}
-              mesFinal={formatarMes(filtros.modo === 'mes' ? filtros.inicio : filtros.fim)} />
+            <NaoCompensa lojas={dados.lojas} promotores={dados.promotores} regras={dados.regras}
+              aoAbrirPromotor={verLojasDoPromotor} />
+            <ResumoArvore porUf={dados.por_uf} promotores={dados.promotores} resumo={dados.resumo}
+              regras={dados.regras} aoAbrirPromotor={verLojasDoPromotor} />
           </div>
         )}
 

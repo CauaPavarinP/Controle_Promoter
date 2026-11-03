@@ -243,6 +243,7 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         visitas_p = pd.to_numeric(lojas_p["visitas_semana"], errors="coerce").dropna()
         linhas_promotores.append({
             "codigo": p.codigo, "nome": p.nome, "supervisor": p.supervisor, "municipio": p.municipio,
+            "uf": (getattr(p, "uf", "") or "").upper() or "—",
             "custo_mensal": _arredondar(custo_atual[p.codigo]), "custo_periodo": _arredondar(custo_p),
             "lojas": int(lojas_p.drop_duplicates(["chave", "loja"]).shape[0]),
             "visitas_semana": _arredondar(visitas_p.sum()) if not visitas_p.empty else None,
@@ -287,6 +288,9 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         "faturamento": _arredondar(fat_total),
         "percentual_custo": _percentual(custo_total, fat_total),
         "cnpjs_compartilhados": int(unicas[unicas["compartilhado"]]["chave"].nunique()),
+        # Lojas que o promotor visita e que não compraram nada no período.
+        "lojas_sem_compra": int(((unicas["faturamento"] <= 0)
+                                 & (pd.to_numeric(unicas["visitas_semana"], errors="coerce") > 0)).sum()),
     }
     regras_usadas = {c: regras[c] for c in ("rateio_custo", "limite_percentual")}
     bloco_custos = _bloco_custos(proms, custos, fim)

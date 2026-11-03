@@ -74,45 +74,79 @@ export default function Filtros({ opcoes, filtros, alterar, limpar }) {
     { texto: 'Últimos 12 meses', inicio: rotulo(indice(ultimo) - 11) },
   ]
 
+  // Filtros escolhidos, mostrados como etiquetas com "x" para tirar.
+  const nomePromotor = opcoes.promotores.find((p) => p.codigo === filtros.promotor)?.nome
+  const ativos = [
+    filtros.supervisor && { campo: 'supervisor', texto: `Supervisor: ${filtros.supervisor}` },
+    filtros.promotor && { campo: 'promotor', texto: `Promotor: ${nomePromotor || filtros.promotor}` },
+    filtros.uf && { campo: 'uf', texto: `UF: ${filtros.uf}` },
+    filtros.cidade && { campo: 'cidade', texto: `Cidade: ${filtros.cidade}` },
+    filtros.pdv && { campo: 'pdv', texto: `PDV: ${filtros.pdv}` },
+  ].filter(Boolean)
+  const [maisFiltros, setMaisFiltros] = useState(false)
+  const escondidosAtivos = ['promotor', 'cidade', 'pdv'].filter((c) => filtros[c]).length
+
   return (
     <section className="filtros">
-      <div className="filtro">
-        Período
-        <div className="alternar">
-          <button className={filtros.modo === 'acumulado' ? 'ativo' : ''} onClick={() => alterar('modo', 'acumulado')}>
-            Acumulado
-          </button>
-          <button className={filtros.modo === 'mes' ? 'ativo' : ''} onClick={() => alterar('modo', 'mes')}>
-            Um mês
-          </button>
+      <div className="filtros-linha">
+        <div className="filtro">
+          Período
+          <div className="alternar">
+            <button className={filtros.modo === 'acumulado' ? 'ativo' : ''} onClick={() => alterar('modo', 'acumulado')}>
+              Acumulado
+            </button>
+            <button className={filtros.modo === 'mes' ? 'ativo' : ''} onClick={() => alterar('modo', 'mes')}>
+              Um mês
+            </button>
+          </div>
         </div>
+        <Seletor
+          rotulo={filtros.modo === 'mes' ? 'Mês' : 'De'}
+          valor={filtros.inicio}
+          aoMudar={(v) => alterar('inicio', v)}
+          opcoes={meses}
+          todos={null}
+        />
+        {filtros.modo === 'acumulado' && (
+          <Seletor rotulo="Até" valor={filtros.fim} aoMudar={(v) => alterar('fim', v)} opcoes={meses} todos={null} />
+        )}
+        <Seletor
+          rotulo="Supervisor"
+          valor={filtros.supervisor}
+          aoMudar={mudarSupervisor}
+          opcoes={opcoes.supervisores.map((s) => ({ valor: s, texto: s }))}
+        />
+        <Seletor rotulo="UF" valor={filtros.uf} aoMudar={mudarUf} opcoes={opcoes.ufs.map((u) => ({ valor: u, texto: u }))} />
+        <button className="secundario mais-filtros" onClick={() => setMaisFiltros((v) => !v)} aria-expanded={maisFiltros}>
+          {maisFiltros ? 'Menos filtros ▴' : `Mais filtros${escondidosAtivos ? ` (${escondidosAtivos})` : ''} ▾`}
+        </button>
       </div>
-      <Seletor
-        rotulo={filtros.modo === 'mes' ? 'Mês' : 'De'}
-        valor={filtros.inicio}
-        aoMudar={(v) => alterar('inicio', v)}
-        opcoes={meses}
-        todos={null}
-      />
-      {filtros.modo === 'acumulado' && (
-        <Seletor rotulo="Até" valor={filtros.fim} aoMudar={(v) => alterar('fim', v)} opcoes={meses} todos={null} />
+
+      {maisFiltros && (
+        <div className="filtros-linha">
+          <Seletor rotulo="Promotor" valor={filtros.promotor} aoMudar={(v) => alterar('promotor', v)} opcoes={promotores} />
+          <Seletor rotulo="Cidade" valor={filtros.cidade} aoMudar={(v) => alterar('cidade', v)} opcoes={cidades} todos="Todas" />
+          <FiltroPdv pdvs={opcoes.pdvs || []} valor={filtros.pdv} aoMudar={(v) => alterar('pdv', v)} />
+          <div className="atalhos">
+            <span className="dica">Período rápido:</span>
+            {atalhos.map((a) => (
+              <button key={a.texto} className="secundario" onClick={() => aplicarPeriodo(a.inicio)}>{a.texto}</button>
+            ))}
+          </div>
+        </div>
       )}
-      <Seletor
-        rotulo="Supervisor"
-        valor={filtros.supervisor}
-        aoMudar={mudarSupervisor}
-        opcoes={opcoes.supervisores.map((s) => ({ valor: s, texto: s }))}
-      />
-      <Seletor rotulo="Promotor" valor={filtros.promotor} aoMudar={(v) => alterar('promotor', v)} opcoes={promotores} />
-      <Seletor rotulo="UF" valor={filtros.uf} aoMudar={mudarUf} opcoes={opcoes.ufs.map((u) => ({ valor: u, texto: u }))} />
-      <Seletor rotulo="Cidade" valor={filtros.cidade} aoMudar={(v) => alterar('cidade', v)} opcoes={cidades} todos="Todas" />
-      <FiltroPdv pdvs={opcoes.pdvs || []} valor={filtros.pdv} aoMudar={(v) => alterar('pdv', v)} />
-      <button className="secundario limpar" onClick={limpar}>Limpar filtros</button>
-      <div className="atalhos">
-        {atalhos.map((a) => (
-          <button key={a.texto} className="secundario" onClick={() => aplicarPeriodo(a.inicio)}>{a.texto}</button>
-        ))}
-      </div>
+
+      {ativos.length > 0 && (
+        <div className="filtros-ativos">
+          {ativos.map((a) => (
+            <button key={a.campo} className="chip" onClick={() => (a.campo === 'uf' ? mudarUf('') : alterar(a.campo, ''))}
+              title="Tirar este filtro">
+              {a.texto} <span aria-hidden="true">✕</span>
+            </button>
+          ))}
+          <button className="link" onClick={limpar}>Limpar tudo</button>
+        </div>
+      )}
     </section>
   )
 }

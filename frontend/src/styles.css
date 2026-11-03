@@ -335,3 +335,35 @@ details.bloco > .bloco { border: 0; padding: 0; margin: 0; }
   .abas-uf .nova-loja { margin-left: 0; width: 100%; }
 }
 .carregando { padding: 10px 14px; border-radius: 8px; background: var(--primaria-clara); color: var(--primaria); margin-bottom: 14px; }
+
+/* Filtros enxutos: linha principal, "Mais filtros", etiquetas dos filtros ativos; barra fixa ao rolar */
+.filtros { display: grid; gap: 10px; position: sticky; top: 0; z-index: 5; box-shadow: 0 2px 6px rgba(0, 0, 0, .04); }
+.filtros-linha { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.mais-filtros { margin-left: auto; }
+.filtros-ativos { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { background: var(--primaria-clara); color: var(--primaria); border: 1px solid var(--borda); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
+.chip span { margin-left: 4px; font-weight: 700; }
+button.link { background: none; color: var(--primaria); padding: 3px 6px; text-decoration: underline; font-size: 13px; }
+.atalhos .dica { align-self: center; }
+@media (max-width: 700px) {
+  .filtros { position: static; }
+  .filtros-linha > * { flex: 1 1 100%; }
+  .mais-filtros { margin-left: 0; }
+}
+
+/* Resumo em níveis (UF → supervisor → promotor) */
+table.arvore tr.clicavel { cursor: pointer; }
+table.arvore tr.clicavel:hover td { background: var(--primaria-clara); }
+table.arvore tr.nivel-0 td { font-weight: 700; background: var(--fundo, #f6f7f9); }
+table.arvore tr.nivel-1 td { font-weight: 600; }
+table.arvore .seta { display: inline-block; width: 18px; color: var(--primaria); }
+table.arvore tfoot td { font-weight: 700; border-top: 2px solid var(--borda); }
+.cards-4 { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.card.card-alerta { border-left-color: var(--critico); }
+
+/* Onde o custo não compensa */
+.duas-colunas { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+.duas-colunas > div { min-width: 0; }
+.duas-colunas h3 { margin: 0 0 4px; font-size: 16px; }
+.sublinha { display: block; font-size: 12px; }
+@media (max-width: 700px) { .duas-colunas { grid-template-columns: 1fr; } }
