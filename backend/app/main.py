@@ -177,7 +177,6 @@ def opcoes(sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     promotores, _custos, roteiro = tabelas_do_calculo(sessao)
     dados = opcoes_de_filtro(faturamento.faturamento_mensal(), promotores, roteiro, colaboradores_pendentes(sessao))
     dados["importacoes"] = faturamento.ultimas_por_tipo(sessao)
-    dados["pendencias"] = pendencias.contar_pendencias(pendencias.calcular_pendencias(sessao))
     dados["reimportar_faturamento"] = faturamento.tem_faturamento_antigo()
     return dados
 

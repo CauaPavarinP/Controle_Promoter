@@ -77,6 +77,7 @@ export default function Faturamento({ admin, meses, aoImportar }) {
   const ultimo = meses[meses.length - 1] || ''
   const [periodo, setPeriodo] = useState({ inicio: '', fim: '' })
   const [dados, setDados] = useState(null)
+  const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
   const [busca, setBusca] = useState('')
   const [uf, setUf] = useState('')
@@ -94,9 +95,11 @@ export default function Faturamento({ admin, meses, aoImportar }) {
     if (!periodo.inicio) return
     let cancelado = false
     setErro('')
+    setCarregando(true)
     http.get(`/api/faturamento?${new URLSearchParams(periodo)}`)
       .then((d) => !cancelado && setDados(d))
       .catch((e) => !cancelado && setErro(e.message))
+      .finally(() => !cancelado && setCarregando(false))
     return () => { cancelado = true }
   }, [periodo])
 
@@ -112,6 +115,7 @@ export default function Faturamento({ admin, meses, aoImportar }) {
 
       {!meses.length && <div className="aviso">Ainda não há faturamento importado.</div>}
       {erro && <div className="erro-caixa">{erro}</div>}
+      {carregando && <p className="carregando">Carregando o faturamento… com a planilha inteira isso pode levar alguns segundos.</p>}
 
       {meses.length > 0 && (
         <section className="filtros">
@@ -131,7 +135,7 @@ export default function Faturamento({ admin, meses, aoImportar }) {
       )}
 
       {dados && (
-        <>
+        <div className={carregando ? 'atualizando' : ''}>
           <section className="bloco">
             <h2>Faturamento por UF</h2>
             <p className="dica">Tudo o que o ERP faturou no período, inclusive clientes que nenhum promotor atende.</p>
@@ -187,7 +191,7 @@ export default function Faturamento({ admin, meses, aoImportar }) {
               />
             </div>
           </section>
-        </>
+        </div>
       )}
       {detalhe && <DetalheNotas linha={detalhe.linha} mes={detalhe.mes} aoFechar={() => setDetalhe(null)} />}
     </>

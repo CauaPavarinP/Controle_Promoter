@@ -334,3 +334,4 @@ details.bloco > .bloco { border: 0; padding: 0; margin: 0; }
 @media (max-width: 700px) {
   .abas-uf .nova-loja { margin-left: 0; width: 100%; }
 }
+.carregando { padding: 10px 14px; border-radius: 8px; background: var(--primaria-clara); color: var(--primaria); margin-bottom: 14px; }

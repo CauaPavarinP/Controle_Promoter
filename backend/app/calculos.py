@@ -422,23 +422,24 @@ def resumo_faturamento(faturamento: pd.DataFrame, regras: dict, cnpjs_no_roteiro
     meses = sorted(fat["rotulo"].unique())
     fat["uf"] = fat["uf"].str.upper().replace("", "—")
 
-    def por_mes(grupo):
-        valores = grupo.groupby("rotulo")["valor"].sum()
-        linha = {m: _arredondar(valores.get(m, 0.0)) for m in meses}
-        return linha, _arredondar(valores.sum())
+    def tabela(indice):
+        return fat.pivot_table(index=indice, columns="rotulo", values="valor", aggfunc="sum", fill_value=0.0)
 
-    por_uf = []
-    for uf, grupo in sorted(fat.groupby("uf"), key=lambda g: (g[0] == "—", g[0])):
-        valores, total = por_mes(grupo)
-        por_uf.append({"uf": uf, "meses": valores, "total": total, "clientes": int(grupo["cnpj"].nunique())})
-    totais, total = por_mes(fat)
+    contagem = fat.groupby("uf")["cnpj"].nunique()
+    por_uf = [{"uf": uf, "meses": {m: _arredondar(v) for m, v in linha.items()}, "total": _arredondar(linha.sum()),
+               "clientes": int(contagem[uf])}
+              for uf, linha in tabela("uf").iterrows()]
+    por_uf.sort(key=lambda l: (l["uf"] == "—", l["uf"]))
+    por_mes = fat.groupby("rotulo")["valor"].sum()
+    totais = {m: _arredondar(por_mes.get(m, 0.0)) for m in meses}
+    total = _arredondar(por_mes.sum())
 
-    clientes = []
-    for cnpj, grupo in fat.groupby("cnpj"):
-        valores, total_c = por_mes(grupo)
-        ultimo = grupo.sort_values(["ano", "mes"]).iloc[-1]
-        clientes.append({"cnpj": cnpj, "razao_social": ultimo["razao_social"], "cidade": ultimo["cidade"],
-                         "uf": ultimo["uf"], "meses": valores, "total": total_c,
-                         "notas": int(grupo["notas"].sum()), "no_roteiro": cnpj in cnpjs_no_roteiro})
+    # Razão social, cidade e UF do último mês em que o cliente comprou.
+    dados = fat.sort_values(["ano", "mes"]).drop_duplicates("cnpj", keep="last").set_index("cnpj")
+    notas = fat.groupby("cnpj")["notas"].sum()
+    clientes = [{"cnpj": cnpj, "razao_social": dados.at[cnpj, "razao_social"], "cidade": dados.at[cnpj, "cidade"],
+                 "uf": dados.at[cnpj, "uf"], "meses": {m: _arredondar(v) for m, v in linha.items()},
+                 "total": _arredondar(linha.sum()), "notas": int(notas[cnpj]), "no_roteiro": cnpj in cnpjs_no_roteiro}
+                for cnpj, linha in tabela("cnpj").iterrows()]
     clientes.sort(key=lambda c: -c["total"])
     return {"meses": meses, "por_uf": por_uf, "totais": {**totais, "total": total}, "clientes": clientes}

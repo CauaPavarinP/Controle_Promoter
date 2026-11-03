@@ -197,6 +197,10 @@ export default function Painel({ usuario, aoSair }) {
           />
         )}
 
+        {ABAS_COM_FILTRO.includes(aba) && (!opcoes || (temDados && carregando)) && !erro && (
+          <p className="carregando nao-imprimir">Calculando… com a planilha inteira isso pode levar alguns segundos.</p>
+        )}
+
         {aba === 'resumo' && temDados && dados && (
           <div className={carregando ? 'atualizando' : ''}>
             <CardsResumo resumo={dados.resumo} regras={dados.regras} />
