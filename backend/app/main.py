@@ -211,7 +211,8 @@ def _ano_mes(texto: str) -> tuple[int, int]:
 @app.get("/api/faturamento")
 def faturamento_do_erp(inicio: str, fim: str, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     """Aba Faturamento: o que veio do ERP no período, por UF e por cliente."""
-    dados = faturamento.mensal_por_cliente(_ano_mes(inicio), _ano_mes(fim))
+    inicio_, fim_ = sorted([_ano_mes(inicio), _ano_mes(fim)])  # "De" depois de "Até": inverte
+    dados = faturamento.mensal_por_cliente(inicio_, fim_)
     return resumo_faturamento(dados, ler_regras(), _cnpjs_no_roteiro(sessao))
 
 

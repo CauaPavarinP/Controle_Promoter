@@ -11,11 +11,13 @@ Versão simplificada (branch `versao-simplificada`), com 4 abas:
 
 | Aba | O que mostra | Como atualiza |
 |---|---|---|
-| **Resumo** | 4 cartões (custo, faturamento, custo ÷ faturamento, promotores e lojas) e uma tabela que abre em níveis **UF → supervisor → promotor** (promotores, lojas, visitas, custo, faturamento, %), no lugar da aba RESUMO da planilha. Clicar no promotor abre as lojas dele | Calculado a partir das outras abas |
+| **Resumo** | 4 cartões (custo, faturamento, custo ÷ faturamento, promotores e lojas) e uma tabela que abre em níveis **UF da loja → supervisor → promotor** (promotores, lojas, visitas, custo, faturamento, %), no lugar da aba RESUMO da planilha. Promotor que atende mais de uma UF aparece em cada uma com a sua parte do custo. Clicar no promotor abre as lojas dele | Calculado a partir das outras abas |
 | **Faturamento** | Tudo o que o ERP faturou no período, por UF e por cliente, mês a mês (inclusive clientes fora do roteiro). Clicar num valor abre as notas | **Importar faturamento do ERP** (arquivo no layout da aba FATURAMENTO ou a própria planilha), com pré-visualização, confirmação e desfazer |
 | **Promotores** | Promotores e repositores com custo por competência e as lojas de cada um; supervisores | Importar a aba PROMOTORES BRASIL ou cadastrar/editar na tela |
 | **Lojas por UF** | Substitui as abas SC, SP, PR, MG e RS: supervisor, promotor, CNPJ, PDV, cidade, UF, JAN…DEZ e TOTAL. Botões por UF | Importar as abas da planilha ou **cadastrar loja na tela** (promotor, CNPJ, nome, cidade, UF, visitas/semana). Cada loja tem o menu **Alterar…** (editar dados, visitas, trocar promotor, encerrar) |
 
+- Com filtro de **UF, cidade ou PDV**, o custo é só a parte do promotor atribuída às lojas filtradas (o resto é de
+  lojas de outros lugares).
 - **Filtros** no Resumo e em Lojas por UF, numa barra que fica fixa ao rolar: período, supervisor e UF; promotor,
   cidade, PDV e atalhos de período em "Mais filtros". Os filtros escolhidos aparecem como etiquetas com ✕.
 - O **faturamento das lojas vem do ERP**: o sistema soma as notas do CNPJ de cada loja, mês a mês (como o

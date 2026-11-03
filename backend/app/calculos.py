@@ -212,7 +212,8 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         lojas = lojas[lojas["cidade"].map(normalizar_texto) == normalizar_texto(filtros.cidade)]
     if filtros.pdv:
         lojas = lojas[lojas["loja"].map(normalizar_texto) == normalizar_texto(filtros.pdv)]
-    if filtros.uf or filtros.cidade or filtros.pdv:
+    filtro_de_local = bool(filtros.uf or filtros.cidade or filtros.pdv)
+    if filtro_de_local:
         # Filtrando por local, só interessam os promotores que atendem ali.
         proms = proms[proms["codigo"].isin(lojas["codigo_promotor"])]
     ativos = ativos[ativos["linha"].isin(lojas["linha"])]
@@ -234,12 +235,18 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
     nomes = dict(zip(proms["codigo"], proms["nome"]))
     supervisores = dict(zip(proms["codigo"], proms["supervisor"]))
 
+    # Custo de cada promotor no período. Com filtro de UF, cidade ou PDV, só a parte atribuída às lojas
+    # filtradas (o resto do custo é das lojas de outros lugares).
+    atribuido = ativos.groupby("codigo_promotor")["custo"].sum()
+    custo_do_promotor = {c: float(atribuido.get(c, 0.0)) if filtro_de_local else sum(custo_mes[c].values())
+                         for c in proms["codigo"]}
+
     # --- Tabela por promotor -------------------------------------------------------------------
     linhas_promotores = []
     for p in proms.itertuples():
         lojas_p = lojas[lojas["codigo_promotor"] == p.codigo]
         fat_p = somar_faturamento(ativos[ativos["codigo_promotor"] == p.codigo])
-        custo_p = sum(custo_mes[p.codigo].values())
+        custo_p = custo_do_promotor[p.codigo]
         visitas_p = pd.to_numeric(lojas_p["visitas_semana"], errors="coerce").dropna()
         linhas_promotores.append({
             "codigo": p.codigo, "nome": p.nome, "supervisor": p.supervisor, "municipio": p.municipio,
@@ -294,36 +301,53 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
     return {"resumo": resumo, "promotores": linhas_promotores, "lojas": linhas_lojas, "regras": regras_usadas,
             "grade": _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados),
             "custos": bloco_custos,
-            "por_uf": _resumo_por_uf(proms, lojas, ativos, custo_mes, bloco_custos, somar_faturamento)}
+            "por_uf": _resumo_por_uf(proms, lojas, ativos, custo_do_promotor, somar_faturamento)}
 
 
-def _resumo_por_uf(proms, lojas, ativos, custo_mes, bloco_custos, somar_faturamento) -> list:
-    """Os 3 blocos da aba RESUMO (monitoramento, custo e faturamento) por UF e supervisor do promotor.
+def _resumo_por_uf(proms, lojas, ativos, custo_do_promotor, somar_faturamento) -> list:
+    """Tabela do Resumo por UF da loja → supervisor → promotor (no lugar da aba RESUMO da planilha).
 
-    Uma linha por UF (subtotal) seguida das linhas dos supervisores daquela UF.
+    O custo do promotor vai para a UF de cada loja, na mesma divisão usada nas lojas. Promotor que atende
+    duas UFs aparece nas duas, cada uma com a sua parte. A parte do custo que não foi para nenhuma loja
+    (mês sem loja no roteiro) fica na UF do cadastro do promotor.
     """
-    custo_mensal = {c["codigo"]: c for c in bloco_custos}
-    proms = proms.assign(uf=proms["uf"].fillna("").str.upper() if "uf" in proms else "")
+    uf_da_linha = lojas.set_index("linha")["uf"].fillna("").str.upper().replace("", "—")
+    ativos = ativos.assign(uf=ativos["linha"].map(uf_da_linha).fillna("—"))
+    nomes = dict(zip(proms["codigo"], proms["nome"]))
+    supervisores = {c: s or "(sem supervisor)" for c, s in zip(proms["codigo"], proms["supervisor"].fillna(""))}
+    uf_cadastro = {c: (u or "").upper() or "—"
+                   for c, u in zip(proms["codigo"], proms["uf"] if "uf" in proms else [""] * len(proms))}
 
-    def linha(nivel, uf, supervisor, grupo):
-        codigos = set(grupo["codigo"])
-        lojas_g = lojas[lojas["codigo_promotor"].isin(codigos)]
+    # Custo de cada (UF, promotor): o atribuído às lojas daquela UF + o que sobrou, na UF do cadastro.
+    custo = ativos.groupby(["uf", "codigo_promotor"])["custo"].sum().to_dict()
+    for codigo in proms["codigo"]:
+        resto = custo_do_promotor[codigo] - sum(v for (u, c), v in custo.items() if c == codigo)
+        if resto > 0.005 or not any(c == codigo for (_, c) in custo):
+            chave = (uf_cadastro[codigo], codigo)
+            custo[chave] = custo.get(chave, 0.0) + max(resto, 0.0)
+
+    def linha(nivel, uf, nome, pares, codigo=""):
+        codigos = {c for _, c in pares}
+        linhas_ = ativos[ativos["uf"].eq(uf) & ativos["codigo_promotor"].isin(codigos)]["linha"].unique()
+        lojas_g = lojas[lojas["linha"].isin(linhas_)]
         visitas = pd.to_numeric(lojas_g["visitas_semana"], errors="coerce").dropna()
-        custo = sum(sum(custo_mes[c].values()) for c in codigos)
-        fat = somar_faturamento(ativos[ativos["codigo_promotor"].isin(codigos)])
-        mensal = {campo: _arredondar(sum(custo_mensal[c][campo] for c in codigos if c in custo_mensal))
-                  for campo in ("salario", "ajuda_custo", "vale_transporte", "outros", "total")}
-        return {"nivel": nivel, "uf": uf or "—", "supervisor": supervisor or "(sem supervisor)",
+        custo_g = sum(custo[p] for p in pares)
+        fat = somar_faturamento(ativos[ativos["uf"].eq(uf) & ativos["codigo_promotor"].isin(codigos)])
+        return {"nivel": nivel, "uf": uf, "nome": nome, "codigo": codigo, "supervisor": nome if nivel == "supervisor" else "",
                 "promotores": len(codigos), "lojas": int(lojas_g.drop_duplicates(["chave", "loja"]).shape[0]),
                 "visitas_semana": _arredondar(visitas.sum()) if not visitas.empty else None,
-                "custo_mensal": mensal, "custo_periodo": _arredondar(custo), "faturamento": _arredondar(fat),
-                "percentual_custo": _percentual(custo, fat)}
+                "custo_periodo": _arredondar(custo_g), "faturamento": _arredondar(fat),
+                "percentual_custo": _percentual(custo_g, fat)}
 
     linhas = []
-    for uf, grupo_uf in sorted(proms.groupby("uf"), key=lambda g: (g[0] == "", g[0])):
-        linhas.append(linha("uf", uf, "", grupo_uf))
-        for supervisor, grupo in sorted(grupo_uf.groupby("supervisor"), key=lambda g: (g[0] == "", g[0])):
-            linhas.append(linha("supervisor", uf, supervisor, grupo))
+    for uf in sorted({u for u, _ in custo}, key=lambda u: (u == "—", u)):
+        da_uf = [p for p in custo if p[0] == uf]
+        linhas.append(linha("uf", uf, uf, da_uf))
+        for sup in sorted({supervisores[c] for _, c in da_uf}, key=lambda s: (s == "(sem supervisor)", s)):
+            da_equipe = [p for p in da_uf if supervisores[p[1]] == sup]
+            linhas.append(linha("supervisor", uf, sup, da_equipe))
+            for par in sorted(da_equipe, key=lambda p: nomes[p[1]]):
+                linhas.append(linha("promotor", uf, nomes[par[1]], [par], codigo=par[1]))
     return linhas
 
 

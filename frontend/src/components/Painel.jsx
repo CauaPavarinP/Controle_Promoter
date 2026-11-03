@@ -216,7 +216,7 @@ export default function Painel({ usuario, aoSair }) {
         {aba === 'resumo' && temDados && dados && (
           <div className={carregando ? 'atualizando' : ''}>
             <CardsResumo resumo={dados.resumo} regras={dados.regras} />
-            <ResumoArvore porUf={dados.por_uf} promotores={dados.promotores} resumo={dados.resumo}
+            <ResumoArvore porUf={dados.por_uf} resumo={dados.resumo}
               regras={dados.regras} aoAbrirPromotor={verLojasDoPromotor} />
           </div>
         )}

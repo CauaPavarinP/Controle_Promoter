@@ -1,4 +1,4 @@
-// Tabela única do Resumo, que abre em níveis: UF → supervisor → promotor.
+// Tabela única do Resumo, que abre em níveis: UF da loja → supervisor → promotor.
 // Junta os blocos Monitoramento, Custo e Faturamento PDV da aba RESUMO da planilha.
 import { useState } from 'react'
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
@@ -14,18 +14,17 @@ const COLUNAS = [
   { campo: 'percentual_custo', titulo: 'Custo ÷ faturamento', num: true },
 ]
 
-/** Monta a árvore a partir das linhas por UF/supervisor e da lista de promotores do painel. */
-function montarArvore(porUf, promotores) {
+/** Monta a árvore com as linhas do painel, que já vêm na ordem UF → supervisor → promotor. */
+function montarArvore(porUf) {
   const ufs = []
   for (const l of porUf) {
     if (l.nivel === 'uf') {
-      ufs.push({ ...l, chave: `uf-${l.uf}`, nome: l.uf, filhos: [] })
+      ufs.push({ ...l, chave: `uf-${l.uf}`, filhos: [] })
+    } else if (l.nivel === 'supervisor') {
+      ufs[ufs.length - 1].filhos.push({ ...l, chave: `s-${l.uf}-${l.nome}`, filhos: [] })
     } else {
-      const uf = ufs[ufs.length - 1]
-      const daEquipe = promotores
-        .filter((p) => p.uf === l.uf && (p.supervisor || '(sem supervisor)') === l.supervisor)
-        .map((p) => ({ ...p, chave: `p-${p.codigo}`, nome: p.nome, promotores: null, codigo: p.codigo }))
-      uf.filhos.push({ ...l, chave: `s-${l.uf}-${l.supervisor}`, nome: l.supervisor, filhos: daEquipe })
+      const equipe = ufs[ufs.length - 1].filhos
+      equipe[equipe.length - 1].filhos.push({ ...l, chave: `p-${l.uf}-${l.codigo}`, promotores: null })
     }
   }
   return ufs
@@ -40,10 +39,10 @@ function Celula({ coluna, linha, regras }) {
   return valor ?? '—'
 }
 
-export default function ResumoArvore({ porUf, promotores, resumo, regras, aoAbrirPromotor }) {
+export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor }) {
   const [abertos, setAbertos] = useState(() => new Set())
   const imprimindo = useImprimindo()
-  const arvore = montarArvore(porUf, promotores)
+  const arvore = montarArvore(porUf)
   const total = { ...resumo, nome: 'Total geral', custo_periodo: resumo.custo }
   const aberto = (chave) => imprimindo || abertos.has(chave)
 
@@ -90,7 +89,9 @@ export default function ResumoArvore({ porUf, promotores, resumo, regras, aoAbri
         </div>
       </div>
       <p className="dica nao-imprimir">
-        Clique numa UF para ver os supervisores, num supervisor para ver os promotores e num promotor para ver as lojas dele.
+        A UF é a da loja: promotor que atende mais de uma UF aparece em cada uma, com a parte do custo dele que foi para
+        aquelas lojas. Clique numa UF para ver os supervisores, num supervisor para ver os promotores e num promotor para
+        ver as lojas dele.
       </p>
       <div className="tabela-rolagem">
         <table className="arvore">

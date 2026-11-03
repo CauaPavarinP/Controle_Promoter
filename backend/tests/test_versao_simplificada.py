@@ -15,18 +15,37 @@ def test_resumo_por_uf_e_supervisor(cliente):
     painel = cliente.get("/api/painel", params=PERIODO).json()
     linhas = painel["por_uf"]
     ufs = [l for l in linhas if l["nivel"] == "uf"]
-    supervisores = [l for l in linhas if l["nivel"] == "supervisor"]
-    assert ufs and supervisores
-    # As linhas de UF somam o total do resumo (custo e promotores).
-    assert sum(l["promotores"] for l in ufs) == painel["resumo"]["promotores"]
+    assert ufs and any(l["nivel"] == "promotor" for l in linhas)
+    # As UFs somam os cartões do Resumo.
     assert round(sum(l["custo_periodo"] for l in ufs), 2) == painel["resumo"]["custo"]
-    # Cada supervisor aparece logo depois da sua UF e soma o mesmo que ela.
-    for uf in ufs:
-        da_uf = [s for s in supervisores if s["uf"] == uf["uf"]]
-        assert sum(s["promotores"] for s in da_uf) == uf["promotores"]
-        # Os promotores da UF (que a tela abre no 3º nível) somam o custo da UF.
-        da_uf_p = [p for p in painel["promotores"] if p["uf"] == uf["uf"]]
-        assert round(sum(p["custo_periodo"] for p in da_uf_p), 2) == uf["custo_periodo"]
+    assert round(sum(l["faturamento"] for l in ufs), 2) == painel["resumo"]["faturamento"]
+    # Cada nível soma o de cima: supervisores somam a UF, promotores somam o supervisor.
+    for i, linha in enumerate(linhas):
+        if linha["nivel"] == "promotor":
+            continue
+        filho = "supervisor" if linha["nivel"] == "uf" else "promotor"
+        abaixo = []
+        for outra in linhas[i + 1:]:
+            if outra["nivel"] == linha["nivel"] or (linha["nivel"] == "supervisor" and outra["nivel"] == "uf"):
+                break
+            if outra["nivel"] == filho:
+                abaixo.append(outra)
+        assert round(sum(x["custo_periodo"] for x in abaixo), 2) == linha["custo_periodo"]
+
+
+def test_filtro_de_uf_usa_so_o_custo_das_lojas_da_uf(cliente):
+    entrar(cliente)
+    importar_cadastros(cliente)
+    importar_faturamento(cliente)
+    for uf in ("SC", "PR"):
+        painel = cliente.get("/api/painel", params={**PERIODO, "uf": uf}).json()
+        custo_lojas = sum(l["custo_periodo"] for l in painel["lojas"])
+        assert abs(painel["resumo"]["custo"] - custo_lojas) < 0.05
+        assert {l["uf"] for l in painel["por_uf"]} == {uf}
+    # Período invertido na aba Faturamento é desvirado.
+    certo = cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"]
+    invertido = cliente.get("/api/faturamento", params={"inicio": "2026-09", "fim": "2026-01"}).json()["totais"]["total"]
+    assert invertido == certo > 0
 
 
 def test_aba_faturamento_mostra_tudo_do_erp(cliente):
