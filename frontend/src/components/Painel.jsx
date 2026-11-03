@@ -3,7 +3,6 @@ import { api } from '../api.js'
 import { formatarMes } from '../formato.js'
 import Filtros from './Filtros.jsx'
 import CardsResumo from './CardsResumo.jsx'
-import NaoCompensa from './NaoCompensa.jsx'
 import ResumoArvore from './ResumoArvore.jsx'
 import Faturamento from './Faturamento.jsx'
 import LojasUf from './LojasUf.jsx'
@@ -217,8 +216,6 @@ export default function Painel({ usuario, aoSair }) {
         {aba === 'resumo' && temDados && dados && (
           <div className={carregando ? 'atualizando' : ''}>
             <CardsResumo resumo={dados.resumo} regras={dados.regras} />
-            <NaoCompensa lojas={dados.lojas} promotores={dados.promotores} regras={dados.regras}
-              aoAbrirPromotor={verLojasDoPromotor} />
             <ResumoArvore porUf={dados.por_uf} promotores={dados.promotores} resumo={dados.resumo}
               regras={dados.regras} aoAbrirPromotor={verLojasDoPromotor} />
           </div>

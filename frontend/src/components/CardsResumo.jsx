@@ -1,6 +1,6 @@
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
 
-// Os 4 números principais do Resumo. Promotores, lojas e visitas ficam como detalhe dos cartões.
+// Os 4 números principais do Resumo: custo, faturamento, custo ÷ faturamento, promotores e lojas.
 export default function CardsResumo({ resumo, regras }) {
   return (
     <>
@@ -8,22 +8,22 @@ export default function CardsResumo({ resumo, regras }) {
         <div className="card">
           <span>Custo dos promotores</span>
           <strong>{formatarMoeda(resumo.custo)}</strong>
-          <small>{resumo.promotores} promotor(es) · {resumo.meses} mês(es)</small>
+          <small>soma de {resumo.meses} mês(es)</small>
         </div>
         <div className="card">
           <span>Faturamento das lojas</span>
           <strong>{formatarMoeda(resumo.faturamento)}</strong>
-          <small>{resumo.lojas} loja(s) atendida(s)</small>
+          <small>das lojas atendidas, pelo ERP</small>
         </div>
         <div className="card">
           <span>Custo ÷ faturamento</span>
           <strong className={classePercentual(resumo.percentual_custo, regras)}>{formatarPercentual(resumo.percentual_custo)}</strong>
-          <small>{resumo.visitas_semana ?? '—'} visitas por semana</small>
+          <small>quanto o promotor custa sobre o que as lojas compram</small>
         </div>
-        <div className={`card ${resumo.lojas_sem_compra > 0 ? 'card-alerta' : ''}`}>
-          <span>Lojas visitadas sem compra</span>
-          <strong>{resumo.lojas_sem_compra}</strong>
-          <small>recebem o promotor e não compraram no período</small>
+        <div className="card">
+          <span>Promotores e lojas</span>
+          <strong>{resumo.promotores} · {resumo.lojas}</strong>
+          <small>promotores · lojas atendidas</small>
         </div>
       </section>
       {resumo.cnpjs_compartilhados > 0 && (

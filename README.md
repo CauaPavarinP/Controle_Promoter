@@ -11,7 +11,7 @@ Versão simplificada (branch `versao-simplificada`), com 4 abas:
 
 | Aba | O que mostra | Como atualiza |
 |---|---|---|
-| **Resumo** | 4 cartões (custo, faturamento, custo ÷ faturamento, lojas visitadas sem compra); **Onde o custo não compensa** (lojas que compram pouco por visita e promotores com maior % de custo); e uma tabela que abre em níveis **UF → supervisor → promotor** (promotores, lojas, visitas, custo, faturamento, %). Clicar no promotor abre as lojas dele | Calculado a partir das outras abas |
+| **Resumo** | 4 cartões (custo, faturamento, custo ÷ faturamento, promotores e lojas) e uma tabela que abre em níveis **UF → supervisor → promotor** (promotores, lojas, visitas, custo, faturamento, %), no lugar da aba RESUMO da planilha. Clicar no promotor abre as lojas dele | Calculado a partir das outras abas |
 | **Faturamento** | Tudo o que o ERP faturou no período, por UF e por cliente, mês a mês (inclusive clientes fora do roteiro). Clicar num valor abre as notas | **Importar faturamento do ERP** (arquivo no layout da aba FATURAMENTO ou a própria planilha), com pré-visualização, confirmação e desfazer |
 | **Promotores** | Promotores e repositores com custo por competência e as lojas de cada um; supervisores | Importar a aba PROMOTORES BRASIL ou cadastrar/editar na tela |
 | **Lojas por UF** | Substitui as abas SC, SP, PR, MG e RS: supervisor, promotor, CNPJ, PDV, cidade, UF, JAN…DEZ e TOTAL. Botões por UF | Importar as abas da planilha ou **cadastrar loja na tela** (promotor, CNPJ, nome, cidade, UF, visitas/semana). Cada loja tem o menu **Alterar…** (editar dados, visitas, trocar promotor, encerrar) |
@@ -24,8 +24,7 @@ Versão simplificada (branch `versao-simplificada`), com 4 abas:
   em uso, cabeçalho colorido e fixo, filtro nas colunas, R$ e % já formatados (zero aparece como "-"), linhas
   alternadas e total em negrito. Botão **Imprimir** no Resumo e em Lojas por UF.
 - **Visitas por semana:** a planilha não tem essa informação. Enquanto não for preenchida (Lojas por UF → Alterar…
-  → Visitas por semana), toda loja do roteiro conta como visitada, a lista "Onde o custo não compensa" ordena pelo
-  faturamento e o custo do promotor é dividido em partes iguais entre as lojas.
+  → Visitas por semana), o custo do promotor é dividido em partes iguais entre as lojas dele.
 - **Usuários** com perfis (administrador, consulta, supervisor), senha criptografada e bloqueio após 5 tentativas.
 - Só o administrador importa e cadastra; os outros perfis consultam.
 

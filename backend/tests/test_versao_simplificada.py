@@ -27,9 +27,6 @@ def test_resumo_por_uf_e_supervisor(cliente):
         # Os promotores da UF (que a tela abre no 3º nível) somam o custo da UF.
         da_uf_p = [p for p in painel["promotores"] if p["uf"] == uf["uf"]]
         assert round(sum(p["custo_periodo"] for p in da_uf_p), 2) == uf["custo_periodo"]
-    # Lojas que recebem visita e não compraram nada no período.
-    sem_compra = {(l["cnpj"], l["loja"]) for l in painel["lojas"] if l["faturamento"] <= 0 and l["cnpj"]}
-    assert painel["resumo"]["lojas_sem_compra"] == len(sem_compra)
 
 
 def test_aba_faturamento_mostra_tudo_do_erp(cliente):

@@ -288,9 +288,6 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         "faturamento": _arredondar(fat_total),
         "percentual_custo": _percentual(custo_total, fat_total),
         "cnpjs_compartilhados": int(unicas[unicas["compartilhado"]]["chave"].nunique()),
-        # Lojas do roteiro (com CNPJ) que não compraram nada no período. A planilha não tem as visitas
-        # por semana, então toda loja do roteiro conta como visitada.
-        "lojas_sem_compra": int(((unicas["faturamento"] <= 0) & (unicas["chave"] != "")).sum()),
     }
     regras_usadas = {c: regras[c] for c in ("rateio_custo", "limite_percentual")}
     bloco_custos = _bloco_custos(proms, custos, fim)

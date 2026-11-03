@@ -359,13 +359,4 @@ table.arvore tr.nivel-1 td { font-weight: 600; }
 table.arvore .seta { display: inline-block; width: 18px; color: var(--primaria); }
 table.arvore tfoot td { font-weight: 700; border-top: 2px solid var(--borda); }
 .cards-4 { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-.card.card-alerta { border-left-color: var(--critico); }
 
-/* Onde o custo não compensa */
-.duas-colunas { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
-.duas-colunas > div { min-width: 0; }
-.duas-colunas h3 { margin: 0 0 4px; font-size: 16px; }
-.sublinha { display: block; font-size: 12px; }
-@media (max-width: 700px) { .duas-colunas { grid-template-columns: 1fr; } }
-.alternar-pequeno { margin: 4px 0 6px; }
-.alternar-pequeno button { padding: 3px 10px; font-size: 13px; }
