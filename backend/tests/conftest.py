@@ -1,4 +1,5 @@
 import importlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,7 +34,15 @@ def recarregar_app():
 
 @pytest.fixture()
 def banco(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'teste.db'}")
+    # TEST_DATABASE_URL=postgresql://... roda os testes num Postgres (como no Render); o banco é zerado a cada teste.
+    url_postgres = os.getenv("TEST_DATABASE_URL", "")
+    if url_postgres:
+        from sqlalchemy import create_engine, text
+        motor = create_engine(url_postgres.replace("postgresql://", "postgresql+psycopg://", 1))
+        with motor.begin() as conexao:
+            conexao.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
+        motor.dispose()
+    monkeypatch.setenv("DATABASE_URL", url_postgres or f"sqlite:///{tmp_path / 'teste.db'}")
     monkeypatch.setenv("APP_USUARIO", "mauricio")
     monkeypatch.setenv("APP_SENHA", "senha-teste")
     monkeypatch.setenv("SECRET_KEY", "chave-teste")

@@ -12,7 +12,7 @@ import secrets
 import time
 
 import pandas as pd
-from sqlalchemy import and_, delete, func, inspect, or_, select, text
+from sqlalchemy import and_, delete, func, inspect, literal_column, or_, select, text
 from sqlalchemy.orm import Session
 
 from . import db
@@ -164,6 +164,10 @@ def erros_da_importacao(sessao: Session, importacao_id: int) -> list[dict]:
 # Consultas usadas pelo cálculo
 # ---------------------------------------------------------------------------
 
+# RECEITA vazia vira "". Sem parâmetro (literal) para o Postgres aceitar a mesma expressão no SELECT e no
+# GROUP BY (com parâmetro, cada um vira $1/$2 e ele recusa).
+_RECEITA = func.coalesce(FaturamentoItem.receita, literal_column("''"))
+
 COLUNAS_MENSAL = ["ano", "mes", "cnpj", "cod_cliente", "chave_tipo", "tipo_nf", "receita",
                   "total_venda", "vlr_total", "notas"]
 
@@ -172,12 +176,12 @@ def faturamento_mensal() -> pd.DataFrame:
     """Faturamento somado por mês, CNPJ, código de cliente, tipo de nota e RECEITA."""
     consulta = (select(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf,
                        FaturamentoItem.cod_cli, FaturamentoItem.tipo_nf_chave, func.min(FaturamentoItem.tipo_nf),
-                       func.coalesce(FaturamentoItem.receita, ""),
+                       _RECEITA,
                        func.coalesce(func.sum(FaturamentoItem.total_venda), 0),
                        func.coalesce(func.sum(FaturamentoItem.vlr_total), 0),
                        func.count(FaturamentoItem.num_nf.distinct()))
                 .group_by(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf, FaturamentoItem.cod_cli,
-                          FaturamentoItem.tipo_nf_chave, func.coalesce(FaturamentoItem.receita, "")))
+                          FaturamentoItem.tipo_nf_chave, _RECEITA))
     with db.engine.connect() as conexao:
         linhas = conexao.execute(consulta).all()
     df = pd.DataFrame(linhas, columns=COLUNAS_MENSAL)
@@ -190,7 +194,7 @@ def mensal_por_cliente(inicio: tuple[int, int], fim: tuple[int, int]) -> pd.Data
     """Faturamento do período somado por mês, CNPJ e tipo de nota, com razão social, cidade e UF do cliente."""
     indice = FaturamentoItem.ano * 12 + FaturamentoItem.mes
     consulta = (select(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf,
-                       FaturamentoItem.tipo_nf_chave, func.coalesce(FaturamentoItem.receita, ""),
+                       FaturamentoItem.tipo_nf_chave, _RECEITA,
                        func.coalesce(func.sum(FaturamentoItem.total_venda), 0),
                        func.coalesce(func.sum(FaturamentoItem.vlr_total), 0),
                        func.count(FaturamentoItem.num_nf.distinct()),
@@ -198,7 +202,7 @@ def mensal_por_cliente(inicio: tuple[int, int], fim: tuple[int, int]) -> pd.Data
                        func.max(FaturamentoItem.uf))
                 .where(indice >= inicio[0] * 12 + inicio[1], indice <= fim[0] * 12 + fim[1])
                 .group_by(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf,
-                          FaturamentoItem.tipo_nf_chave, func.coalesce(FaturamentoItem.receita, "")))
+                          FaturamentoItem.tipo_nf_chave, _RECEITA))
     with db.engine.connect() as conexao:
         linhas = conexao.execute(consulta).all()
     df = pd.DataFrame(linhas, columns=["ano", "mes", "cnpj", "chave_tipo", "receita", "total_venda", "vlr_total",

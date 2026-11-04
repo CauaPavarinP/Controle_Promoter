@@ -134,15 +134,14 @@ Abra http://localhost:5173, entre com o usuário/senha do `.env` e importe, nest
 
 Testes: `cd backend && pytest`
 
-## Publicar no Render (quando for a hora)
+## Publicar no Render
 
-- **Build:** `pip install -r backend/requirements.txt && cd frontend && npm ci && npm run build`
-- **Start:** `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- **Variáveis de ambiente:** `APP_USUARIO` e `APP_SENHA` (só para criar o primeiro administrador), `SECRET_KEY`,
-  `DATABASE_URL` (Postgres do Render), `AMBIENTE=producao`
-- O FastAPI entrega o React já compilado (`frontend/dist`): é **um serviço só**.
-- Confirme se o ambiente Python do Render tem Node disponível para o `npm run build`. Se não tiver, a
-  alternativa é fazer o build com Docker.
+- O serviço é criado com **Docker** (`Dockerfile` na raiz): uma etapa com Node gera o `frontend/dist` e a imagem
+  final só com Python roda o FastAPI, que entrega o React. É **um serviço só**.
+- **Banco:** Postgres do Render, na variável `DATABASE_URL`. As migrations rodam sozinhas ao iniciar.
+- **Variáveis de ambiente:** `DATABASE_URL`, `SECRET_KEY`, `AMBIENTE=producao` (já vem no Dockerfile) e
+  `APP_USUARIO` / `APP_SENHA` (só para criar o primeiro administrador; depois pode apagar).
+- Para rodar os testes num Postgres, como no Render: `TEST_DATABASE_URL=postgresql://... pytest`.
 
 ## Segurança
 
