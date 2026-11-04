@@ -65,13 +65,15 @@ function formatoDaColuna(coluna) {
   return coluna.num ? 'numero' : 'texto'
 }
 
+const SIGLAS = /\b(pdv|uf|cnpj|erp|cod|cli)\b/gi
 const tituloDoArquivo = (nome) => {
-  const texto = nome.replace(/[-_]+/g, ' ').trim()
+  const texto = nome.replace(/[-_]+/g, ' ').trim().replace(SIGLAS, (s) => s.toUpperCase())
   return texto.charAt(0).toUpperCase() + texto.slice(1)
 }
 
-/** Gera o .xlsx: linhas na ordem da tela e as linhas de total (rodapé) em negrito no fim. */
-export async function exportarExcel(nomeArquivo, colunas, linhas, totais = []) {
+/** Gera o .xlsx: linhas na ordem da tela, as linhas de total (rodapé) em negrito no fim e, se `destacar(linha)`
+ * disser, linhas em destaque (ex.: as UFs do Resumo). */
+export async function exportarExcel(nomeArquivo, colunas, linhas, totais = [], destacar = null) {
   const valores = (l) => colunas.map((c) => {
     const v = c.exportar ? c.exportar(l) : l[c.campo]
     return v === undefined ? null : v
@@ -87,6 +89,7 @@ export async function exportarExcel(nomeArquivo, colunas, linhas, totais = []) {
         colunas: colunas.map((c) => ({ titulo: c.titulo, formato: formatoDaColuna(c) })),
         linhas: linhas.map(valores),
         totais: totais.map(valores),
+        destaques: destacar ? linhas.flatMap((l, i) => (destacar(l) ? [i] : [])) : [],
       }),
     })
     if (!resposta.ok) {

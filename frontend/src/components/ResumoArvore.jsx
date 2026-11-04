@@ -76,7 +76,7 @@ export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor })
         ...s.filhos.map((p) => ({ ...p, tipo: 'Promotor', nome: `        ${p.nome}` })),
       ]),
     ])
-    exportarExcel('resumo-custo-x-faturamento', [{ campo: 'tipo', titulo: 'Nível' }, ...COLUNAS], todas, [{ ...total, tipo: 'Total' }])
+    exportarExcel('resumo-custo-x-faturamento', [{ campo: 'tipo', titulo: 'Nível' }, ...COLUNAS], todas, [{ ...total, tipo: 'Total' }], (l) => l.tipo === 'UF')
   }
 
   return (

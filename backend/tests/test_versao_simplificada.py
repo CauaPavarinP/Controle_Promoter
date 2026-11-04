@@ -101,7 +101,7 @@ def test_exportar_excel_formatado(cliente):
              "colunas": [{"titulo": "Loja", "formato": "texto"}, {"titulo": "Faturamento", "formato": "moeda"},
                          {"titulo": "% custo", "formato": "percentual"}],
              "linhas": [["=HYPERLINK(\"x\")", 1500.5, 8.1], ["Loja B", None, None]],
-             "totais": [["Total", 1500.5, 8.1]]}
+             "totais": [["Total", 1500.5, 8.1]], "destaques": [1]}
     resposta = cliente.post("/api/exportar", json=dados)
     assert resposta.status_code == 200, resposta.text
     assert resposta.headers["content-type"].startswith("application/vnd.openxmlformats")
@@ -112,6 +112,8 @@ def test_exportar_excel_formatado(cliente):
     assert aba["B5"].value == 1500.5 and "R$" in aba["B5"].number_format
     assert abs(aba["C5"].value - 0.081) < 1e-9 and aba["C5"].number_format.startswith("0.0%")
     assert aba["A7"].font.bold and aba.freeze_panes == "A5"
+    assert aba["A6"].font.bold and not aba["A5"].font.bold  # linha 1 (a partir de 0) em destaque
+    assert not aba.sheet_view.showGridLines
     cliente.post("/api/logout")
     assert cliente.post("/api/exportar", json=dados).status_code == 401
 
