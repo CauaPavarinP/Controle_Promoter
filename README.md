@@ -97,10 +97,7 @@ Regras fixas:
 
 ## Pendências com o Maurício / Rayan
 
-- Cada loja de rede tem código de cliente próprio no ERP, ou tudo é faturado na matriz?
-- Existe planilha de roteiro com a frequência de visitas por loja?
-- A integração direta com o ERP (sem exportar arquivo) depende de acesso ao banco ou à API do ERP, a combinar com a TI.
-- Quem vai usar o sistema? Cada supervisor vê só a própria equipe?
+As perguntas em aberto estão em [`docs/perguntas-mauricio.md`](docs/perguntas-mauricio.md).
 
 ## Rodar no computador (desenvolvimento)
 
