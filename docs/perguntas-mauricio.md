@@ -37,6 +37,9 @@ Atualizado em 04/11/2026. Marque a resposta ao lado de cada item.
    - Resposta:
 7. **Lojas com o mesmo CNPJ** — várias lojas (principalmente em MG: 358 lojas com 4 CNPJs) usam o mesmo
    CNPJ. Cada loja de rede tem um código de cliente próprio no ERP (COD CLI), ou tudo é faturado na matriz?
+   - Exemplo: cerca de 20 lojas ANGELONI em SC (Centro, Laguna, Santa Mônica, Tubarão, 11, 13, 15…) estão com o
+     mesmo CNPJ 83.646.984/0108-49. Esse CNPJ é o centro de distribuição do Angeloni? Dá para saber quanto
+     cada loja comprou (COD CLI por loja no ERP), ou só o total da rede?
    - Resposta:
 8. **Lojas com faturamento zero** — algumas lojas não têm nenhuma nota no ERP de janeiro a setembro
    (ex.: GIASSI - AREIAS, CONDOR 42). O CNPJ está certo ou a loja realmente não comprou?
