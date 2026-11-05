@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 from contextlib import asynccontextmanager
 
 from urllib.parse import urlsplit
@@ -34,6 +35,8 @@ log = logging.getLogger("uvicorn.error")
 async def ciclo_de_vida(_app):
     # Cria/atualiza as tabelas (migrations), o primeiro administrador e converte dados antigos.
     preparar_banco()
+    if PRODUCAO:  # soma o faturamento já ao ligar (no servidor gratuito leva de segundos a minutos)
+        threading.Thread(target=faturamento.aquecer_cache, daemon=True).start()
     yield
 
 

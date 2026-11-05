@@ -189,6 +189,7 @@ def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = Non
             "UPDATE importacoes SET situacao = 'substituida' WHERE tipo = 'faturamento' AND situacao = 'ativa' "
             "AND id <> :atual AND NOT EXISTS (SELECT 1 FROM faturamento_itens f WHERE f.importacao_id = importacoes.id)"),
             {"atual": importacao_id})
+    limpar_cache()
     _previas.pop(token, None)
     return {"importacao_id": importacao_id, "linhas_importadas": len(itens),
             "meses": [_rotulo(a, m) for a, m in meses], "meses_substituidos": [_rotulo(a, m) for a, m in existentes]}
@@ -203,6 +204,7 @@ def desfazer(sessao: Session, importacao_id: int) -> dict:
     apagados = sessao.execute(delete(FaturamentoItem).where(FaturamentoItem.importacao_id == importacao_id)).rowcount
     importacao.situacao = "desfeita"
     sessao.commit()
+    limpar_cache()
     return {"itens_apagados": apagados}
 
 
@@ -253,8 +255,49 @@ COLUNAS_MENSAL = ["ano", "mes", "cnpj", "cod_cliente", "chave_tipo", "tipo_nf", 
                   "total_venda", "vlr_total", "notas"]
 
 
+# Somar as ~317 mil linhas do ano leva menos de 1 s num computador comum, mas de 30 s a minutos no Postgres
+# gratuito do Render, e cada tela (Resumo, Faturamento, Lojas) pede essa soma. Por isso o resultado fica guardado
+# na memória (~15 MB) e só é refeito quando o faturamento muda (importar, substituir meses ou desfazer).
+# Pedidos que chegam enquanto a soma está sendo feita esperam por ela, em vez de cada um abrir outra no banco
+# (era isso que esgotava as conexões e derrubava as outras telas com erro 500).
+_cache: dict[str, dict] = {}
+_trava_cache = threading.Lock()
+_versao_cache = 0
+
+
+def _do_cache(chave: str, calcular) -> pd.DataFrame:
+    with _trava_cache:
+        entrada = _cache.setdefault(chave, {"trava": threading.Lock(), "versao": None, "valor": None})
+    with entrada["trava"]:
+        if entrada["versao"] != _versao_cache:
+            versao = _versao_cache  # se o faturamento mudar durante a soma, o próximo pedido refaz
+            entrada["valor"] = calcular()
+            entrada["versao"] = versao
+        return entrada["valor"].copy()  # cópia: quem usa pode alterar à vontade
+
+
+def limpar_cache() -> None:
+    """Chamar sempre que faturamento_itens mudar (depois do commit)."""
+    global _versao_cache
+    with _trava_cache:
+        _versao_cache += 1
+
+
+def aquecer_cache() -> None:
+    """Faz as somas com antecedência (ao ligar o servidor), para a primeira tela não esperar."""
+    try:
+        faturamento_mensal()
+        _mensal_por_cliente_completo()
+    except Exception:  # noqa: BLE001 - se falhar aqui, a primeira tela tenta de novo
+        log.exception("Não foi possível pré-calcular o faturamento")
+
+
 def faturamento_mensal() -> pd.DataFrame:
     """Faturamento somado por mês, CNPJ, código de cliente, tipo de nota e RECEITA."""
+    return _do_cache("mensal", _somar_faturamento_mensal)
+
+
+def _somar_faturamento_mensal() -> pd.DataFrame:
     consulta = (select(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf,
                        FaturamentoItem.cod_cli, FaturamentoItem.tipo_nf_chave, func.min(FaturamentoItem.tipo_nf),
                        _RECEITA,
@@ -273,7 +316,18 @@ def faturamento_mensal() -> pd.DataFrame:
 
 def mensal_por_cliente(inicio: tuple[int, int], fim: tuple[int, int]) -> pd.DataFrame:
     """Faturamento do período somado por mês, CNPJ e tipo de nota, com razão social, cidade e UF do cliente."""
-    indice = FaturamentoItem.ano * 12 + FaturamentoItem.mes
+    df = _mensal_por_cliente_completo()
+    indice = df["ano"] * 12 + df["mes"]
+    dentro = (indice >= inicio[0] * 12 + inicio[1]) & (indice <= fim[0] * 12 + fim[1])
+    return df[dentro].reset_index(drop=True)
+
+
+def _mensal_por_cliente_completo() -> pd.DataFrame:
+    """Todos os meses (o período é filtrado depois, na memória)."""
+    return _do_cache("por_cliente", _somar_mensal_por_cliente)
+
+
+def _somar_mensal_por_cliente() -> pd.DataFrame:
     consulta = (select(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf,
                        FaturamentoItem.tipo_nf_chave, _RECEITA,
                        func.coalesce(func.sum(FaturamentoItem.total_venda), 0),
@@ -281,7 +335,6 @@ def mensal_por_cliente(inicio: tuple[int, int], fim: tuple[int, int]) -> pd.Data
                        func.count(FaturamentoItem.num_nf.distinct()),
                        func.max(FaturamentoItem.razao_social), func.max(FaturamentoItem.cidade),
                        func.max(FaturamentoItem.uf))
-                .where(indice >= inicio[0] * 12 + inicio[1], indice <= fim[0] * 12 + fim[1])
                 .group_by(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf,
                           FaturamentoItem.tipo_nf_chave, _RECEITA))
     with db.engine.connect() as conexao:
