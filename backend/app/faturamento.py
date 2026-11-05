@@ -55,6 +55,8 @@ def preparar_previa(conteudo: bytes, nome: str, usuario: str, cnpjs_no_roteiro: 
                      .agg(valor=("total_venda", "sum"), razao_social=("razao_social", "first"),
                           cidade=("cidade", "first"), uf=("uf", "first"))
                      .reset_index())
+    for coluna in ("cnpj_cpf", "razao_social", "cidade", "uf"):  # "category" vazio vira NaN: volta para texto
+        por_cnpj[coluna] = por_cnpj[coluna].astype(object).where(por_cnpj[coluna].notna(), "")
     sem_roteiro = por_cnpj[~por_cnpj["cnpj_cpf"].isin(cnpjs_no_roteiro)].sort_values("valor", ascending=False)
 
     token = secrets.token_urlsafe(16)
@@ -101,8 +103,13 @@ def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = Non
                 avisos=json.dumps(previa["avisos"] + (avisos_extra or []), ensure_ascii=False),
                 log_erros=json.dumps(previa["erros"], ensure_ascii=False), situacao="ativa")
         ).inserted_primary_key[0]
-        itens.assign(importacao_id=importacao_id).to_sql(
-            "faturamento_itens", conexao, if_exists="append", index=False, chunksize=5000)
+        # Em pedaços: o to_sql converte o pedaço inteiro para texto de uma vez (com 317 mil linhas estourava
+        # a memória do servidor).
+        for inicio in range(0, len(itens), 5000):
+            pedaco = itens.iloc[inicio:inicio + 5000].assign(importacao_id=importacao_id)
+            for coluna in pedaco.columns[pedaco.dtypes == "category"]:
+                pedaco[coluna] = pedaco[coluna].astype(object).where(pedaco[coluna].notna(), None)
+            pedaco.to_sql("faturamento_itens", conexao, if_exists="append", index=False)
         # Importações antigas que ficaram sem nenhum item (todos os meses substituídos).
         conexao.execute(text(
             "UPDATE importacoes SET situacao = 'substituida' WHERE tipo = 'faturamento' AND situacao = 'ativa' "
