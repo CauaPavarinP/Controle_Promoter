@@ -224,26 +224,83 @@ def _texto_celula(valor):
     return normalizar_codigo(valor) or None
 
 
-def ler_faturamento(conteudo: bytes, nome_arquivo: str):
-    """Lê a exportação do ERP. Devolve (itens válidos, erros [{linha, motivo}], avisos, aba)."""
-    tabelas = ler_tabelas(conteudo, nome_arquivo, APELIDOS_FATURAMENTO, _valida_faturamento)
-    if not tabelas:
-        raise ErroImportacao(
-            "Não encontrei a base de faturamento. Colunas obrigatórias: CNPJ CPF, NUM NF, TOTAL VENDA (ou VLR TOTAL) "
-            "e a data de emissão (ou ANO e MÊS).")
-    aba, df = tabelas[0]
-    avisos = []
-    if len(tabelas) > 1:
-        avisos.append(f"Mais de uma aba parece base de faturamento; usei só a aba '{aba}'.")
+# Lido aos poucos: a aba FATURAMENTO real tem ~317 mil linhas e 40 colunas. Lida de uma vez passava de 1 GB de
+# memória (o Render grátis tem 512 MB). Em partes, com os textos repetidos guardados como "category", fica em
+# ~1/5 disso.
+LINHAS_POR_PARTE = 5_000
+CAMPOS_REPETIDOS = CAMPOS_TEXTO + ["cnpj_cpf", "tipo_nf", "tipo_nf_chave"]
+
+
+def _cabecalho(linhas: list, apelidos: dict, valida):
+    """(índice da linha de cabeçalho, mapa campo -> coluna) entre as primeiras linhas, ou None."""
+    melhor = None
+    for indice, linha in enumerate(linhas):
+        mapa = _mapear_colunas(list(linha), apelidos)
+        if valida(mapa) and (melhor is None or len(mapa) > len(melhor[1])):
+            melhor = (indice, mapa)
+    return melhor
+
+
+def _partes_do_arquivo(conteudo: bytes, nome_arquivo: str, apelidos: dict, valida):
+    """Acha a aba e o cabeçalho e devolve (aba, mapa, nº da 1ª linha de dados no Excel, avisos, gerador de partes).
+
+    Cada parte é um DataFrame só com as colunas reconhecidas, com no máximo LINHAS_POR_PARTE linhas.
+    """
+    from itertools import chain, islice
+
+    def em_partes(linhas, mapa):
+        posicoes = list(mapa.items())
+        while True:
+            bloco = list(islice(linhas, LINHAS_POR_PARTE))
+            if not bloco:
+                return
+            yield pd.DataFrame({campo: [linha[pos] if pos < len(linha) else None for linha in bloco]
+                                for campo, pos in posicoes})
+
+    if nome_arquivo.lower().endswith(".csv"):
+        texto = conteudo.decode("utf-8-sig", errors="replace")
+        primeira = texto.split("\n", 1)[0]
+        separador = ";" if primeira.count(";") > primeira.count(",") else ","
+        try:
+            linhas = (tuple(c if c != "" else None for c in linha)
+                      for linha in __import__("csv").reader(io.StringIO(texto), delimiter=separador))
+            primeiras = list(islice(linhas, 30))
+        except Exception as erro:  # noqa: BLE001 - CSV mal formado vira mensagem para o usuário
+            raise ErroImportacao(f"Não consegui ler o CSV: {erro}") from erro
+        achado = _cabecalho(primeiras, apelidos, valida)
+        if achado is None:
+            return None
+        indice, mapa = achado
+        return "CSV", mapa, indice + 2, [], em_partes(chain(primeiras[indice + 1:], linhas), mapa)
+
+    from openpyxl import load_workbook
+    try:
+        livro = load_workbook(io.BytesIO(conteudo), read_only=True, data_only=True)
+    except Exception as erro:  # noqa: BLE001 - arquivo que não é Excel vira mensagem para o usuário
+        raise ErroImportacao(f"Não consegui abrir o arquivo como Excel: {erro}") from erro
+    candidatas = []
+    for aba in livro.worksheets:
+        linhas = aba.iter_rows(values_only=True)
+        primeiras = list(islice(linhas, 30))
+        achado = _cabecalho(primeiras, apelidos, valida)
+        if achado is not None:
+            candidatas.append((aba.title, achado, primeiras, linhas))
+    if not candidatas:
+        return None
+    nome_aba, (indice, mapa), primeiras, linhas = candidatas[0]
+    avisos = [f"Mais de uma aba parece base de faturamento; usei só a aba '{nome_aba}'."] if len(candidatas) > 1 else []
+    return nome_aba, mapa, indice + 2, avisos, em_partes(chain(primeiras[indice + 1:], linhas), mapa)
+
+
+def _tratar_parte(df: pd.DataFrame, primeira_linha: int, usar_vlr_total: bool):
+    """Valida e converte uma parte do faturamento. Devolve (itens válidos, erros [{linha, motivo}])."""
     for campo in APELIDOS_FATURAMENTO:
         if campo not in df:
             df[campo] = None
-    if df["total_venda"].isna().all():
-        avisos.append("O arquivo não tem a coluna TOTAL VENDA; usei VLR TOTAL no lugar.")
+    if usar_vlr_total:
         df["total_venda"] = df["vlr_total"]
-
-    # Número da linha no Excel, para o relatório de erros (cabeçalho + 1).
-    df["linha"] = range(2, len(df) + 2)
+    # Número da linha no Excel, para o relatório de erros.
+    df["linha"] = range(primeira_linha, primeira_linha + len(df))
     df = df[~df[["cnpj_cpf", "num_nf", "total_venda", "vlr_total"]].isna().all(axis=1)]  # linhas vazias
 
     df["cnpj_cpf"] = df["cnpj_cpf"].map(normalizar_cnpj)
@@ -265,8 +322,8 @@ def ler_faturamento(conteudo: bytes, nome_arquivo: str):
         erros.append({"linha": int(linha), "motivo": motivo})
     df = df[motivos == ""].copy()
 
-    df["ano"] = df["ano"].astype(int)
-    df["mes"] = df["mes"].astype(int)
+    df["ano"] = df["ano"].astype("int16")
+    df["mes"] = df["mes"].astype("int8")
     for campo in CAMPOS_TEXTO:
         df[campo] = df[campo].map(_texto_celula).map(
             lambda v, t=TAMANHOS[campo]: v[:t] if isinstance(v, str) else v)
@@ -274,7 +331,45 @@ def ler_faturamento(conteudo: bytes, nome_arquivo: str):
     df["tipo_nf"] = df["tipo_nf"].fillna("").astype(str).str.strip().replace("", SEM_TIPO).str[:60]
     df["tipo_nf_chave"] = df["tipo_nf"].map(normalizar_texto)
     df["data_emissao"] = df["data_emissao"].where(df["data_emissao"].notna(), None)
-    return df.drop(columns=["linha"]), erros, avisos, aba
+    for campo in CAMPOS_NUMERICOS:
+        df[campo] = df[campo].astype("float64")
+    for campo in CAMPOS_REPETIDOS:
+        df[campo] = df[campo].astype("category")
+    return df.drop(columns=["linha"]), erros
+
+
+def _juntar_partes(partes: list) -> pd.DataFrame:
+    """Junta as partes mantendo os textos como "category" (pd.concat simples voltaria tudo para texto)."""
+    if not partes:
+        return pd.DataFrame(columns=list(APELIDOS_FATURAMENTO) + ["tipo_nf_chave"])
+    colunas = {}
+    for campo in partes[0].columns:
+        if campo in CAMPOS_REPETIDOS:
+            colunas[campo] = pd.Series(pd.api.types.union_categoricals([p[campo] for p in partes], ignore_order=True))
+        else:
+            colunas[campo] = pd.concat([p[campo] for p in partes], ignore_index=True)
+    return pd.DataFrame(colunas)
+
+
+def ler_faturamento(conteudo: bytes, nome_arquivo: str):
+    """Lê a exportação do ERP. Devolve (itens válidos, erros [{linha, motivo}], avisos, aba)."""
+    achado = _partes_do_arquivo(conteudo, nome_arquivo, APELIDOS_FATURAMENTO, _valida_faturamento)
+    if achado is None:
+        raise ErroImportacao(
+            "Não encontrei a base de faturamento. Colunas obrigatórias: CNPJ CPF, NUM NF, TOTAL VENDA (ou VLR TOTAL) "
+            "e a data de emissão (ou ANO e MÊS).")
+    aba, mapa, primeira_linha, avisos, partes_brutas = achado
+    usar_vlr_total = "total_venda" not in mapa
+    if usar_vlr_total:
+        avisos.append("O arquivo não tem a coluna TOTAL VENDA; usei VLR TOTAL no lugar.")
+    partes, erros = [], []
+    for bruta in partes_brutas:
+        parte, erros_parte = _tratar_parte(bruta, primeira_linha, usar_vlr_total)
+        primeira_linha += len(bruta)
+        erros += erros_parte
+        if not parte.empty:
+            partes.append(parte)
+    return _juntar_partes(partes), erros, avisos, aba
 
 
 # ---------------------------------------------------------------------------
