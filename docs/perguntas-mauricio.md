@@ -51,6 +51,17 @@ Atualizado em 04/11/2026. Marque a resposta ao lado de cada item.
 
 ## Faturamento (aba FATURAMENTO)
 
+0. **Colunas feitas à mão** — ele contou que as colunas em cinza da aba FATURAMENTO não vêm do ERP:
+   **AJ – QTDE/CAIXA**, **AK – BONIFICAÇÃO** e **AL – TOTAL VENDAS**. O sistema usa o TOTAL VENDAS como valor do
+   faturamento (igual ao SOMASE das abas por UF).
+   - Como cada uma é calculada? É fórmula (qual?) ou ele digita/cola de outro lugar?
+   - Se for fórmula, o sistema pode calcular sozinho e ele passa a importar o arquivo do ERP direto, sem montar
+     essas colunas.
+   - Quando o arquivo vem sem TOTAL VENDAS, o sistema usa o VLR TOTAL: dá o mesmo valor? Se não, qual a diferença
+     (bonificação, devolução, desconto…)?
+   - A última coluna ("0", com o nome do representante) também é feita à mão?
+   - Resposta:
+
 11. **Setembro incompleto** — setembro tem muito menos linhas que os outros meses. A exportação foi feita
     no meio do mês?
     - Resposta:
