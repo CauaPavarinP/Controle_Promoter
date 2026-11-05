@@ -7,6 +7,7 @@ import io
 import re
 import unicodedata
 
+import numpy as np
 import pandas as pd
 
 SEM_TIPO = "Sem tipo"
@@ -241,10 +242,12 @@ def _cabecalho(linhas: list, apelidos: dict, valida):
     return melhor
 
 
-def _partes_do_arquivo(conteudo: bytes, nome_arquivo: str, apelidos: dict, valida):
+def _partes_do_arquivo(fonte, nome_arquivo: str, apelidos: dict, valida):
     """Acha a aba e o cabeçalho e devolve (aba, mapa, nº da 1ª linha de dados no Excel, avisos, gerador de partes).
 
-    Cada parte é um DataFrame só com as colunas reconhecidas, com no máximo LINHAS_POR_PARTE linhas.
+    `fonte` é o conteúdo (bytes) ou o caminho do arquivo no disco; do disco ele é lido aos poucos, sem carregar
+    o arquivo inteiro na memória. Cada parte é um DataFrame só com as colunas reconhecidas, com no máximo
+    LINHAS_POR_PARTE linhas.
     """
     from itertools import chain, islice
 
@@ -258,12 +261,17 @@ def _partes_do_arquivo(conteudo: bytes, nome_arquivo: str, apelidos: dict, valid
                                 for campo, pos in posicoes})
 
     if nome_arquivo.lower().endswith(".csv"):
-        texto = conteudo.decode("utf-8-sig", errors="replace")
-        primeira = texto.split("\n", 1)[0]
+        import csv
+        if isinstance(fonte, (bytes, bytearray)):
+            arquivo_texto = io.StringIO(fonte.decode("utf-8-sig", errors="replace"))
+        else:
+            arquivo_texto = open(fonte, encoding="utf-8-sig", errors="replace", newline="")  # noqa: SIM115
+        primeira = arquivo_texto.readline()
+        arquivo_texto.seek(0)
         separador = ";" if primeira.count(";") > primeira.count(",") else ","
         try:
             linhas = (tuple(c if c != "" else None for c in linha)
-                      for linha in __import__("csv").reader(io.StringIO(texto), delimiter=separador))
+                      for linha in csv.reader(arquivo_texto, delimiter=separador))
             primeiras = list(islice(linhas, 30))
         except Exception as erro:  # noqa: BLE001 - CSV mal formado vira mensagem para o usuário
             raise ErroImportacao(f"Não consegui ler o CSV: {erro}") from erro
@@ -275,7 +283,8 @@ def _partes_do_arquivo(conteudo: bytes, nome_arquivo: str, apelidos: dict, valid
 
     from openpyxl import load_workbook
     try:
-        livro = load_workbook(io.BytesIO(conteudo), read_only=True, data_only=True)
+        livro = load_workbook(io.BytesIO(fonte) if isinstance(fonte, (bytes, bytearray)) else fonte,
+                              read_only=True, data_only=True)
     except Exception as erro:  # noqa: BLE001 - arquivo que não é Excel vira mensagem para o usuário
         raise ErroImportacao(f"Não consegui abrir o arquivo como Excel: {erro}") from erro
     candidatas = []
@@ -333,27 +342,40 @@ def _tratar_parte(df: pd.DataFrame, primeira_linha: int, usar_vlr_total: bool):
     df["data_emissao"] = df["data_emissao"].where(df["data_emissao"].notna(), None)
     for campo in CAMPOS_NUMERICOS:
         df[campo] = df[campo].astype("float64")
-    for campo in CAMPOS_REPETIDOS:
-        df[campo] = df[campo].astype("category")
     return df.drop(columns=["linha"]), erros
 
 
-def _juntar_partes(partes: list) -> pd.DataFrame:
-    """Junta as partes mantendo os textos como "category" (pd.concat simples voltaria tudo para texto)."""
+def _codificar(serie: pd.Series, dicionario: dict) -> np.ndarray:
+    """Troca cada texto por um número de um dicionário único para o arquivo todo (-1 = vazio).
+
+    Assim cada texto diferente (cliente, item, nota…) fica guardado uma vez só, e cada linha guarda só o número.
+    """
+    locais, distintos = pd.factorize(serie, use_na_sentinel=True)
+    globais = np.array([dicionario.setdefault(v, len(dicionario)) for v in distintos], dtype=np.int32)
+    return np.where(locais < 0, -1, globais[locais] if len(globais) else -1).astype(np.int32)
+
+
+def _juntar_partes(partes: list, dicionarios: dict) -> pd.DataFrame:
+    """Junta as partes; as colunas de texto viram "category" com o dicionário do arquivo todo."""
     if not partes:
         return pd.DataFrame(columns=list(APELIDOS_FATURAMENTO) + ["tipo_nf_chave"])
     colunas = {}
     for campo in partes[0].columns:
-        if campo in CAMPOS_REPETIDOS:
-            colunas[campo] = pd.Series(pd.api.types.union_categoricals([p[campo] for p in partes], ignore_order=True))
+        valores = np.concatenate([p[campo].to_numpy() for p in partes]) if campo in dicionarios else None
+        if campo in dicionarios:
+            categorias = pd.Index(list(dicionarios[campo]), dtype=object)
+            colunas[campo] = pd.Categorical.from_codes(valores, categories=categorias)
         else:
             colunas[campo] = pd.concat([p[campo] for p in partes], ignore_index=True)
     return pd.DataFrame(colunas)
 
 
-def ler_faturamento(conteudo: bytes, nome_arquivo: str):
-    """Lê a exportação do ERP. Devolve (itens válidos, erros [{linha, motivo}], avisos, aba)."""
-    achado = _partes_do_arquivo(conteudo, nome_arquivo, APELIDOS_FATURAMENTO, _valida_faturamento)
+def ler_faturamento(fonte, nome_arquivo: str, ao_progredir=None):
+    """Lê a exportação do ERP (bytes ou caminho do arquivo). Devolve (itens válidos, erros, avisos, aba).
+
+    `ao_progredir(linhas_lidas)` é chamado a cada parte, para a tela mostrar o andamento.
+    """
+    achado = _partes_do_arquivo(fonte, nome_arquivo, APELIDOS_FATURAMENTO, _valida_faturamento)
     if achado is None:
         raise ErroImportacao(
             "Não encontrei a base de faturamento. Colunas obrigatórias: CNPJ CPF, NUM NF, TOTAL VENDA (ou VLR TOTAL) "
@@ -363,13 +385,20 @@ def ler_faturamento(conteudo: bytes, nome_arquivo: str):
     if usar_vlr_total:
         avisos.append("O arquivo não tem a coluna TOTAL VENDA; usei VLR TOTAL no lugar.")
     partes, erros = [], []
+    dicionarios = {campo: {} for campo in CAMPOS_REPETIDOS}
+    linhas_lidas = 0
     for bruta in partes_brutas:
         parte, erros_parte = _tratar_parte(bruta, primeira_linha, usar_vlr_total)
         primeira_linha += len(bruta)
+        linhas_lidas += len(bruta)
         erros += erros_parte
         if not parte.empty:
+            for campo in CAMPOS_REPETIDOS:
+                parte[campo] = _codificar(parte[campo], dicionarios[campo])
             partes.append(parte)
-    return _juntar_partes(partes), erros, avisos, aba
+        if ao_progredir:
+            ao_progredir(linhas_lidas)
+    return _juntar_partes(partes, dicionarios), erros, avisos, aba
 
 
 # ---------------------------------------------------------------------------

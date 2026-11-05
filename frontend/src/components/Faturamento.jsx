@@ -10,10 +10,24 @@ function Importacao({ aoImportar }) {
   const [previa, setPrevia] = useState(null)
   const [concluido, setConcluido] = useState(null)
   const [versao, setVersao] = useState(0)
+  // Linhas já lidas enquanto o servidor lê o arquivo em segundo plano (null = não está lendo).
+  const [linhasLidas, setLinhasLidas] = useState(null)
 
   async function enviar(arquivo) {
     setConcluido(null)
-    setPrevia(await http.enviarArquivo('/api/importacoes/faturamento/previa', arquivo))
+    setPrevia(null)
+    try {
+      let resposta = await http.enviarArquivo('/api/importacoes/faturamento/previa', arquivo)
+      // Arquivo grande: o servidor continua lendo e a tela pergunta o andamento a cada 3 segundos.
+      while (resposta.situacao === 'lendo') {
+        setLinhasLidas(resposta.linhas)
+        await new Promise((pronto) => setTimeout(pronto, 3000))
+        resposta = await http.get(`/api/importacoes/faturamento/leitura/${resposta.leitura}`)
+      }
+      setPrevia(resposta)
+    } finally {
+      setLinhasLidas(null)
+    }
   }
 
   return (
@@ -30,6 +44,12 @@ function Importacao({ aoImportar }) {
           />
         </div>
       </section>
+      {linhasLidas !== null && (
+        <div className="carregando">
+          Lendo o arquivo no servidor… <b>{linhasLidas.toLocaleString('pt-BR')}</b> linhas lidas até agora.
+          Um arquivo grande pode levar até uns 20 minutos no servidor gratuito: deixe esta página aberta.
+        </div>
+      )}
       {previa && (
         <section className="bloco">
           <PreviaFaturamento

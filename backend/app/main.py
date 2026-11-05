@@ -1,5 +1,9 @@
 """API do Controle de Promotores (FastAPI)."""
+import asyncio
 import logging
+import os
+import shutil
+import tempfile
 from contextlib import asynccontextmanager
 
 from urllib.parse import urlsplit
@@ -139,13 +143,42 @@ def _importar_cadastro(sessao: Session, tipo: str, conteudo: bytes, nome: str, u
     return resumo
 
 
+ESPERA_PREVIA_SEGUNDOS = 15
+
+
 @app.post("/api/importacoes/faturamento/previa")
 async def previa_faturamento(arquivo: UploadFile = File(...), sessao: Session = Depends(db.sessao_db),
                              usuario: Usuario = Depends(exigir_admin)):
-    """Lê o arquivo do ERP e mostra o resumo antes de gravar."""
-    conteudo, nome = await _ler_arquivo(arquivo)
+    """Lê o arquivo do ERP e mostra o resumo antes de gravar.
+
+    O arquivo é salvo no disco e lido em segundo plano. Se terminar em ~15 s, a resposta já é o resumo; senão
+    vem {"situacao": "lendo", "leitura": código} e a tela pergunta o andamento em /leitura/{código}.
+    """
+    nome = arquivo.filename or ""
+    if not nome.lower().endswith((".xlsx", ".xlsm", ".csv")):
+        _erro("Envie um arquivo .xlsx, .xlsm ou .csv.")
+    if arquivo.size is not None and arquivo.size > TAMANHO_MAXIMO_MB * 1024 * 1024:
+        _erro(f"Arquivo grande demais (máximo {TAMANHO_MAXIMO_MB} MB).", 413)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(nome)[1].lower()) as destino:
+        shutil.copyfileobj(arquivo.file, destino, length=1024 * 1024)
     try:
-        return faturamento.preparar_previa(conteudo, nome, usuario.usuario, _cnpjs_no_roteiro(sessao))
+        codigo = faturamento.iniciar_leitura(destino.name, nome, usuario.usuario, _cnpjs_no_roteiro(sessao))
+        resposta = faturamento.andamento_da_leitura(codigo)
+        for _ in range(int(ESPERA_PREVIA_SEGUNDOS * 2)):  # arquivo pequeno já volta com o resumo
+            if resposta["situacao"] != "lendo":
+                break
+            await asyncio.sleep(0.5)
+            resposta = faturamento.andamento_da_leitura(codigo)
+        return resposta
+    except ErroImportacao as erro:
+        _erro(str(erro))
+
+
+@app.get("/api/importacoes/faturamento/leitura/{codigo}")
+def andamento_da_leitura(codigo: str, _=Depends(exigir_admin)):
+    """Andamento da leitura do arquivo do ERP: {"situacao": "lendo", "linhas": n} ou o resumo pronto."""
+    try:
+        return faturamento.andamento_da_leitura(codigo)
     except ErroImportacao as erro:
         _erro(str(erro))
 

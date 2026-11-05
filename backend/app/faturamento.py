@@ -8,7 +8,10 @@ Fluxo da importação:
 3. desfazer(): apaga os itens de uma importação.
 """
 import json
+import logging
+import os
 import secrets
+import threading
 import time
 
 import pandas as pd
@@ -42,9 +45,10 @@ def _filtro_meses(meses):
     return or_(*[and_(FaturamentoItem.ano == a, FaturamentoItem.mes == m) for a, m in meses])
 
 
-def preparar_previa(conteudo: bytes, nome: str, usuario: str, cnpjs_no_roteiro: set[str]) -> dict:
+def preparar_previa(conteudo, nome: str, usuario: str, cnpjs_no_roteiro: set[str], ao_progredir=None) -> dict:
+    """`conteudo`: bytes do arquivo ou caminho dele no disco."""
     _limpar_previas()
-    itens, erros, avisos, aba = ler_faturamento(conteudo, nome)
+    itens, erros, avisos, aba = ler_faturamento(conteudo, nome, ao_progredir=ao_progredir)
     if itens.empty:
         raise ErroImportacao("O arquivo não tem nenhuma linha válida (com CNPJ, data e valor).")
     meses = sorted({(int(a), int(m)) for a, m in zip(itens["ano"], itens["mes"])})
@@ -77,6 +81,59 @@ def preparar_previa(conteudo: bytes, nome: str, usuario: str, cnpjs_no_roteiro: 
                           "valor": round(float(r.valor), 2)} for r in sem_roteiro.head(20).itertuples()],
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Leitura em segundo plano: o arquivo grande leva minutos no servidor gratuito (0,15 de processador). A tela
+# pergunta o andamento a cada poucos segundos em vez de esperar uma resposta só (que o navegador abandonaria).
+# ---------------------------------------------------------------------------
+
+log = logging.getLogger("uvicorn.error")
+_leituras: dict[str, dict] = {}
+
+
+def iniciar_leitura(caminho: str, nome: str, usuario: str, cnpjs_no_roteiro: set[str]) -> str:
+    """Começa a ler o arquivo (já salvo no disco) numa thread e devolve o código da leitura."""
+    agora = time.time()
+    for codigo in [c for c, l in _leituras.items() if agora - l["criado"] > 3600]:
+        _leituras.pop(codigo, None)
+    if any(l["situacao"] == "lendo" for l in _leituras.values()):
+        os.remove(caminho)
+        raise ErroImportacao("Já tem um arquivo sendo lido. Espere ele terminar para enviar outro.")
+    codigo = secrets.token_urlsafe(12)
+    estado = _leituras[codigo] = {"situacao": "lendo", "linhas": 0, "criado": agora}
+
+    def trabalhar():
+        try:
+            estado["previa"] = preparar_previa(caminho, nome, usuario, cnpjs_no_roteiro,
+                                               ao_progredir=lambda linhas: estado.update(linhas=linhas))
+            estado["situacao"] = "pronto"
+        except ErroImportacao as erro:
+            estado.update(situacao="erro", erro=str(erro))
+        except Exception:  # noqa: BLE001 - qualquer falha vira mensagem para a tela, com detalhe no log
+            log.exception("Erro ao ler o arquivo de faturamento %s", nome)
+            estado.update(situacao="erro", erro="Erro inesperado ao ler o arquivo. Confira se é a exportação do ERP.")
+        finally:
+            try:
+                os.remove(caminho)
+            except OSError:
+                pass
+
+    threading.Thread(target=trabalhar, name=f"leitura-{codigo}", daemon=True).start()
+    return codigo
+
+
+def andamento_da_leitura(codigo: str) -> dict:
+    estado = _leituras.get(codigo)
+    if estado is None:
+        raise ErroImportacao("Leitura não encontrada (o servidor pode ter reiniciado). Envie o arquivo de novo.")
+    if estado["situacao"] == "erro":
+        _leituras.pop(codigo, None)
+        raise ErroImportacao(estado["erro"])
+    if estado["situacao"] == "pronto":
+        _leituras.pop(codigo, None)
+        return {**estado["previa"], "situacao": "pronto"}
+    return {"situacao": "lendo", "leitura": codigo, "linhas": estado["linhas"]}
 
 
 def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = None) -> dict:
