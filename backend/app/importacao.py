@@ -10,8 +10,6 @@ import unicodedata
 import numpy as np
 import pandas as pd
 
-from .leitor_xlsx import ArquivoNaoSuportado, LivroXlsx
-
 SEM_TIPO = "Sem tipo"
 
 
@@ -283,49 +281,24 @@ def _partes_do_arquivo(fonte, nome_arquivo: str, apelidos: dict, valida):
         indice, mapa = achado
         return "CSV", mapa, indice + 2, [], em_partes(chain(primeiras[indice + 1:], linhas), mapa)
 
-    candidatas = []
+    from openpyxl import load_workbook
     try:
-        # Leitor rápido (app/leitor_xlsx.py): ~3x mais rápido e ~8x menos memória que o openpyxl.
-        livro = LivroXlsx(fonte)
-        abas = [(nome, livro.linhas(caminho)) for nome, caminho in livro.abas]
-    except ArquivoNaoSuportado:
-        from openpyxl import load_workbook
-        try:
-            livro = load_workbook(io.BytesIO(fonte) if isinstance(fonte, (bytes, bytearray)) else fonte,
-                                  read_only=True, data_only=True)
-        except Exception as erro:  # noqa: BLE001 - arquivo que não é Excel vira mensagem para o usuário
-            raise ErroImportacao(f"Não consegui abrir o arquivo como Excel: {erro}") from erro
-        abas = [(aba.title, aba.iter_rows(values_only=True)) for aba in livro.worksheets]
-    for nome_aba, linhas in abas:
+        livro = load_workbook(io.BytesIO(fonte) if isinstance(fonte, (bytes, bytearray)) else fonte,
+                              read_only=True, data_only=True)
+    except Exception as erro:  # noqa: BLE001 - arquivo que não é Excel vira mensagem para o usuário
+        raise ErroImportacao(f"Não consegui abrir o arquivo como Excel: {erro}") from erro
+    candidatas = []
+    for aba in livro.worksheets:
+        linhas = aba.iter_rows(values_only=True)
         primeiras = list(islice(linhas, 30))
         achado = _cabecalho(primeiras, apelidos, valida)
         if achado is not None:
-            candidatas.append((nome_aba, achado, primeiras, linhas))
+            candidatas.append((aba.title, achado, primeiras, linhas))
     if not candidatas:
         return None
     nome_aba, (indice, mapa), primeiras, linhas = candidatas[0]
     avisos = [f"Mais de uma aba parece base de faturamento; usei só a aba '{nome_aba}'."] if len(candidatas) > 1 else []
     return nome_aba, mapa, indice + 2, avisos, em_partes(chain(primeiras[indice + 1:], linhas), mapa)
-
-
-def _datas(valores: pd.Series) -> pd.Series:
-    """Datas de texto (05/01/2026), de data do Excel ou de número de série do Excel (46027 = 05/01/2026)."""
-    numeros = pd.to_numeric(valores, errors="coerce")
-    serial = numeros.between(20_000, 80_000)  # de 1954 a 2119: número de série, não um ano ou código
-    datas = pd.to_datetime(valores.where(~serial), errors="coerce", dayfirst=True)
-    if serial.any():
-        datas[serial] = pd.to_datetime(numeros[serial], unit="D", origin="1899-12-30")
-    return datas
-
-
-def _por_valor_distinto(serie: pd.Series, funcao) -> pd.Series:
-    """Aplica `funcao` uma vez por valor diferente (não por célula): a coluna repete muito ("JOINVILLE" em
-    milhares de linhas), então isso corta a maior parte do trabalho da conferência."""
-    codigos, distintos = pd.factorize(serie, use_na_sentinel=True)
-    convertidos = np.empty(len(distintos) + 1, dtype=object)
-    convertidos[:-1] = [funcao(valor) for valor in distintos]
-    convertidos[-1] = funcao(None)  # código -1 = célula vazia
-    return pd.Series(convertidos[codigos], index=serie.index)
 
 
 def _tratar_parte(df: pd.DataFrame, primeira_linha: int, usar_vlr_total: bool):
@@ -339,15 +312,14 @@ def _tratar_parte(df: pd.DataFrame, primeira_linha: int, usar_vlr_total: bool):
     df["linha"] = range(primeira_linha, primeira_linha + len(df))
     df = df[~df[["cnpj_cpf", "num_nf", "total_venda", "vlr_total"]].isna().all(axis=1)]  # linhas vazias
 
-    df["cnpj_cpf"] = _por_valor_distinto(df["cnpj_cpf"], normalizar_cnpj)
-    datas = _datas(df["data_emissao"])
+    df["cnpj_cpf"] = df["cnpj_cpf"].map(normalizar_cnpj)
+    datas = pd.to_datetime(df["data_emissao"], errors="coerce", dayfirst=True)
     ano = pd.to_numeric(df["ano"], errors="coerce").fillna(datas.dt.year)
     mes = pd.to_numeric(df["mes"], errors="coerce").fillna(datas.dt.month)
     df["ano"], df["mes"] = ano, mes
-    # Fica como data compacta (datetime64) até a gravação: 317 mil objetos "date" do Python pesavam na memória.
-    df["data_emissao"] = datas.dt.normalize()
+    df["data_emissao"] = datas.dt.date
     for campo in CAMPOS_NUMERICOS:
-        df[campo] = _por_valor_distinto(df[campo], numero_ou_nada)
+        df[campo] = df[campo].map(numero_ou_nada)
 
     erros = []
     motivos = pd.Series("", index=df.index)
@@ -362,28 +334,15 @@ def _tratar_parte(df: pd.DataFrame, primeira_linha: int, usar_vlr_total: bool):
     df["ano"] = df["ano"].astype("int16")
     df["mes"] = df["mes"].astype("int8")
     for campo in CAMPOS_TEXTO:
-        df[campo] = _por_valor_distinto(
-            df[campo], lambda v, t=TAMANHOS[campo]: (lambda x: x[:t] if isinstance(x, str) else x)(_texto_celula(v)))
+        df[campo] = df[campo].map(_texto_celula).map(
+            lambda v, t=TAMANHOS[campo]: v[:t] if isinstance(v, str) else v)
     df["cod_cli"] = df["cod_cli"].fillna("")
     df["tipo_nf"] = df["tipo_nf"].fillna("").astype(str).str.strip().replace("", SEM_TIPO).str[:60]
-    df["tipo_nf_chave"] = _por_valor_distinto(df["tipo_nf"], normalizar_texto)
+    df["tipo_nf_chave"] = df["tipo_nf"].map(normalizar_texto)
+    df["data_emissao"] = df["data_emissao"].where(df["data_emissao"].notna(), None)
     for campo in CAMPOS_NUMERICOS:
         df[campo] = df[campo].astype("float64")
     return df.drop(columns=["linha"]), erros
-
-
-def devolver_memoria() -> None:
-    """Devolve ao sistema a memória que o Python já liberou mas ainda segura (no Linux, malloc_trim).
-
-    Sem isso a memória "usada" do servidor só sobe durante a importação, mesmo com os dados já descartados.
-    """
-    import ctypes
-    import gc
-    gc.collect()
-    try:
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except (OSError, AttributeError):  # fora do Linux (ex.: Windows no PC) não existe; não faz falta
-        pass
 
 
 def _codificar(serie: pd.Series, dicionario: dict) -> np.ndarray:
@@ -401,18 +360,13 @@ def _juntar_partes(partes: list, dicionarios: dict) -> pd.DataFrame:
     if not partes:
         return pd.DataFrame(columns=list(APELIDOS_FATURAMENTO) + ["tipo_nf_chave"])
     colunas = {}
-    for campo in list(partes[0].columns):
-        # pop: cada coluna sai das partes assim que é juntada, para não ficar tudo duplicado na memória.
-        pedacos = [p.pop(campo) for p in partes]
+    for campo in partes[0].columns:
+        valores = np.concatenate([p[campo].to_numpy() for p in partes]) if campo in dicionarios else None
         if campo in dicionarios:
             categorias = pd.Index(list(dicionarios[campo]), dtype=object)
-            colunas[campo] = pd.Categorical.from_codes(np.concatenate([x.to_numpy() for x in pedacos]),
-                                                       categories=categorias)
+            colunas[campo] = pd.Categorical.from_codes(valores, categories=categorias)
         else:
-            colunas[campo] = pd.concat(pedacos, ignore_index=True)
-        del pedacos
-    partes.clear()
-    devolver_memoria()
+            colunas[campo] = pd.concat([p[campo] for p in partes], ignore_index=True)
     return pd.DataFrame(colunas)
 
 
@@ -444,8 +398,6 @@ def ler_faturamento(fonte, nome_arquivo: str, ao_progredir=None):
             partes.append(parte)
         if ao_progredir:
             ao_progredir(linhas_lidas)
-        if len(partes) % 10 == 0:
-            devolver_memoria()
     return _juntar_partes(partes, dicionarios), erros, avisos, aba
 
 
