@@ -14,5 +14,8 @@ COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./
 COPY --from=front /app/frontend/dist /app/frontend/dist
+# Roda sem permissão de administrador (root) dentro do contêiner.
+RUN useradd --create-home --uid 10001 app
+USER app
 # O Render informa a porta na variável PORT.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

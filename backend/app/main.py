@@ -2,8 +2,10 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from urllib.parse import urlsplit
+
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -35,6 +37,34 @@ app = FastAPI(title="Controle de Promotores", lifespan=ciclo_de_vida,
               openapi_url=None if PRODUCAO else "/openapi.json")
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=SESSAO_HORAS * 3600,
                    same_site="lax", https_only=PRODUCAO)
+
+# Cabeçalhos de segurança em todas as respostas: o site não abre dentro de outro (clickjacking), o navegador só
+# roda scripts do próprio site e não "adivinha" o tipo dos arquivos.
+CABECALHOS_SEGURANCA = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                                "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; "
+                                "base-uri 'self'; form-action 'self'; object-src 'none'"),
+}
+METODOS_QUE_ALTERAM = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.middleware("http")
+async def protecoes(request: Request, chamar_proximo):
+    # Pedido que altera dados vindo de outro site (CSRF): o cookie já é SameSite=Lax; esta é a segunda barreira.
+    if request.method in METODOS_QUE_ALTERAM and request.url.path.startswith("/api/"):
+        origem = request.headers.get("origin")
+        if origem and urlsplit(origem).hostname != (request.url.hostname or ""):
+            return JSONResponse({"detail": "Pedido recusado: origem diferente do site."}, status_code=403)
+    resposta = await chamar_proximo(request)
+    for nome, valor in CABECALHOS_SEGURANCA.items():
+        resposta.headers.setdefault(nome, valor)
+    if PRODUCAO:
+        resposta.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resposta
 app.include_router(usuarios.rotas)
 app.include_router(cadastros.rotas)
 app.include_router(pendencias.rotas)
@@ -54,10 +84,16 @@ def _erro(mensagem: str, status: int = 400):
 # Importações
 # ---------------------------------------------------------------------------
 
+# A planilha inteira tem ~63 MB; o limite evita que um arquivo enorme derrube o servidor.
+TAMANHO_MAXIMO_MB = 150
+
+
 async def _ler_arquivo(arquivo: UploadFile) -> tuple[bytes, str]:
     nome = arquivo.filename or ""
     if not nome.lower().endswith((".xlsx", ".xlsm", ".csv")):
         _erro("Envie um arquivo .xlsx, .xlsm ou .csv.")
+    if arquivo.size is not None and arquivo.size > TAMANHO_MAXIMO_MB * 1024 * 1024:
+        _erro(f"Arquivo grande demais (máximo {TAMANHO_MAXIMO_MB} MB).", 413)
     return await arquivo.read(), nome
 
 

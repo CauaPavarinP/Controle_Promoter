@@ -142,6 +142,8 @@ class Usuario(Carimbo, Base):
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     tentativas_falhas: Mapped[int] = mapped_column(Integer, default=0)
     bloqueado_ate: Mapped[datetime | None] = mapped_column(DateTime)
+    # Vai junto no cookie de sessão; trocar a chave derruba as sessões abertas desse usuário.
+    sessao_chave: Mapped[str] = mapped_column(String(64), default="")
 
 
 class Importacao(Base):

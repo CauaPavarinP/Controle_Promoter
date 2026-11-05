@@ -1,4 +1,6 @@
 """Login, sessão e permissões por perfil."""
+import hmac
+
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -9,7 +11,10 @@ from .modelos import Usuario
 def usuario_logado(request: Request, sessao: Session = Depends(db.sessao_db)) -> Usuario:
     usuario_id = request.session.get("usuario_id")
     usuario = sessao.get(Usuario, usuario_id) if usuario_id else None
-    if usuario is None or not usuario.ativo:
+    # A chave da sessão muda ao sair, trocar a senha ou receber senha nova: cookie antigo (ou roubado) deixa de valer.
+    chave_valida = usuario is not None and usuario.sessao_chave and \
+        hmac.compare_digest(str(request.session.get("chave", "")), usuario.sessao_chave)
+    if usuario is None or not usuario.ativo or not chave_valida:
         request.session.clear()
         raise HTTPException(status_code=401, detail="Sessão expirada. Entre novamente.")
     return usuario

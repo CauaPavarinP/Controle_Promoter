@@ -48,3 +48,14 @@ def registrar_falha(usuario) -> None:
 def registrar_sucesso(usuario) -> None:
     usuario.tentativas_falhas = 0
     usuario.bloqueado_ate = None
+
+
+def nova_chave_de_sessao(usuario) -> str:
+    """Troca a chave da sessão: quem estiver logado com a chave antiga cai (sair, troca de senha…)."""
+    usuario.sessao_chave = secrets.token_hex(16)
+    return usuario.sessao_chave
+
+
+# Hash de uma senha qualquer, para o login de usuário inexistente levar o mesmo tempo que o de um que existe
+# (sem isso dá para descobrir quais usuários existem medindo o tempo de resposta).
+HASH_FALSO = gerar_hash(secrets.token_hex(8))

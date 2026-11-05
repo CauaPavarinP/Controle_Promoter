@@ -145,11 +145,18 @@ Testes: `cd backend && pytest`
 
 ## Segurança
 
-- O repositório deve ser **privado**.
-- **Planilhas reais nunca vão para o GitHub.** O `.gitignore` bloqueia `.xlsx`/`.csv`, exceto os exemplos fictícios.
-- Senhas e chaves só em variáveis de ambiente (`.env` local, Environment no Render).
-- Todas as rotas `/api` exigem login, exceto `/api/login`. `/health` é público.
-- Perfis: **administrador** altera tudo; **consulta** e **supervisor** só consultam. (A visão restrita do
-  supervisor à própria equipe fica para a Fase 4.)
-- Senhas guardadas com hash scrypt; 5 tentativas erradas bloqueiam o login por 15 minutos.
-- Exportação para Excel (CSV) protegida contra fórmulas (`=`, `+`, `-`, `@`).
+- **Login:** senha com hash scrypt; bloqueio de 15 min após 5 erros; o login leva o mesmo tempo para usuário que
+  existe ou não (não dá para descobrir usuários medindo o tempo).
+- **Sessão:** cookie assinado, `HttpOnly`, `Secure` em produção e `SameSite=Lax`, válido por 12 h. Cada usuário tem
+  uma chave de sessão: **Sair**, **trocar a senha** ou receber **senha nova** troca a chave e derruba os cookies
+  antigos (inclusive um cookie roubado).
+- **Permissões:** toda rota de consulta exige login; toda rota que altera dados exige administrador.
+- **Pedidos de outro site (CSRF):** além do `SameSite=Lax`, pedidos que alteram dados com `Origin` de outro site são
+  recusados.
+- **Cabeçalhos:** `Content-Security-Policy` (só scripts do próprio site), `X-Frame-Options: DENY`, `nosniff`,
+  `Referrer-Policy` e `Strict-Transport-Security` em produção.
+- **Uploads:** só `.xlsx`, `.xlsm` e `.csv`, até 150 MB. **Excel exportado:** texto que começa com `=`, `+`, `@` não
+  vira fórmula.
+- **Produção:** `/docs` desligado; exige `SECRET_KEY` e `DATABASE_URL`; o contêiner roda sem root.
+- Testes: `backend/tests/test_seguranca.py`.
+- **Em aberto (decisão do Maurício):** os perfis consulta e supervisor veem o custo (salário) dos promotores.
