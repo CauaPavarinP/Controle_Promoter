@@ -47,7 +47,7 @@ function Importacao({ aoImportar }) {
       {linhasLidas !== null && (
         <div className="carregando">
           Lendo o arquivo no servidor… <b>{linhasLidas.toLocaleString('pt-BR')}</b> linhas lidas até agora.
-          Um arquivo grande pode levar até uns 20 minutos no servidor gratuito: deixe esta página aberta.
+          O faturamento do ano inteiro leva alguns minutos no servidor gratuito: deixe esta página aberta.
         </div>
       )}
       {previa && (

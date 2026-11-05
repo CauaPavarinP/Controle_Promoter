@@ -136,6 +136,29 @@ def andamento_da_leitura(codigo: str) -> dict:
     return {"situacao": "lendo", "leitura": codigo, "linhas": estado["linhas"]}
 
 
+def _pedacos_para_gravar(itens: pd.DataFrame, importacao_id: int):
+    """Itens em pedaços de 5 mil linhas, com vazio = None (converter tudo de uma vez estourava a memória)."""
+    for inicio in range(0, len(itens), 5000):
+        pedaco = itens.iloc[inicio:inicio + 5000].assign(importacao_id=importacao_id)
+        if pd.api.types.is_datetime64_any_dtype(pedaco["data_emissao"]):
+            pedaco["data_emissao"] = pedaco["data_emissao"].dt.date
+        yield pedaco.astype(object).where(pedaco.notna(), None)
+
+
+def _gravar_itens(conexao, itens: pd.DataFrame, importacao_id: int) -> None:
+    """Grava os itens. No Postgres usa COPY (carga em massa), várias vezes mais rápido que INSERT linha a linha."""
+    if conexao.dialect.name != "postgresql":
+        for pedaco in _pedacos_para_gravar(itens, importacao_id):
+            pedaco.to_sql("faturamento_itens", conexao, if_exists="append", index=False)
+        return
+    colunas = ", ".join(list(itens.columns) + ["importacao_id"])
+    cursor = conexao.connection.driver_connection.cursor()
+    with cursor.copy(f"COPY faturamento_itens ({colunas}) FROM STDIN") as copia:
+        for pedaco in _pedacos_para_gravar(itens, importacao_id):
+            for linha in pedaco.itertuples(index=False, name=None):
+                copia.write_row(linha)
+
+
 def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = None) -> dict:
     previa = _previas.get(token)
     if previa is None:
@@ -160,13 +183,7 @@ def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = Non
                 avisos=json.dumps(previa["avisos"] + (avisos_extra or []), ensure_ascii=False),
                 log_erros=json.dumps(previa["erros"], ensure_ascii=False), situacao="ativa")
         ).inserted_primary_key[0]
-        # Em pedaços: o to_sql converte o pedaço inteiro para texto de uma vez (com 317 mil linhas estourava
-        # a memória do servidor).
-        for inicio in range(0, len(itens), 5000):
-            pedaco = itens.iloc[inicio:inicio + 5000].assign(importacao_id=importacao_id)
-            for coluna in pedaco.columns[pedaco.dtypes == "category"]:
-                pedaco[coluna] = pedaco[coluna].astype(object).where(pedaco[coluna].notna(), None)
-            pedaco.to_sql("faturamento_itens", conexao, if_exists="append", index=False)
+        _gravar_itens(conexao, itens, importacao_id)
         # Importações antigas que ficaram sem nenhum item (todos os meses substituídos).
         conexao.execute(text(
             "UPDATE importacoes SET situacao = 'substituida' WHERE tipo = 'faturamento' AND situacao = 'ativa' "
