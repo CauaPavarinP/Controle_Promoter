@@ -169,3 +169,50 @@ def test_arquivo_lento_e_lido_em_segundo_plano(cliente, banco, monkeypatch):
     confirmado = cliente.post(f"/api/importacoes/faturamento/{resposta['token']}/confirmar", json={"substituir": False})
     assert confirmado.status_code == 200
     assert cliente.get("/api/importacoes/faturamento/leitura/nao-existe").status_code == 400
+
+
+def test_somas_guardadas_sao_refeitas_quando_o_faturamento_muda(cliente):
+    """O Resumo e a aba Faturamento usam a soma guardada na memória, mas nunca uma soma velha."""
+    entrar(cliente)
+    importar_cadastros(cliente)
+    assert _faturamento_total(cliente) == 0
+    assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == 0
+    _, resposta = importar_faturamento(cliente)
+    ident = resposta.json()["importacao_id"]
+    total = _faturamento_total(cliente)
+    assert total > 0
+    assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] > 0
+    assert cliente.post(f"/api/importacoes/{ident}/desfazer").status_code == 200
+    assert _faturamento_total(cliente) == 0
+    assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == 0
+    assert cliente.get("/api/opcoes").json()["meses"] == []
+
+
+def test_varios_pedidos_ao_mesmo_tempo_fazem_uma_soma_so(banco, monkeypatch):
+    """Telas abertas juntas esperam a mesma soma, em vez de cada uma ocupar uma conexão com o banco."""
+    import threading
+    import time
+
+    import pandas as pd
+
+    chamadas = []
+
+    def soma_lenta():
+        chamadas.append(1)
+        time.sleep(0.3)
+        return pd.DataFrame({"ano": [2026], "mes": [1]})
+
+    monkeypatch.setattr(banco.faturamento, "_somar_faturamento_mensal", soma_lenta)
+    resultados = []
+    tarefas = [threading.Thread(target=lambda: resultados.append(banco.faturamento.faturamento_mensal()))
+               for _ in range(5)]
+    for tarefa in tarefas:
+        tarefa.start()
+    for tarefa in tarefas:
+        tarefa.join()
+    assert len(chamadas) == 1 and len(resultados) == 5
+    resultados[0].loc[0, "ano"] = 1999          # cada um recebe a sua cópia
+    assert banco.faturamento.faturamento_mensal().loc[0, "ano"] == 2026
+    banco.faturamento.limpar_cache()            # faturamento mudou: a próxima tela soma de novo
+    banco.faturamento.faturamento_mensal()
+    assert len(chamadas) == 2

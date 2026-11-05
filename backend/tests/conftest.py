@@ -95,3 +95,4 @@ def gravar_itens(banco, linhas):
                                        num_nf=str(numero), tipo_nf=tipo, tipo_nf_chave=normalizar_texto(tipo),
                                        receita=receita, total_venda=valor, vlr_total=valor))
         sessao.commit()
+    banco.faturamento.limpar_cache()
