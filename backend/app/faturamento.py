@@ -126,13 +126,13 @@ def iniciar_leitura(caminho: str, nome: str, usuario: str, cnpjs_no_roteiro: set
 def andamento_da_leitura(codigo: str) -> dict:
     estado = _leituras.get(codigo)
     if estado is None:
-        raise ErroImportacao("Leitura não encontrada (o servidor pode ter reiniciado). Envie o arquivo de novo.")
+        raise ErroImportacao("Leitura não encontrada: o servidor reiniciou ou ela foi feita há mais de 1 hora. "
+                             "Envie o arquivo de novo.")
+    # Leitura terminada continua disponível (até 1 hora): perguntar de novo devolve a mesma resposta.
     if estado["situacao"] == "erro":
-        _leituras.pop(codigo, None)
         raise ErroImportacao(estado["erro"])
     if estado["situacao"] == "pronto":
-        _leituras.pop(codigo, None)
-        return {**estado["previa"], "situacao": "pronto"}
+        return {**estado["previa"], "situacao": "pronto", "leitura": codigo}
     return {"situacao": "lendo", "leitura": codigo, "linhas": estado["linhas"]}
 
 
@@ -220,7 +220,8 @@ def historico(sessao: Session) -> list[dict]:
         select(FaturamentoItem.importacao_id, func.count()).group_by(FaturamentoItem.importacao_id)).all())
     return [{
         "id": i.id, "tipo": i.tipo, "arquivo": i.arquivo_nome, "usuario": i.usuario,
-        "data_hora": i.criado_em.isoformat() if i.criado_em else None,
+        # O banco grava em UTC (sem fuso); o "Z" faz o navegador mostrar no horário de Brasília.
+        "data_hora": i.criado_em.isoformat() + ("Z" if i.criado_em.tzinfo is None else "") if i.criado_em else None,
         "periodos": [p for p in i.periodos.split(",") if p], "linhas_lidas": i.linhas_lidas,
         "linhas_importadas": i.linhas_importadas, "linhas_com_erro": i.linhas_com_erro,
         "itens_atuais": itens_por_importacao.get(i.id, 0), "total_venda": i.total_venda,

@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import shutil
+import secrets
 import tempfile
 import threading
 from contextlib import asynccontextmanager
@@ -15,6 +16,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -93,6 +96,24 @@ async def dados_invalidos(_request: Request, erro: RequestValidationError):
         else:
             partes.append(f"{campo}: valor inválido")
     return JSONResponse({"detail": "Dados inválidos — " + "; ".join(partes)}, status_code=422)
+
+
+@app.exception_handler(Exception)
+async def erro_inesperado(request: Request, erro: Exception):
+    """Qualquer falha não prevista vira uma mensagem em `detail` (a tela mostrava só "Erro ao falar com o servidor").
+
+    O detalhe técnico fica no log do servidor com o mesmo número de referência, para achar depois.
+    """
+    referencia = secrets.token_hex(3).upper()
+    log.error("Erro inesperado (ref. %s) em %s %s: %r", referencia, request.method, request.url.path, erro)
+    if isinstance(erro, DBAPIError) and "too long" in str(erro.orig):
+        mensagem = ("Algum valor é maior do que o sistema aceita (por exemplo, um CNPJ com mais de 14 dígitos ou "
+                    "um texto muito longo). Confira o arquivo e tente de novo.")
+    elif isinstance(erro, SATimeoutError):
+        mensagem = "O servidor está ocupado com outros pedidos. Espere um minuto e tente de novo."
+    else:
+        mensagem = "Erro inesperado no servidor."
+    return JSONResponse({"detail": f"{mensagem} (ref. {referencia})"}, status_code=500)
 
 
 app.include_router(usuarios.rotas)

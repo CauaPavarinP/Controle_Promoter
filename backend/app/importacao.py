@@ -352,6 +352,7 @@ def _tratar_parte(df: pd.DataFrame, primeira_linha: int, usar_vlr_total: bool):
     erros = []
     motivos = pd.Series("", index=df.index)
     motivos[df["cnpj_cpf"] == ""] = "CNPJ/CPF vazio"
+    motivos[df["cnpj_cpf"].str.len() > 14] = "CNPJ/CPF com mais de 14 dígitos"
     motivos[(motivos == "") & (df["ano"].isna() | df["mes"].isna() | ~df["mes"].between(1, 12)
                                | ~df["ano"].between(2000, 2100))] = "data inválida"
     motivos[(motivos == "") & df["total_venda"].isna()] = "TOTAL VENDA não é número"
@@ -617,7 +618,12 @@ def importar_roteiro(conteudo: bytes, nome_arquivo: str):
     df = pd.concat(partes, ignore_index=True)
 
     df["codigo_promotor"] = df["codigo_promotor"].map(normalizar_codigo)
+    bruto = df["cnpj"]
     df["cnpj"] = df["cnpj"].map(normalizar_cnpj)
+    # Mais de 14 dígitos não é um CNPJ (ex.: dois CNPJs na mesma célula). A loja entra sem CNPJ, com aviso,
+    # em vez de derrubar a importação inteira.
+    cnpj_invalido = df["cnpj"].str.len() > 14
+    df.loc[cnpj_invalido, "cnpj"] = ""
     for campo in ("colaborador", "loja", "cidade", "uf"):
         df[campo] = df[campo].fillna("").astype(str).str.strip()
     df["uf"] = df["uf"].str.upper()
@@ -629,6 +635,13 @@ def importar_roteiro(conteudo: bytes, nome_arquivo: str):
     df = df.drop_duplicates(["codigo_promotor", "colaborador", "cnpj", "loja"]).copy()
 
     avisos = []
+    cnpj_invalido = cnpj_invalido.reindex(df.index, fill_value=False)
+    if cnpj_invalido.any():
+        exemplos = [f"{aba} · {loja} ({str(valor).strip()[:40]})" for aba, loja, valor in
+                    zip(df.loc[cnpj_invalido, "aba"], df.loc[cnpj_invalido, "loja"], bruto.loc[df.index][cnpj_invalido])]
+        avisos.append(f"{len(exemplos)} loja(s) com CNPJ inválido (mais de 14 dígitos) entraram sem CNPJ, sem "
+                      "faturamento. Corrija na planilha ou na tela: " + "; ".join(exemplos[:10])
+                      + (" …" if len(exemplos) > 10 else ""))
     # Visitas por semana: inteiro de 1 a 7 (como na tela). O resto fica vazio, com aviso.
     visitas = pd.to_numeric(df["visitas_semana"], errors="coerce")
     validas = visitas.between(1, 7) & (visitas == visitas.round())

@@ -23,6 +23,12 @@ Atualizado em 04/11/2026. Marque a resposta ao lado de cada item.
 4. **Município vazio** — vários promotores estão sem município. Precisa preencher? (Serve para o filtro de
    município.)
    - Resposta:
+4b. **UF que não bate com a cidade** — na coluna UF da PROMOTORES BRASIL aparecem, por exemplo, "Braço do
+   Norte - SP", "Palhoça - SP", "São José - SP" e "Joinville - MG" (cidades de SC). O sistema usa a UF como
+   está na planilha. É erro de digitação ou a UF é a da região que o promotor atende?
+   - Resposta:
+4c. **Promotor sem supervisor** — MAICON JHONATAN VIEIRA está sem supervisor. Quem é o supervisor dele?
+   - Resposta:
 
 ## Lojas e roteiro (abas SC, SP, PR, MG, RS)
 
