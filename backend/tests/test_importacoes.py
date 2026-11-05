@@ -150,3 +150,22 @@ def test_grade_mes_a_mes_e_detalhe_das_notas(cliente):
     loja = so_pdv["lojas"][0]
     assert loja["faturamento_por_visita"] == round(loja["faturamento"] / (2 * 52 / 12 * 9), 2)
     assert "pdvs" in cliente.get("/api/opcoes").json()
+
+
+def test_arquivo_lento_e_lido_em_segundo_plano(cliente, banco, monkeypatch):
+    """Arquivo que demora: a resposta vem "lendo" e a tela pergunta o andamento até ficar pronto."""
+    import time
+    entrar(cliente)
+    monkeypatch.setattr(banco.main, "ESPERA_PREVIA_SEGUNDOS", 0)
+    with open(EXEMPLOS / "faturamento_exemplo.xlsx", "rb") as conteudo:
+        resposta = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("f.xlsx", conteudo)}).json()
+    assert resposta["situacao"] == "lendo"
+    for _ in range(100):
+        resposta = cliente.get(f"/api/importacoes/faturamento/leitura/{resposta['leitura']}").json()
+        if resposta["situacao"] != "lendo":
+            break
+        time.sleep(0.1)
+    assert resposta["situacao"] == "pronto" and resposta["linhas_validas"] > 0
+    confirmado = cliente.post(f"/api/importacoes/faturamento/{resposta['token']}/confirmar", json={"substituir": False})
+    assert confirmado.status_code == 200
+    assert cliente.get("/api/importacoes/faturamento/leitura/nao-existe").status_code == 400
