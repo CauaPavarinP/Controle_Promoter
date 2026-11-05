@@ -47,21 +47,39 @@ def normalizar_codigo(valor) -> str:
     return str(valor).strip()
 
 
-def converter_numero(valor) -> float:
-    """Aceita número do Excel ou texto no formato brasileiro (R$ 1.234,56)."""
+# Número escrito como texto. Formato brasileiro (1.234,56 / 1234,56 / 1.200) ou com ponto decimal (1234.56).
+# Qualquer outra coisa ("600 + 120m", "R$ 600 a 700", "1,2,3") NÃO é número: antes os dígitos eram colados
+# ("600 + 120m" virava 600120).
+_NUMERO_BR = re.compile(r"-?(\d{1,3}(\.\d{3})+|\d+)(,\d+)?")
+_NUMERO_PONTO = re.compile(r"-?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?")
+
+
+def ler_numero(valor):
+    """Número do Excel ou texto com UM número (aceita R$, espaços nas pontas e "-" = zero).
+
+    Vazio = 0. Texto que não é exatamente um número = None (quem chama decide se é erro).
+    """
     if valor is None or (isinstance(valor, float) and pd.isna(valor)):
         return 0.0
+    if isinstance(valor, bool):
+        return None
     if isinstance(valor, (int, float)):
         return float(valor)
-    texto = re.sub(r"[^\d,.\-]", "", str(valor))
-    if not texto or texto in "-.,":
+    texto = str(valor).replace("\xa0", " ").strip()
+    texto = re.sub(r"^R\$\s*", "", texto, flags=re.IGNORECASE).strip()
+    if texto in ("", "-"):
         return 0.0
-    if "," in texto:
-        texto = texto.replace(".", "").replace(",", ".")
-    try:
-        return float(texto)
-    except ValueError:
-        return 0.0
+    if _NUMERO_BR.fullmatch(texto):
+        return float(texto.replace(".", "").replace(",", "."))
+    if _NUMERO_PONTO.fullmatch(texto):
+        return float(texto.replace(",", ""))
+    return None
+
+
+def converter_numero(valor) -> float:
+    """Como ler_numero, mas texto que não é número vale 0."""
+    numero = ler_numero(valor)
+    return 0.0 if numero is None else numero
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +93,10 @@ def _ler_abas(conteudo: bytes, nome_arquivo: str):
         separador = ";" if texto.split("\n", 1)[0].count(";") > texto.split("\n", 1)[0].count(",") else ","
 
         def ler_csv(**kwargs):
-            return pd.read_csv(io.StringIO(texto), sep=separador, header=None, dtype=object, **kwargs)
+            try:
+                return pd.read_csv(io.StringIO(texto), sep=separador, header=None, dtype=object, **kwargs)
+            except (pd.errors.EmptyDataError, pd.errors.ParserError) as erro:
+                raise ErroImportacao(f"Não consegui ler o CSV (vazio ou mal formado): {erro}") from erro
         return [("CSV", ler_csv)]
 
     try:
@@ -194,22 +215,7 @@ def _valida_faturamento(mapa):
 
 def numero_ou_nada(valor):
     """Número do Excel ou texto brasileiro; vazio/"-" = 0; texto que não é número = None (erro)."""
-    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
-        return 0.0
-    if isinstance(valor, (int, float)):
-        return float(valor)
-    texto = str(valor).strip()
-    if texto in ("", "-", "R$ -", "R$-"):
-        return 0.0
-    limpo = re.sub(r"[^\d,.\-]", "", texto)
-    if not limpo or not re.search(r"\d", limpo):
-        return None
-    if "," in limpo:
-        limpo = limpo.replace(".", "").replace(",", ".")
-    try:
-        return float(limpo)
-    except ValueError:
-        return None
+    return ler_numero(valor)
 
 
 def _texto_celula(valor):
@@ -252,7 +258,8 @@ def ler_faturamento(conteudo: bytes, nome_arquivo: str):
     erros = []
     motivos = pd.Series("", index=df.index)
     motivos[df["cnpj_cpf"] == ""] = "CNPJ/CPF vazio"
-    motivos[(motivos == "") & (df["ano"].isna() | df["mes"].isna() | ~df["mes"].between(1, 12))] = "data inválida"
+    motivos[(motivos == "") & (df["ano"].isna() | df["mes"].isna() | ~df["mes"].between(1, 12)
+                               | ~df["ano"].between(2000, 2100))] = "data inválida"
     motivos[(motivos == "") & df["total_venda"].isna()] = "TOTAL VENDA não é número"
     for linha, motivo in zip(df.loc[motivos != "", "linha"], motivos[motivos != ""]):
         erros.append({"linha": int(linha), "motivo": motivo})
@@ -319,6 +326,16 @@ APELIDOS_PROMOTORES = {
 }
 
 
+# Acima disso, um item do custo mensal de um promotor (salário, ajuda, vale ou total) é erro de digitação/leitura.
+LIMITE_CUSTO_MENSAL = 50_000.0
+_PALAVRAS_SUPERVISOR = re.compile(r"\b(SUP|SUPERVISOR|SUPERVISORA|SUPERV)\b")
+
+
+def eh_supervisor(nome: str, municipio: str = "") -> bool:
+    return bool(_PALAVRAS_SUPERVISOR.search(normalizar_texto(nome))
+                or _PALAVRAS_SUPERVISOR.search(normalizar_texto(municipio)))
+
+
 def _valida_promotores(mapa):
     return "codigo" in mapa and "nome" in mapa and ("total" in mapa or "salario" in mapa)
 
@@ -335,8 +352,27 @@ def importar_promotores(conteudo: bytes, nome_arquivo: str):
     df["nome"] = df["nome"].fillna("").astype(str).str.strip()
     df = df[(df["codigo"] != "") & (df["nome"] != "")]
 
-    for campo in ("salario", "ajuda_custo", "transporte", "total"):
-        df[campo] = df[campo].map(converter_numero) if campo in df else 0.0
+    avisos = []
+    nomes_colunas = {"salario": "Salário", "ajuda_custo": "Ajuda de custo", "transporte": "Vale transporte",
+                     "total": "TOTAL"}
+    for campo, rotulo in nomes_colunas.items():
+        if campo not in df:
+            df[campo] = 0.0
+            continue
+        originais = df[campo]
+        valores = originais.map(ler_numero)
+        # Texto que não é um número só (ex.: "600 + 120m"): fica 0, como o Excel faz no TOTAL da planilha, e avisa.
+        invalidos = valores.isna()
+        # Valor fora do normal para um mês de um promotor (ex.: 600120): fica 0 e avisa.
+        absurdos = ~invalidos & ((valores < 0) | (valores > LIMITE_CUSTO_MENSAL))
+        for (codigo, nome, original), motivo in (
+                [(t, "não é número") for t in zip(df.loc[invalidos, "codigo"], df.loc[invalidos, "nome"],
+                                                  originais[invalidos])]
+                + [(t, "fora do normal") for t in zip(df.loc[absurdos, "codigo"], df.loc[absurdos, "nome"],
+                                                      originais[absurdos])]):
+            avisos.append(f"{rotulo} de {nome} (código {codigo}) = '{original}' {motivo}: ficou 0. "
+                          "Corrija na planilha ou no cadastro.")
+        df[campo] = valores.where(~(invalidos | absurdos), 0.0).astype(float)
     soma = df["salario"] + df["ajuda_custo"] + df["transporte"]
     df["custo_mensal"] = df["total"].where(df["total"] > 0, soma)
 
@@ -347,15 +383,26 @@ def importar_promotores(conteudo: bytes, nome_arquivo: str):
             df[campo] = ""
         df[campo] = df[campo].fillna("").astype(str).str.strip()
 
-    avisos = []
     repetidos = df[df["codigo"].duplicated(keep=False)]
     if not repetidos.empty:
         avisos.append("Códigos repetidos (mantive a última linha): "
                       + ", ".join(sorted(repetidos["codigo"].unique())))
         df = df.drop_duplicates("codigo", keep="last")
-    sem_supervisor = df[df["supervisor"] == ""]
+    # Supervisor na lista de promotores ("Sup." / "Supervisor" no nome ou no município, ou o nome de alguém
+    # que aparece na coluna SUPERVISOR): entra como função Supervisor e fica fora da contagem e do custo dos
+    # promotores (pergunta 3 do docs/perguntas-mauricio.md).
+    nomes_supervisores = {normalizar_texto(n) for n in df["supervisor"] if n}
+    df["funcao"] = [
+        "Supervisor" if eh_supervisor(nome, municipio) or normalizar_texto(nome) in nomes_supervisores else "Promotor"
+        for nome, municipio in zip(df["nome"], df["municipio"])]
+    supervisores = df[df["funcao"] == "Supervisor"]
+    if not supervisores.empty:
+        avisos.append(f"{len(supervisores)} supervisor(es) na lista de promotores ficaram como função Supervisor "
+                      "(fora do custo e da contagem de promotores): " + ", ".join(supervisores["nome"][:10]))
+    sem_supervisor = df[(df["supervisor"] == "") & (df["funcao"] != "Supervisor")]
     if not sem_supervisor.empty:
-        avisos.append(f"{len(sem_supervisor)} promotor(es) sem supervisor.")
+        avisos.append(f"{len(sem_supervisor)} promotor(es) sem supervisor: " + ", ".join(sem_supervisor["nome"][:10])
+                      + (" …" if len(sem_supervisor) > 10 else ""))
 
     resumo = {"aba": aba, "promotores": len(df), "avisos": avisos}
     return df, resumo
@@ -406,11 +453,18 @@ def importar_roteiro(conteudo: bytes, nome_arquivo: str):
     uf_da_aba = df["aba"].astype(str).str.strip().str.upper()
     vazia = (df["uf"] == "") & uf_da_aba.str.fullmatch(r"[A-Z]{2}")
     df.loc[vazia, "uf"] = uf_da_aba[vazia]
-    df["visitas_semana"] = pd.to_numeric(df["visitas_semana"], errors="coerce")
     df = df[(df["loja"] != "") & ((df["codigo_promotor"] != "") | (df["colaborador"] != ""))]
-    df = df.drop_duplicates(["codigo_promotor", "colaborador", "cnpj", "loja"])
+    df = df.drop_duplicates(["codigo_promotor", "colaborador", "cnpj", "loja"]).copy()
 
     avisos = []
+    # Visitas por semana: inteiro de 1 a 7 (como na tela). O resto fica vazio, com aviso.
+    visitas = pd.to_numeric(df["visitas_semana"], errors="coerce")
+    validas = visitas.between(1, 7) & (visitas == visitas.round())
+    invalidas = df["visitas_semana"].notna() & (df["visitas_semana"].astype(str).str.strip() != "") & ~validas
+    if invalidas.any():
+        avisos.append(f"{int(invalidas.sum())} loja(s) com visitas por semana inválidas (use 1 a 7) ficaram sem "
+                      "visitas: " + ", ".join(df.loc[invalidas, "loja"].head(5)))
+    df["visitas_semana"] = visitas.where(validas)
     sem_cnpj = int((df["cnpj"] == "").sum())
     if sem_cnpj:
         avisos.append(f"{sem_cnpj} loja(s) sem CNPJ: aparecem no roteiro, mas sem faturamento.")

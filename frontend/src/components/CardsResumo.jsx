@@ -28,10 +28,11 @@ export default function CardsResumo({ resumo, regras }) {
       </section>
       {resumo.cnpjs_compartilhados > 0 && (
         <p className="nota">
-          ⚠ {resumo.cnpjs_compartilhados} CNPJ(s) com mais de uma loja e sem COD CLI para separar: o faturamento é
-          compartilhado entre as lojas e conta uma vez só nos totais.
+          ⚠ {resumo.cnpjs_compartilhados} CNPJ(s) com mais de uma loja e sem COD CLI para separar: o faturamento do CNPJ
+          é dividido entre essas lojas (e entre os promotores de cada loja), para a soma por promotor bater com o total.
         </p>
       )}
+      {(resumo.avisos || []).map((aviso) => <p key={aviso} className="nota">⚠ {aviso}</p>)}
     </>
   )
 }

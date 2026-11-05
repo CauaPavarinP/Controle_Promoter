@@ -43,6 +43,8 @@ export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor })
   const [abertos, setAbertos] = useState(() => new Set())
   const imprimindo = useImprimindo()
   const arvore = montarArvore(porUf)
+  // Visitas por semana: a planilha não tem; a coluna só aparece quando alguma loja tiver o dado.
+  const colunas = porUf.some((l) => l.visitas_semana != null) ? COLUNAS : COLUNAS.filter((c) => c.campo !== 'visitas_semana')
   const total = { ...resumo, nome: 'Total geral', custo_periodo: resumo.custo }
   const aberto = (chave) => imprimindo || abertos.has(chave)
 
@@ -76,7 +78,7 @@ export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor })
         ...s.filhos.map((p) => ({ ...p, tipo: 'Promotor', nome: `        ${p.nome}` })),
       ]),
     ])
-    exportarExcel('resumo-custo-x-faturamento', [{ campo: 'tipo', titulo: 'Nível' }, ...COLUNAS], todas, [{ ...total, tipo: 'Total' }], (l) => l.tipo === 'UF')
+    exportarExcel('resumo-custo-x-faturamento', [{ campo: 'tipo', titulo: 'Nível' }, ...colunas], todas, [{ ...total, tipo: 'Total' }], (l) => l.tipo === 'UF')
   }
 
   return (
@@ -96,16 +98,16 @@ export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor })
       <div className="tabela-rolagem">
         <table className="arvore">
           <thead>
-            <tr>{COLUNAS.map((c) => <th key={c.campo} className={c.num ? 'num' : ''}>{c.titulo}</th>)}</tr>
+            <tr>{colunas.map((c) => <th key={c.campo} className={c.num ? 'num' : ''}>{c.titulo}</th>)}</tr>
           </thead>
           <tbody>
-            {!linhas.length && <tr><td colSpan={COLUNAS.length} className="vazio">Nenhum promotor com esses filtros.</td></tr>}
+            {!linhas.length && <tr><td colSpan={colunas.length} className="vazio">Nenhum promotor com esses filtros.</td></tr>}
             {linhas.map((l) => {
               const temFilhos = l.nivel < 2 && l.filhos.length > 0
               const clicar = l.nivel === 2 ? () => aoAbrirPromotor(l.codigo) : temFilhos ? () => alternar(l.chave) : undefined
               return (
                 <tr key={l.chave} className={`nivel-${l.nivel} ${clicar ? 'clicavel' : ''}`} onClick={clicar}>
-                  {COLUNAS.map((c, i) => (
+                  {colunas.map((c, i) => (
                     <td key={c.campo} className={c.num ? 'num' : ''}>
                       {i === 0 ? (
                         <span className="arvore-nome" style={{ paddingLeft: l.nivel * 22 }}>
@@ -125,7 +127,7 @@ export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor })
           {linhas.length > 0 && (
             <tfoot>
               <tr>
-                {COLUNAS.map((c, i) => (
+                {colunas.map((c, i) => (
                   <td key={c.campo} className={c.num ? 'num' : ''}>
                     {i === 0 ? total.nome : <Celula coluna={c} linha={total} regras={regras} />}
                   </td>

@@ -168,7 +168,8 @@ def test_importacao_da_planilha_e_idempotente(cliente):
     assert len(cliente.get("/api/pdvs").json()) == 11
     assert len(cliente.get("/api/roteiros").json()) == 11
     assert len(cliente.get("/api/supervisores").json()) == 2
-    assert resposta.json()["cadastros"] == {"criados": 0, "mantidos": 11, "pendentes": 0}
+    assert resposta.json()["cadastros"] == {"criados": 0, "mantidos": 11, "pendentes": 0,
+                                                "uf_diferente": 0}
 
 
 def test_converte_dados_da_versao_anterior(banco):

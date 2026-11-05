@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from . import db
 from .config import APP_SENHA, APP_USUARIO
-from .importacao import normalizar_texto
+from .importacao import LIMITE_CUSTO_MENSAL, normalizar_texto
 from .modelos import (ApelidoColaborador, CustoPromotor, Pdv, Promotor, Roteiro, RoteiroPendente, Supervisor,
                       Usuario)
 from .seguranca import gerar_hash
@@ -64,16 +64,19 @@ def custo_vigente(promotor: Promotor, ano: int, mes: int) -> CustoPromotor | Non
 def aplicar_promotores(sessao: Session, df: pd.DataFrame) -> dict:
     """Cria ou atualiza promotores a partir da planilha. Custo novo vira reajuste no mês atual."""
     hoje = date.today()
-    criados = atualizados = reajustes = 0
+    criados = atualizados = reajustes = corrigidos = 0
     for linha in df.itertuples():
         promotor = sessao.scalar(select(Promotor).where(Promotor.codigo == linha.codigo))
         municipio, uf = separar_municipio(linha.municipio)
         uf = uf or str(getattr(linha, "uf", "") or "").strip().upper()[:2]
         dados = {"nome": linha.nome, "municipio": municipio, "uf": uf,
                  "data_admissao": _data(linha.admissao)}
+        # A planilha só sabe dizer "é supervisor"; Promotor/Repositor escolhido na tela não é sobrescrito.
+        supervisor_na_lista = getattr(linha, "funcao", "") == "Supervisor"
         supervisor = obter_supervisor(sessao, linha.supervisor)
         if promotor is None:
-            promotor = Promotor(codigo=linha.codigo, **dados, supervisor=supervisor)
+            promotor = Promotor(codigo=linha.codigo, **dados, supervisor=supervisor,
+                                funcao="Supervisor" if supervisor_na_lista else "Promotor")
             sessao.add(promotor)
             criados += 1
         else:
@@ -82,12 +85,22 @@ def aplicar_promotores(sessao: Session, df: pd.DataFrame) -> dict:
                     setattr(promotor, campo, valor)
             if supervisor is not None:
                 promotor.supervisor = supervisor
+            if supervisor_na_lista:
+                promotor.funcao = "Supervisor"
             atualizados += 1
 
         salario, ajuda, vt = _numero(linha.salario), _numero(linha.ajuda_custo), _numero(linha.transporte)
         outros = max(0.0, round(_numero(linha.custo_mensal) - (salario + ajuda + vt), 2))
         atual = custo_vigente(promotor, hoje.year, hoje.month) if promotor.custos else None
         valores = (salario, ajuda, vt, outros)
+        # Custo gravado errado por versão anterior (ex.: "600 + 120m" lido como 600120): corrige no lugar,
+        # em vez de virar reajuste a partir de hoje (o valor errado ficaria nos meses anteriores).
+        errados = [c for c in promotor.custos if _custo_absurdo(c)]
+        if errados:
+            for custo in errados:
+                custo.salario, custo.ajuda_custo, custo.vale_transporte, custo.outros = valores
+            corrigidos += len(errados)
+            continue
         if atual is not None and (atual.salario, atual.ajuda_custo, atual.vale_transporte, atual.outros) == valores:
             continue
         if atual is None:
@@ -103,17 +116,53 @@ def aplicar_promotores(sessao: Session, df: pd.DataFrame) -> dict:
             promotor.custos.append(existente)
         existente.salario, existente.ajuda_custo, existente.vale_transporte, existente.outros = valores
     sessao.commit()
-    return {"criados": criados, "atualizados": atualizados, "reajustes": reajustes}
+    return {"criados": criados, "atualizados": atualizados, "reajustes": reajustes,
+            "custos_corrigidos": corrigidos}
+
+
+def _custo_absurdo(custo: CustoPromotor) -> bool:
+    return any(v is not None and (v < 0 or v > LIMITE_CUSTO_MENSAL)
+               for v in (custo.salario, custo.ajuda_custo, custo.vale_transporte, custo.outros))
 
 
 def _indice_promotores(sessao: Session) -> dict:
-    """Nome normalizado (com e sem espaços) → promotor, para ligar o roteiro pelo nome."""
+    """Nome normalizado (com e sem espaços) → lista de promotores com esse nome (pode haver homônimos)."""
     indice = {}
-    for promotor in sessao.scalars(select(Promotor)):
+    for promotor in sessao.scalars(select(Promotor).order_by(Promotor.id)):
         nome = normalizar_texto(promotor.nome)
-        indice.setdefault(nome, promotor)
-        indice.setdefault(nome.replace(" ", ""), promotor)
+        for chave in {nome, nome.replace(" ", "")}:
+            lista = indice.setdefault(chave, [])
+            if promotor not in lista:
+                lista.append(promotor)
     return indice
+
+
+def escolher_promotor(codigo: str, colaborador: str, uf: str, por_codigo: dict, por_nome: dict,
+                      apelidos: dict) -> tuple[Promotor | None, str]:
+    """Promotor de uma linha do roteiro. Devolve (promotor, motivo); sem promotor, o motivo diz por quê.
+
+    - Nome e código juntos precisam concordar: código de outra pessoa não liga a loja (antes o código
+      ganhava do nome e a loja ia para quem tinha aquele número).
+    - Nome repetido (homônimos): usa o da mesma UF da loja; se não der para decidir, fica pendente.
+    """
+    nome = normalizar_texto(colaborador)
+    pelo_codigo = por_codigo.get(codigo) if codigo else None
+    candidatos = (por_nome.get(nome) or por_nome.get(nome.replace(" ", ""))) if nome else None
+    if not candidatos and nome in apelidos:
+        candidatos = [apelidos[nome]]
+    candidatos = candidatos or []
+    if pelo_codigo is not None and (not nome or pelo_codigo in candidatos):
+        return pelo_codigo, ""
+    if pelo_codigo is not None and not candidatos:
+        return None, f"código {codigo} é de {pelo_codigo.nome}, não de {colaborador}"
+    if len(candidatos) == 1:
+        return candidatos[0], ""
+    if len(candidatos) > 1:
+        mesma_uf = [p for p in candidatos if uf and (p.uf or "").upper() == uf.upper()]
+        if len(mesma_uf) == 1:
+            return mesma_uf[0], ""
+        return None, "nome repetido em mais de um promotor"
+    return None, "nome não encontrado"
 
 
 def obter_pdv(sessao: Session, cnpj: str, nome: str, cidade: str = "", uf: str = "") -> Pdv:
@@ -130,18 +179,22 @@ def obter_pdv(sessao: Session, cnpj: str, nome: str, cidade: str = "", uf: str =
 
 
 def aplicar_roteiro(sessao: Session, df: pd.DataFrame, origem: str = "importação") -> dict:
-    """Cria PDVs e roteiros vigentes a partir da planilha; o que não achar promotor vira pendência."""
-    inicio = date(date.today().year, 1, 1)
+    """Cria PDVs e roteiros vigentes a partir da planilha; o que não achar promotor vira pendência.
+
+    A planilha não tem data: o vínculo começa em 01/01 do ano corrente ou na admissão do promotor, o que
+    for depois (antes, começava em 01/01 mesmo para quem foi admitido depois).
+    """
+    comeco_do_ano = date(date.today().year, 1, 1)
     por_codigo = {p.codigo: p for p in sessao.scalars(select(Promotor))}
     por_nome = _indice_promotores(sessao)
     # Nomes já ligados antes no quadro "Colaboradores não encontrados".
     apelidos = {a.nome_chave: a.promotor for a in sessao.scalars(select(ApelidoColaborador))}
     sessao.query(RoteiroPendente).delete()
-    criados = mantidos = pendentes = 0
+    criados = mantidos = pendentes = desligados = 0
+    uf_diferente = []
     for linha in df.itertuples():
-        nome = normalizar_texto(linha.colaborador)
-        promotor = (por_codigo.get(linha.codigo_promotor) or por_nome.get(nome)
-                    or por_nome.get(nome.replace(" ", "")) or apelidos.get(nome))
+        promotor, motivo = escolher_promotor(linha.codigo_promotor, linha.colaborador, linha.uf, por_codigo,
+                                             por_nome, apelidos)
         visitas = None if pd.isna(linha.visitas_semana) else int(linha.visitas_semana)
         if promotor is None:
             sessao.add(RoteiroPendente(colaborador=linha.colaborador or linha.codigo_promotor, cnpj_cpf=linha.cnpj,
@@ -149,6 +202,12 @@ def aplicar_roteiro(sessao: Session, df: pd.DataFrame, origem: str = "importaç�
                                        visitas_por_semana=visitas, origem=getattr(linha, "aba", origem)))
             pendentes += 1
             continue
+        inicio = max(comeco_do_ano, promotor.data_admissao or comeco_do_ano)
+        if promotor.data_desligamento and promotor.data_desligamento < inicio:
+            desligados += 1
+            continue
+        if promotor.uf and linha.uf and promotor.uf.upper() != linha.uf.upper():
+            uf_diferente.append(f"{promotor.nome} ({promotor.uf}) → {linha.loja} ({linha.uf})")
         pdv = obter_pdv(sessao, linha.cnpj, linha.loja, linha.cidade, linha.uf)
         vigente = sessao.scalar(select(Roteiro).where(
             Roteiro.promotor_id == promotor.id, Roteiro.pdv_id == pdv.id, Roteiro.data_fim.is_(None)))
@@ -162,7 +221,14 @@ def aplicar_roteiro(sessao: Session, df: pd.DataFrame, origem: str = "importaç�
             mantidos += 1
         sessao.flush()
     sessao.commit()
-    return {"criados": criados, "mantidos": mantidos, "pendentes": pendentes}
+    avisos = []
+    if desligados:
+        avisos.append(f"{desligados} loja(s) de promotor já desligado ficaram de fora.")
+    if uf_diferente:
+        avisos.append(f"{len(uf_diferente)} loja(s) numa UF diferente da UF do promotor (confira se o vínculo está "
+                      "certo): " + "; ".join(uf_diferente[:5]) + (" …" if len(uf_diferente) > 5 else ""))
+    return {"criados": criados, "mantidos": mantidos, "pendentes": pendentes, "uf_diferente": len(uf_diferente),
+            "avisos": avisos}
 
 
 def migrar_legado(sessao: Session) -> None:

@@ -21,7 +21,8 @@ Versão simplificada (branch `versao-simplificada`), com 4 abas:
 - **Filtros** no Resumo e em Lojas por UF, numa barra que fica fixa ao rolar: período, supervisor e UF; promotor,
   cidade, PDV e atalhos de período em "Mais filtros". Os filtros escolhidos aparecem como etiquetas com ✕.
 - O **faturamento das lojas vem do ERP**: o sistema soma as notas do CNPJ de cada loja, mês a mês (como o
-  SOMASE da planilha), mas **CNPJ que aparece em mais de uma loja conta uma vez só** nos totais.
+  SOMASE da planilha). **CNPJ que aparece em mais de uma loja é dividido** entre elas (e, dentro da loja, entre os
+  promotores dela): a soma por promotor, supervisor ou UF sempre dá o total.
 - Todas as tabelas ordenam por coluna e exportam para **Excel (.xlsx) formatado** (`app/exportar.py`): título, filtros
   em uso, cabeçalho colorido e fixo, filtro nas colunas, R$ e % já formatados (zero aparece como "-"), linhas
   alternadas e total em negrito. Botão **Imprimir** no Resumo e em Lojas por UF.
@@ -75,7 +76,16 @@ frontend/           tela em React (Vite)
   pré-visualização e no histórico, com o número da linha no Excel (exportável).
 - **Histórico** com **desfazer** (apaga os itens daquela importação). Meses que ela substituiu não voltam.
 - Promotores e roteiro **não apagam nada** (rodar de novo não duplica). O primeiro custo de um promotor vale
-  desde a admissão; o vínculo do roteiro começa em 01/01 do ano corrente.
+  desde a admissão; o vínculo do roteiro começa em 01/01 do ano corrente **ou na admissão, o que for depois**.
+- **Números em texto:** só vale um número (`1.234,56`, `1234.56`, `R$ 600,00`). Texto como `600 + 120m` fica 0 com
+  aviso (antes virava 600120). Item de custo acima de R$ 50.000/mês também fica 0 com aviso; reimportar a planilha
+  corrige custo gravado errado antes.
+- **Ligação loja → promotor:** se a linha tem código e nome, os dois precisam ser da mesma pessoa (código de outra
+  pessoa não liga a loja). Nome repetido em dois promotores usa o da UF da loja; sem como decidir, fica pendente.
+  Lojas numa UF diferente da do promotor aparecem nos avisos da importação.
+- **Supervisor na lista de promotores** ("Sup."/"Supervisor" no nome ou município, ou nome que está na coluna
+  SUPERVISOR) entra com função Supervisor e fica fora do custo e da contagem de promotores.
+- **Visitas por semana** na planilha: só inteiro de 1 a 7; o resto fica vazio, com aviso.
 
 ## Regras do cálculo
 
@@ -83,17 +93,21 @@ Valores padrão em `REGRAS_PADRAO` (`app/regras.py`): valor = TOTAL VENDA, todos
 planilha), custo de cada loja proporcional às visitas por semana. Nesta versão não há tela para mudar as regras.
 
 Regras fixas:
+- **Período:** `AAAA-MM`, mês 01 a 12, até 5 anos. **Meses depois do mês atual ficam fora** (não há custo projetado).
 - **Custo por competência:** em cada mês vale o último reajuste até aquele mês. Conta a partir do mês de
   admissão e até o mês de desligamento (meses inteiros). Reajuste não muda os meses anteriores.
+- **Promotor só conta nos meses em que estava contratado:** antes da admissão (ou depois do desligamento) ele não
+  entra na contagem, as lojas dele não contam e o faturamento delas não vai para ele.
 - **Roteiro com datas:** o faturamento de cada mês vai para o promotor cujo vínculo estava vigente no
   **último dia do mês**. Trocar o promotor não muda o que foi atribuído ao anterior.
 - **PDVs com o mesmo CNPJ** (CNPJ + nome diferentes):
   1. se cada loja tem o seu **COD CLI** no cadastro e eles são diferentes, o faturamento é separado pelo COD CLI;
-  2. se não, o faturamento do CNPJ conta **uma vez só** nos totais e as lojas aparecem com o aviso
-     "faturamento compartilhado com outra loja";
+  2. se não, o faturamento do CNPJ é **dividido em partes iguais** entre as lojas (no mês) e as lojas aparecem
+     com o aviso "faturamento compartilhado com outra loja";
 - Loja com faturamento compartilhado: o % de custo da loja não é calculado.
-- PDV com mais de um promotor ao mesmo tempo: o faturamento aparece cheio para cada um (opção "a" do
-  documento, seção 5.5).
+- PDV com mais de um promotor ao mesmo tempo: o faturamento da loja é dividido em partes iguais entre eles
+  (antes aparecia cheio para cada um — opção "a" do documento, seção 5.5 —, e a soma por promotor passava do
+  total; **confirmar com o Maurício**).
 
 ## Pendências com o Maurício / Rayan
 

@@ -14,7 +14,7 @@ from . import db
 from .autenticacao import exigir_admin, usuario_logado
 from .carga import custo_vigente
 from .faturamento import dados_do_cliente
-from .importacao import normalizar_cnpj, normalizar_texto
+from .importacao import LIMITE_CUSTO_MENSAL, normalizar_cnpj, normalizar_texto
 from .modelos import CustoPromotor, Pdv, Promotor, Roteiro, Supervisor
 
 rotas = APIRouter(prefix="/api")
@@ -149,12 +149,13 @@ def transferir_equipe(ident: int, dados: Transferencia, sessao: Session = Depend
 # ---------------------------------------------------------------------------
 
 class CustoEntrada(BaseModel):
+    # Teto por item (LIMITE_CUSTO_MENSAL): evita gravar um valor digitado errado como 600120.
     ano: int = Field(ge=2000, le=2100)
     mes: int = Field(ge=1, le=12)
-    salario: float = Field(ge=0)
-    ajuda_custo: float = Field(ge=0, default=0)
-    vale_transporte: float = Field(ge=0, default=0)
-    outros: float = Field(ge=0, default=0)
+    salario: float = Field(ge=0, le=LIMITE_CUSTO_MENSAL)
+    ajuda_custo: float = Field(ge=0, le=LIMITE_CUSTO_MENSAL, default=0)
+    vale_transporte: float = Field(ge=0, le=LIMITE_CUSTO_MENSAL, default=0)
+    outros: float = Field(ge=0, le=LIMITE_CUSTO_MENSAL, default=0)
 
 
 class PromotorEntrada(BaseModel):

@@ -201,16 +201,20 @@ def resolver_colaborador(dados: ResolverColaborador, sessao: Session = Depends(d
     return {"vinculos_criados": criados}
 
 
+_CONECTIVOS = {"DE", "DA", "DO", "DAS", "DOS", "E"}
+
+
 def _sugerir_promotor(nome: str, promotores: list) -> dict | None:
     """Promotor com o nome mais parecido (erro de digitação, acento, nome do meio a mais ou a menos)."""
     alvo = normalizar_texto(nome)
-    palavras = set(alvo.split())
+    # "DE", "DA", "DOS"… não contam como sobrenome em comum ("Maria de Souza" x "Maria de Oliveira").
+    palavras = set(alvo.split()) - _CONECTIVOS
     melhor, nota_melhor = None, 0.0
     for p in promotores:
         candidato = normalizar_texto(p.nome)
         nota = SequenceMatcher(None, alvo, candidato).ratio()
         # Mesmo primeiro nome e algum sobrenome em comum também conta ("Ana Silva" x "Ana Maria Silva").
-        comuns = palavras & set(candidato.split())
+        comuns = palavras & (set(candidato.split()) - _CONECTIVOS)
         if alvo.split()[:1] == candidato.split()[:1] and len(comuns) >= 2:
             nota = max(nota, 0.85)
         if nota > nota_melhor:

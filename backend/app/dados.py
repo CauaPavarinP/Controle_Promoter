@@ -20,7 +20,7 @@ def tabelas_do_calculo(sessao: Session) -> tuple[pd.DataFrame, pd.DataFrame, pd.
             "codigo": p.codigo, "nome": p.nome, "admissao": _texto_data(p.data_admissao),
             "desligamento": _texto_data(p.data_desligamento),
             "municipio": f"{p.municipio} - {p.uf}" if p.uf else p.municipio,
-            "uf": p.uf or "", "supervisor": p.supervisor.nome if p.supervisor else "",
+            "uf": p.uf or "", "supervisor": p.supervisor.nome if p.supervisor else "", "funcao": p.funcao or "",
             "salario": atual.salario if atual else 0.0,
             "ajuda_custo": atual.ajuda_custo if atual else 0.0,
             "transporte": atual.vale_transporte if atual else 0.0,
@@ -40,7 +40,7 @@ def tabelas_do_calculo(sessao: Session) -> tuple[pd.DataFrame, pd.DataFrame, pd.
         "data_inicio": _texto_data(r.data_inicio), "data_fim": _texto_data(r.data_fim),
     } for r, codigo, pdv in roteiros]
 
-    colunas_promotores = ["codigo", "nome", "admissao", "desligamento", "municipio", "uf", "supervisor",
+    colunas_promotores = ["codigo", "nome", "admissao", "desligamento", "municipio", "uf", "supervisor", "funcao",
                           "salario", "ajuda_custo", "transporte", "custo_mensal"]
     colunas_roteiro = ["roteiro_id", "codigo_promotor", "colaborador", "cnpj", "loja", "cidade", "uf", "cod_cli",
                        "visitas_semana", "data_inicio", "data_fim"]

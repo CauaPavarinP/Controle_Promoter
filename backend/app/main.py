@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -14,7 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import cadastros, db, exportar, faturamento, pendencias, usuarios
 from .autenticacao import exigir_admin, usuario_logado
-from .calculos import Filtros, calcular_painel, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
+from .calculos import Filtros, calcular_painel, indice_mes, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
 from .carga import aplicar_promotores, aplicar_roteiro, preparar_banco
 from .config import FRONTEND_DIST, PRODUCAO, SECRET_KEY, SESSAO_HORAS
 from .dados import colaboradores_pendentes, tabelas_do_calculo
@@ -65,6 +66,28 @@ async def protecoes(request: Request, chamar_proximo):
     if PRODUCAO:
         resposta.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return resposta
+
+
+def _numero_curto(valor) -> str:
+    return f"{valor:g}" if isinstance(valor, (int, float)) else str(valor)
+
+
+@app.exception_handler(RequestValidationError)
+async def dados_invalidos(_request: Request, erro: RequestValidationError):
+    """Erro de validação em texto (a tela mostra `detail` como mensagem; a lista do FastAPI virava "[object Object]")."""
+    partes = []
+    for item in erro.errors():
+        campo = str(item.get("loc", ["", "?"])[-1])
+        limites = item.get("ctx") or {}
+        if "le" in limites:
+            partes.append(f"{campo}: no máximo {_numero_curto(limites['le'])}")
+        elif "ge" in limites:
+            partes.append(f"{campo}: no mínimo {_numero_curto(limites['ge'])}")
+        else:
+            partes.append(f"{campo}: valor inválido")
+    return JSONResponse({"detail": "Dados inválidos — " + "; ".join(partes)}, status_code=422)
+
+
 app.include_router(usuarios.rotas)
 app.include_router(cadastros.rotas)
 app.include_router(pendencias.rotas)
@@ -106,6 +129,7 @@ def _importar_cadastro(sessao: Session, tipo: str, conteudo: bytes, nome: str, u
                        "roteiro": (importar_roteiro, aplicar_roteiro)}[tipo]
     tabela, resumo = leitor(conteudo, nome)
     resumo["cadastros"] = aplicar(sessao, tabela)
+    resumo["avisos"] += resumo["cadastros"].pop("avisos", [])
     faturamento.registrar(sessao, tipo, nome, usuario.usuario, len(tabela), resumo["avisos"])
     pendentes = colaboradores_pendentes(sessao)
     if tipo == "roteiro" and pendentes:
@@ -218,30 +242,30 @@ def opcoes(sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     return dados
 
 
+# Até 5 anos por consulta (60 meses).
+MESES_MAXIMOS = 60
+
+
 @app.get("/api/painel")
 def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: str = "", cidade: str = "",
            pdv: str = "", sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     try:
-        filtros = Filtros(inicio=inicio, fim=fim, supervisor=supervisor, promotor=promotor, uf=uf, cidade=cidade,
-                          pdv=pdv)
-        indice_inicio = int(inicio[:4]) * 12 + int(inicio[5:7])
-        indice_fim = int(fim[:4]) * 12 + int(fim[5:7])
-    except (ValueError, IndexError) as erro:
-        raise HTTPException(status_code=400, detail="Período inválido. Use AAAA-MM.") from erro
-    if abs(indice_fim - indice_inicio) > 60:
+        indice_inicio, indice_fim = indice_mes(inicio), indice_mes(fim)
+    except ValueError as erro:
+        raise HTTPException(status_code=400, detail=str(erro)) from erro
+    if abs(indice_fim - indice_inicio) >= MESES_MAXIMOS:
         _erro("Escolha um período de até 5 anos.")
+    filtros = Filtros(inicio=inicio, fim=fim, supervisor=supervisor, promotor=promotor, uf=uf, cidade=cidade, pdv=pdv)
     promotores, custos, roteiro = tabelas_do_calculo(sessao)
     return calcular_painel(faturamento.faturamento_mensal(), promotores, roteiro, filtros, ler_regras(), custos)
 
 
 def _ano_mes(texto: str) -> tuple[int, int]:
     try:
-        ano, mes = int(texto[:4]), int(texto[5:7])
-    except (ValueError, IndexError):
+        indice = indice_mes(texto)
+    except ValueError:
         _erro("Mês inválido. Use AAAA-MM.")
-    if not 1 <= mes <= 12:
-        _erro("Mês inválido. Use AAAA-MM.")
-    return ano, mes
+    return indice // 12, indice % 12 + 1
 
 
 @app.get("/api/faturamento")
@@ -255,10 +279,7 @@ def faturamento_do_erp(inicio: str, fim: str, sessao: Session = Depends(db.sessa
 @app.get("/api/faturamento/itens")
 def itens_de_um_mes(cnpj: str, mes: str, cod_cli: str = "", _=Depends(usuario_logado)):
     """Notas (itens) de um PDV num mês: o detalhe de um valor da grade mês a mês."""
-    try:
-        ano, numero = int(mes[:4]), int(mes[5:7])
-    except (ValueError, IndexError):
-        _erro("Mês inválido. Use AAAA-MM.")
+    ano, numero = _ano_mes(mes)
     if len(cnpj) < 8:
         _erro("CNPJ inválido.")
     return faturamento.itens_do_cliente(cnpj, ano, numero, cod_cli, ler_regras())

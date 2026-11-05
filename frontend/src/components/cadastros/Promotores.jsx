@@ -62,6 +62,7 @@ function CamposPromotor({ dados, alterar, supervisores }) {
           <select value={dados.funcao} onChange={(e) => alterar('funcao', e.target.value)}>
             <option>Promotor</option>
             <option>Repositor</option>
+            <option>Supervisor</option>
           </select>
         </Campo>
       </div>

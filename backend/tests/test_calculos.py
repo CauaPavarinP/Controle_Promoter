@@ -54,7 +54,8 @@ def test_acumulado_conta_cnpj_compartilhado_uma_vez():
     assert painel["resumo"]["faturamento"] == 15000.0
     assert painel["resumo"]["cnpjs_compartilhados"] == 1
     lojas_rede = [l for l in painel["lojas"] if l["cnpj"] == "111"]
-    assert all(l["faturamento"] == 15000.0 and l["compartilhado"] for l in lojas_rede)
+    # Cada loja da rede fica com a sua parte do CNPJ; somadas, dão o valor do CNPJ (não 2 × 15.000).
+    assert all(l["faturamento"] == 7500.0 and l["compartilhado"] for l in lojas_rede)
     assert all(l["percentual_custo"] is None for l in lojas_rede)  # % não faz sentido com valor da rede
 
 
@@ -103,7 +104,8 @@ def test_mesmo_cnpj_separado_pelo_cod_cli():
     # Sem COD CLI numa das lojas: não dá para separar, o CNPJ é compartilhado e conta uma vez.
     rot.loc[1, "cod_cli"] = ""
     painel = calcular_painel(fat, prom, rot, Filtros("2026-01", "2026-01"))
-    assert [l["faturamento"] for l in painel["lojas"]] == [1000.0, 1000.0]
+    assert [l["faturamento"] for l in painel["lojas"]] == [500.0, 500.0]
+    assert painel["resumo"]["faturamento"] == 1000.0
     assert all(l["compartilhado"] for l in painel["lojas"])
     assert painel["resumo"]["faturamento"] == 1000.0
 
@@ -137,6 +139,7 @@ def test_rateio_do_custo_por_loja():
 
 def test_faturamento_por_visita():
     fat, prom, rot = _dados()
+    prom.loc[prom["codigo"] == "2", "admissao"] = "2026-01-05"  # contratado em fevereiro
     rot.loc[rot["loja"] == "SEM COMPRA", "visitas_semana"] = 1
     painel = calcular_painel(fat, prom, rot, Filtros("2026-02", "2026-02", promotor="2"))
     outra = next(l for l in painel["lojas"] if l["loja"] == "OUTRA")
