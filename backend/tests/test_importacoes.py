@@ -166,9 +166,14 @@ def test_arquivo_lento_e_lido_em_segundo_plano(cliente, banco, monkeypatch):
             break
         time.sleep(0.1)
     assert resposta["situacao"] == "pronto" and resposta["linhas_validas"] > 0
+    # Perguntar de novo depois de pronta devolve a mesma prévia (antes dizia "o servidor pode ter reiniciado").
+    de_novo = cliente.get(f"/api/importacoes/faturamento/leitura/{resposta['leitura']}")
+    assert de_novo.status_code == 200 and de_novo.json()["token"] == resposta["token"]
     confirmado = cliente.post(f"/api/importacoes/faturamento/{resposta['token']}/confirmar", json={"substituir": False})
     assert confirmado.status_code == 200
     assert cliente.get("/api/importacoes/faturamento/leitura/nao-existe").status_code == 400
+    historico = cliente.get("/api/importacoes").json()
+    assert historico[0]["data_hora"].endswith("Z")  # UTC marcado: o navegador mostra no horário de Brasília
 
 
 def test_somas_guardadas_sao_refeitas_quando_o_faturamento_muda(cliente):
@@ -216,3 +221,39 @@ def test_varios_pedidos_ao_mesmo_tempo_fazem_uma_soma_so(banco, monkeypatch):
     banco.faturamento.limpar_cache()            # faturamento mudou: a próxima tela soma de novo
     banco.faturamento.faturamento_mensal()
     assert len(chamadas) == 2
+
+
+def test_cnpj_com_mais_de_14_digitos_nao_derruba_o_roteiro(cliente):
+    """Célula com dois CNPJs (28 dígitos) dava erro 500 (VARCHAR(14)); agora a loja entra sem CNPJ, com aviso."""
+    import io
+
+    import pandas as pd
+    entrar(cliente)
+    importar_cadastros(cliente, "promotores")
+    nome = cliente.get("/api/promotores").json()[0]["nome"]
+    sc = pd.DataFrame({"Colaborador": [nome, nome], "CPF/CNPJ": ["12.345.678/0001-90 / 98.765.432/0001-10",
+                                                               "11.222.333/0001-81"],
+                       "RAZÃO SOCIAL": ["Loja Dupla", "Loja Certa"], "Cidade": ["ITAJAI", "ITAJAI"], "UF": ["SC", "SC"]})
+    arquivo = io.BytesIO()
+    with pd.ExcelWriter(arquivo) as planilha:
+        sc.to_excel(planilha, sheet_name="SC", index=False)
+    resposta = cliente.post("/api/importacoes/roteiro", files={"arquivo": ("sc.xlsx", arquivo.getvalue())})
+    assert resposta.status_code == 200, resposta.text
+    assert any("CNPJ inválido" in aviso and "Loja Dupla" in aviso for aviso in resposta.json()["avisos"])
+    pdvs = {p["nome_fantasia"]: p["cnpj_cpf"] for p in cliente.get("/api/pdvs").json()}
+    assert pdvs["Loja Dupla"] == "" and pdvs["Loja Certa"] == "11222333000181"
+
+
+def test_erro_inesperado_vira_mensagem_para_a_tela(banco, monkeypatch):
+    """Falha não prevista: resposta em JSON com `detail` (a tela mostrava só "Erro ao falar com o servidor")."""
+    from fastapi.testclient import TestClient
+
+    def quebra(*_args, **_kwargs):
+        raise RuntimeError("falha de teste")
+
+    monkeypatch.setattr(banco.main, "calcular_painel", quebra)
+    with TestClient(banco.main.app, raise_server_exceptions=False) as cliente:
+        entrar(cliente)
+        resposta = cliente.get("/api/painel", params=PERIODO)
+    assert resposta.status_code == 500
+    assert resposta.json()["detail"].startswith("Erro inesperado no servidor. (ref. ")

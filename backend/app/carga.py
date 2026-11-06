@@ -96,6 +96,11 @@ def aplicar_promotores(sessao: Session, df: pd.DataFrame) -> dict:
         # Custo gravado errado por versão anterior (ex.: "600 + 120m" lido como 600120): corrige no lugar,
         # em vez de virar reajuste a partir de hoje (o valor errado ficaria nos meses anteriores).
         errados = [c for c in promotor.custos if _custo_absurdo(c)]
+        # "600 + 120m" que a versão anterior gravou como 0: corrige no lugar também (valia desde o início).
+        campos_em_texto = str(getattr(linha, "custo_em_texto", "") or "").split()
+        if campos_em_texto:
+            errados += [c for c in promotor.custos if c not in errados
+                        and all(not getattr(c, _CAMPO_CUSTO[campo]) for campo in campos_em_texto)]
         if errados:
             for custo in errados:
                 custo.salario, custo.ajuda_custo, custo.vale_transporte, custo.outros = valores
@@ -118,6 +123,9 @@ def aplicar_promotores(sessao: Session, df: pd.DataFrame) -> dict:
     sessao.commit()
     return {"criados": criados, "atualizados": atualizados, "reajustes": reajustes,
             "custos_corrigidos": corrigidos}
+
+
+_CAMPO_CUSTO = {"salario": "salario", "ajuda_custo": "ajuda_custo", "transporte": "vale_transporte"}
 
 
 def _custo_absurdo(custo: CustoPromotor) -> bool:
