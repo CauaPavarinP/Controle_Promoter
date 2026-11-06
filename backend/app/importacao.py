@@ -79,6 +79,24 @@ def ler_numero(valor):
     return None
 
 
+# "600 + 120m": R$ 600 mais R$ 120 mensais (resposta do Maurício) = R$ 720 por mês. Aceita "600 +120m",
+# "R$ 600 + R$ 120 mensais" etc. Só soma de dois ou mais valores; qualquer outro texto continua não sendo número.
+_PARCELA = r"(?:R\$\s*)?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?"
+_SOMA_MENSAL = re.compile(rf"\s*{_PARCELA}(?:\s*\+\s*{_PARCELA}\s*(?:m|mes|mensal|mensais)?\.?)+\s*", re.IGNORECASE)
+
+
+def _reais(valor: float) -> str:
+    return "R$ " + f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def ler_soma_mensal(valor):
+    """Texto como "600 + 120m" vira a soma (720.0); qualquer outra coisa devolve None."""
+    if not isinstance(valor, str) or not _SOMA_MENSAL.fullmatch(valor.replace("\xa0", " ")):
+        return None
+    parcelas = re.findall(r"(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?", valor)
+    return round(sum(float(p.replace(".", "").replace(",", ".")) for p in parcelas), 2)
+
+
 def converter_numero(valor) -> float:
     """Como ler_numero, mas texto que não é número vale 0."""
     numero = ler_numero(valor)
@@ -526,6 +544,7 @@ def importar_promotores(conteudo: bytes, nome_arquivo: str):
     df = df[(df["codigo"] != "") & (df["nome"] != "")]
 
     avisos = []
+    df["custo_em_texto"] = ""  # campos que vieram como "600 + 120m" (para refazer o custo e corrigir o já gravado)
     nomes_colunas = {"salario": "Salário", "ajuda_custo": "Ajuda de custo", "transporte": "Vale transporte",
                      "total": "TOTAL"}
     for campo, rotulo in nomes_colunas.items():
@@ -534,7 +553,20 @@ def importar_promotores(conteudo: bytes, nome_arquivo: str):
             continue
         originais = df[campo]
         valores = originais.map(ler_numero)
-        # Texto que não é um número só (ex.: "600 + 120m"): fica 0, como o Excel faz no TOTAL da planilha, e avisa.
+        # "600 + 120m" (600 + 120 mensais): soma as parcelas. O TOTAL da planilha dessas linhas não inclui esse
+        # valor (o Excel trata o texto como 0), por isso o custo mensal delas é refeito logo abaixo.
+        somas = originais.where(valores.isna()).map(ler_soma_mensal)
+        somados = somas.notna()
+        if somados.any() and campo != "total":
+            valores = valores.where(~somados, somas)
+            df.loc[somados, "custo_em_texto"] = df.loc[somados, "custo_em_texto"] + campo + " "
+            exemplos = [f"{nome} ('{original}' = {_reais(soma)})"
+                        for nome, original, soma in zip(df.loc[somados, "nome"], originais[somados], somas[somados])]
+            avisos.append(f"{rotulo} escrita como soma em {len(exemplos)} promotor(es): somei as parcelas "
+                          "(ex.: '600 + 120m' = R$ 600 + R$ 120 mensais = R$ 720) e o custo mensal deles passou a "
+                          "incluir esse valor (o TOTAL da planilha não incluía): " + "; ".join(exemplos[:10])
+                          + (" …" if len(exemplos) > 10 else ""))
+        # Texto que não é número (nem soma): fica 0, como o Excel faz no TOTAL da planilha, e avisa.
         invalidos = valores.isna()
         # Valor fora do normal para um mês de um promotor (ex.: 600120): fica 0 e avisa.
         absurdos = ~invalidos & ((valores < 0) | (valores > LIMITE_CUSTO_MENSAL))
@@ -548,6 +580,8 @@ def importar_promotores(conteudo: bytes, nome_arquivo: str):
         df[campo] = valores.where(~(invalidos | absurdos), 0.0).astype(float)
     soma = df["salario"] + df["ajuda_custo"] + df["transporte"]
     df["custo_mensal"] = df["total"].where(df["total"] > 0, soma)
+    em_texto = df["custo_em_texto"] != ""
+    df.loc[em_texto, "custo_mensal"] = pd.concat([df["total"], soma], axis=1).max(axis=1)[em_texto]
 
     if "admissao" in df:
         df["admissao"] = pd.to_datetime(df["admissao"], errors="coerce", dayfirst=True).dt.strftime("%Y-%m-%d")

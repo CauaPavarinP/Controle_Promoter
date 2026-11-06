@@ -38,7 +38,7 @@ def _linha_promotor(codigo, nome, municipio, supervisor="Sup Um", salario=2000, 
 # 1. Ajuda de custo "600 + 120m" virava 600120 -------------------------------------------------------------
 
 def test_numero_em_texto_so_aceita_um_numero():
-    assert ler_numero("600 + 120m") is None
+    assert ler_numero("600 + 120m") is None       # soma é tratada à parte (ler_soma_mensal)
     assert ler_numero("600 120") is None
     assert ler_numero("R$ 1.234,56") == 1234.56
     assert ler_numero("1.200") == 1200.0          # milhar brasileiro (antes virava 1,2)
@@ -46,16 +46,46 @@ def test_numero_em_texto_so_aceita_um_numero():
     assert ler_numero(" - ") == 0.0 and ler_numero(None) == 0.0
 
 
-def test_ajuda_de_custo_com_texto_fica_zero_com_aviso(cliente, banco):
+def test_soma_mensal_em_texto():
+    from app.importacao import ler_soma_mensal
+    assert ler_soma_mensal("600 + 120m") == 720.0     # 600 + 120 mensais (resposta do Maurício)
+    assert ler_soma_mensal("600 +120m") == 720.0
+    assert ler_soma_mensal("R$ 600 + R$ 120 mensais") == 720.0
+    assert ler_soma_mensal("1.200,50 + 120m") == 1320.5
+    for texto in ("600 120", "600 a 700", "600", "abc", 600):
+        assert ler_soma_mensal(texto) is None
+
+
+def test_ajuda_de_custo_600_mais_120m_vale_720_por_mes(cliente, banco):
     entrar(cliente)
+    # Na planilha, o TOTAL dessas linhas não soma a ajuda (o Excel trata o texto como 0): 2000 + 400 = 2400.
     linhas = [_linha_promotor(30001, "Ana Sara", "TIJUCAS - SC", ajuda="600 + 120m", total=2400),
-              _linha_promotor(30002, "Bia Sara", "TIJUCAS - SC", ajuda=600120)]
+              _linha_promotor(30002, "Bia Sara", "TIJUCAS - SC", ajuda=600120),
+              _linha_promotor(30003, "Cida Sara", "TIJUCAS - SC", ajuda="seiscentos", total=2400)]
     resposta = _enviar(cliente, "promotores", {"PROMOTORES BRASIL": pd.DataFrame(linhas)}, startrow=4)
-    assert any("600 + 120m" in a and "não é número" in a for a in resposta["avisos"])
+    assert any("Ana Sara ('600 + 120m' = R$ 720,00)" in a for a in resposta["avisos"])
     assert any("600120" in a and "fora do normal" in a for a in resposta["avisos"])
-    for nome in ("Ana Sara", "Bia Sara"):
+    assert any("seiscentos" in a and "não é número" in a for a in resposta["avisos"])
+    ana = _promotor(cliente, "Ana Sara")["custos"][0]
+    assert ana["ajuda_custo"] == 720 and ana["total"] == 2000 + 720 + 400
+    for nome in ("Bia Sara", "Cida Sara"):
         custo = _promotor(cliente, nome)["custos"][0]
         assert custo["ajuda_custo"] == 0 and custo["total"] == 2400
+
+
+def test_reimportar_corrige_600_mais_120m_gravado_como_zero(cliente, banco):
+    """A versão anterior gravou ajuda 0: reimportar corrige no lugar (desde a admissão), não vira reajuste."""
+    entrar(cliente)
+    linhas = pd.DataFrame([_linha_promotor(30001, "Ana Sara", "TIJUCAS - SC", ajuda="600 + 120m", total=2400)])
+    _enviar(cliente, "promotores", {"PROMOTORES BRASIL": linhas}, startrow=4)
+    from app.modelos import CustoPromotor
+    with banco.db.SessaoLocal() as sessao:   # como a versão anterior gravava
+        sessao.query(CustoPromotor).update({"ajuda_custo": 0, "outros": 0})
+        sessao.commit()
+    resposta = _enviar(cliente, "promotores", {"PROMOTORES BRASIL": linhas}, startrow=4)
+    assert resposta["cadastros"]["custos_corrigidos"] == 1 and resposta["cadastros"]["reajustes"] == 0
+    custos = _promotor(cliente, "Ana Sara")["custos"]
+    assert len(custos) == 1 and custos[0]["ajuda_custo"] == 720 and custos[0]["total"] == 3120
 
 
 def test_reimportar_corrige_custo_gravado_errado(cliente, banco):

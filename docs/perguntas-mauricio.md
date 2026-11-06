@@ -10,7 +10,9 @@ Atualizado em 04/11/2026. Marque a resposta ao lado de cada item.
    - O valor certo é R$ 720 (600 + 120)? O que quer dizer o "m"?
    - Hoje o TOTAL dessas linhas na planilha não soma a ajuda de custo (ex.: 2.260 + 600 = 2.860), porque o
      Excel ignora texto. O total certo deveria incluir a ajuda?
-   - Resposta:
+   - Resposta: o "m" é **mensal** — "600 + 120m" = R$ 600 + R$ 120 mensais. O sistema passou a ler R$ 720 e
+     a somar no custo mensal desses promotores. **Falta confirmar:** os R$ 720 são todo mês (o sistema
+     considera assim) e o TOTAL certo inclui essa ajuda (ex.: 2.260 + 720 = 2.980)?
 2. **Códigos repetidos** — a coluna código tem duas numerações (30xxx e números pequenos). Os códigos
    11, 12, 13, 17, 19 e 21 aparecem em duas pessoas diferentes cada.
    - Os números pequenos são de outra empresa, equipe ou contrato? Existe um código único para cada pessoa
