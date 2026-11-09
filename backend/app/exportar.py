@@ -26,7 +26,7 @@ MOEDA_SEM_CENTAVOS = '"R$" #,##0;-"R$" #,##0;"-"'
 MOEDA_COM_CENTAVOS = '"R$" #,##0.00;-"R$" #,##0.00;"-"'
 FORMATOS = {"percentual": '0.0%;-0.0%;"-"', "inteiro": "#,##0", "texto": "@"}
 LARGURA_MINIMA = {"moeda": 14, "percentual": 10, "numero": 9}
-MAX_LINHAS = 200_000
+MAX_LINHAS = 50_000  # a maior tabela real (clientes do faturamento) tem ~6 mil linhas
 
 AZUL = "1F4E8C"
 AZUL_CLARO = "E7EEF8"

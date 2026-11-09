@@ -1,5 +1,6 @@
 """API do Controle de Promotores (FastAPI)."""
 import asyncio
+from dataclasses import astuple
 import logging
 import os
 import shutil
@@ -11,6 +12,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,15 +21,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import cadastros, db, exportar, faturamento, pendencias, usuarios
+from . import cadastros, db, exportar, faturamento, pendencias, respostas_guardadas, usuarios
 from .autenticacao import exigir_admin, usuario_logado
 from .calculos import Filtros, calcular_painel, indice_mes, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
 from .carga import aplicar_promotores, aplicar_roteiro, preparar_banco
+from .carga import trava_cadastros as _trava_cadastros
 from .config import FRONTEND_DIST, PRODUCAO, SECRET_KEY, SESSAO_HORAS
 from .dados import colaboradores_pendentes, tabelas_do_calculo
-from .importacao import ErroImportacao, importar_promotores, importar_roteiro, ler_totais_abas_uf
+from .importacao import ErroImportacao, devolver_memoria, importar_promotores, importar_roteiro, ler_totais_abas_uf
 from .modelos import Pdv, Roteiro, Usuario
 from .regras import gravar_regras, ler_regras
 
@@ -38,6 +42,7 @@ log = logging.getLogger("uvicorn.error")
 async def ciclo_de_vida(_app):
     # Cria/atualiza as tabelas (migrations), o primeiro administrador e converte dados antigos.
     preparar_banco()
+    faturamento.limpar_pasta_previas()
     if PRODUCAO:  # soma o faturamento já ao ligar (no servidor gratuito leva de segundos a minutos)
         threading.Thread(target=faturamento.aquecer_cache, daemon=True).start()
     yield
@@ -46,6 +51,8 @@ async def ciclo_de_vida(_app):
 app = FastAPI(title="Controle de Promotores", lifespan=ciclo_de_vida,
               docs_url=None if PRODUCAO else "/docs", redoc_url=None,
               openapi_url=None if PRODUCAO else "/openapi.json")
+# Respostas JSON comprimidas: o Resumo (~800 KB) e o Faturamento (~1,5 MB) viajam ~10x menores.
+app.add_middleware(GZipMiddleware, minimum_size=2000)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=SESSAO_HORAS * 3600,
                    same_site="lax", https_only=PRODUCAO)
 
@@ -71,6 +78,8 @@ async def protecoes(request: Request, chamar_proximo):
         if origem and urlsplit(origem).hostname != (request.url.hostname or ""):
             return JSONResponse({"detail": "Pedido recusado: origem diferente do site."}, status_code=403)
     resposta = await chamar_proximo(request)
+    if request.method in METODOS_QUE_ALTERAM:
+        respostas_guardadas.dados_mudaram()  # qualquer alteração invalida o Resumo/Faturamento guardados
     for nome, valor in CABECALHOS_SEGURANCA.items():
         resposta.headers.setdefault(nome, valor)
     if PRODUCAO:
@@ -137,6 +146,8 @@ def _erro(mensagem: str, status: int = 400):
 
 # A planilha inteira tem ~63 MB; o limite evita que um arquivo enorme derrube o servidor.
 TAMANHO_MAXIMO_MB = 150
+OCUPADO = ("O servidor já está lendo outra planilha (faturamento ou cadastros). Espere ela terminar e envie de "
+           "novo: duas leituras juntas passariam do limite de memória do servidor.")
 
 
 async def _ler_arquivo(arquivo: UploadFile) -> tuple[bytes, str]:
@@ -150,6 +161,16 @@ async def _ler_arquivo(arquivo: UploadFile) -> tuple[bytes, str]:
 
 def _cnpjs_no_roteiro(sessao: Session) -> set[str]:
     return set(sessao.scalars(select(Pdv.cnpj_cpf).join(Roteiro, Roteiro.pdv_id == Pdv.id)).all())
+
+
+def _importar_cadastro_uma_vez(sessao: Session, tipo: str, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
+    if faturamento.lendo_agora() or not _trava_cadastros.acquire(blocking=False):
+        raise ErroImportacao(OCUPADO)
+    try:
+        return _importar_cadastro(sessao, tipo, conteudo, nome, usuario)
+    finally:
+        _trava_cadastros.release()
+        devolver_memoria()
 
 
 def _importar_cadastro(sessao: Session, tipo: str, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
@@ -183,8 +204,14 @@ async def previa_faturamento(arquivo: UploadFile = File(...), sessao: Session = 
         _erro("Envie um arquivo .xlsx, .xlsm ou .csv.")
     if arquivo.size is not None and arquivo.size > TAMANHO_MAXIMO_MB * 1024 * 1024:
         _erro(f"Arquivo grande demais (máximo {TAMANHO_MAXIMO_MB} MB).", 413)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(nome)[1].lower()) as destino:
-        shutil.copyfileobj(arquivo.file, destino, length=1024 * 1024)
+    if _trava_cadastros.locked():
+        _erro(OCUPADO)
+
+    def salvar():
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(nome)[1].lower()) as arquivo_disco:
+            shutil.copyfileobj(arquivo.file, arquivo_disco, length=1024 * 1024)
+        return arquivo_disco
+    destino = await run_in_threadpool(salvar)
     try:
         codigo = faturamento.iniciar_leitura(destino.name, nome, usuario.usuario, _cnpjs_no_roteiro(sessao))
         resposta = faturamento.andamento_da_leitura(codigo)
@@ -216,6 +243,16 @@ async def importar_planilha(arquivo: UploadFile = File(...), sessao: Session = D
     e devolve a pré-visualização do faturamento (que o usuário ainda precisa confirmar).
     """
     conteudo, nome = await _ler_arquivo(arquivo)
+    if faturamento.lendo_agora() or not _trava_cadastros.acquire(blocking=False):
+        _erro(OCUPADO)
+    try:
+        return await run_in_threadpool(_importar_planilha_inteira, sessao, conteudo, nome, usuario)
+    finally:
+        _trava_cadastros.release()
+        devolver_memoria()
+
+
+def _importar_planilha_inteira(sessao: Session, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
     resultado = {}
     for tipo in ("promotores", "roteiro"):
         try:
@@ -245,7 +282,9 @@ async def importar_cadastro(tipo: str, arquivo: UploadFile = File(...), sessao: 
         _erro("Tipo de importação inválido.", 404)
     conteudo, nome = await _ler_arquivo(arquivo)
     try:
-        return _importar_cadastro(sessao, tipo, conteudo, nome, usuario)
+        # Ler a planilha de 64 MB leva até 1 minuto no servidor gratuito: fora da linha principal, para as outras
+        # telas continuarem respondendo enquanto isso.
+        return await run_in_threadpool(_importar_cadastro_uma_vez, sessao, tipo, conteudo, nome, usuario)
     except ErroImportacao as erro:
         _erro(str(erro))
 
@@ -291,12 +330,14 @@ def desfazer(ident: int, sessao: Session = Depends(db.sessao_db), _=Depends(exig
 # ---------------------------------------------------------------------------
 
 @app.get("/api/opcoes")
-def opcoes(sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
-    promotores, _custos, roteiro = tabelas_do_calculo(sessao)
-    dados = opcoes_de_filtro(faturamento.faturamento_mensal(), promotores, roteiro, colaboradores_pendentes(sessao))
-    dados["importacoes"] = faturamento.ultimas_por_tipo(sessao)
-    dados["reimportar_faturamento"] = faturamento.tem_faturamento_antigo()
-    return dados
+def opcoes(pedido: Request, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
+    def calcular():
+        promotores, _custos, roteiro = tabelas_do_calculo(sessao)
+        dados = opcoes_de_filtro(faturamento.faturamento_mensal(), promotores, roteiro, colaboradores_pendentes(sessao))
+        dados["importacoes"] = faturamento.ultimas_por_tipo(sessao)
+        dados["reimportar_faturamento"] = faturamento.tem_faturamento_antigo()
+        return dados
+    return respostas_guardadas.responder(pedido, ("opcoes",), calcular)
 
 
 # Até 5 anos por consulta (60 meses).
@@ -304,7 +345,7 @@ MESES_MAXIMOS = 60
 
 
 @app.get("/api/painel")
-def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: str = "", cidade: str = "",
+def painel(pedido: Request, inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: str = "", cidade: str = "",
            pdv: str = "", sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     try:
         indice_inicio, indice_fim = indice_mes(inicio), indice_mes(fim)
@@ -313,8 +354,11 @@ def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: 
     if abs(indice_fim - indice_inicio) >= MESES_MAXIMOS:
         _erro("Escolha um período de até 5 anos.")
     filtros = Filtros(inicio=inicio, fim=fim, supervisor=supervisor, promotor=promotor, uf=uf, cidade=cidade, pdv=pdv)
-    promotores, custos, roteiro = tabelas_do_calculo(sessao)
-    return calcular_painel(faturamento.faturamento_mensal(), promotores, roteiro, filtros, ler_regras(), custos)
+
+    def calcular():
+        promotores, custos, roteiro = tabelas_do_calculo(sessao)
+        return calcular_painel(faturamento.faturamento_mensal(), promotores, roteiro, filtros, ler_regras(), custos)
+    return respostas_guardadas.responder(pedido, ("painel", *astuple(filtros)), calcular)
 
 
 def _ano_mes(texto: str) -> tuple[int, int]:
@@ -326,11 +370,12 @@ def _ano_mes(texto: str) -> tuple[int, int]:
 
 
 @app.get("/api/faturamento")
-def faturamento_do_erp(inicio: str, fim: str, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
+def faturamento_do_erp(pedido: Request, inicio: str, fim: str, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     """Aba Faturamento: o que veio do ERP no período, por UF e por cliente."""
     inicio_, fim_ = sorted([_ano_mes(inicio), _ano_mes(fim)])  # "De" depois de "Até": inverte
-    dados = faturamento.mensal_por_cliente(inicio_, fim_)
-    return resumo_faturamento(dados, ler_regras(), _cnpjs_no_roteiro(sessao))
+    return respostas_guardadas.responder(
+        pedido, ("faturamento", inicio_, fim_),
+        lambda: resumo_faturamento(faturamento.mensal_por_cliente(inicio_, fim_), ler_regras(), _cnpjs_no_roteiro(sessao)))
 
 
 @app.get("/api/faturamento/itens")

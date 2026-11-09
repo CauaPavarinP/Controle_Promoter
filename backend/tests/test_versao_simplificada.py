@@ -168,3 +168,44 @@ def test_ligacao_fica_lembrada_na_proxima_importacao(cliente, tmp_path):
     # Ao esquecer a ligação, a próxima importação volta a pedir.
     assert cliente.delete(f"/api/colaboradores-pendentes/lembrados/{lembrados[0]['id']}").status_code == 200
     assert importar()["cadastros"]["pendentes"] == 1
+
+
+def test_resumo_guardado_nunca_fica_velho(cliente, banco):
+    """Resposta guardada sai rápido, mas qualquer alteração (importar, editar, desfazer) faz recalcular."""
+    entrar(cliente)
+    importar_cadastros(cliente)
+    chamadas = []
+    original = banco.main.calcular_painel
+
+    def contando(*args, **kwargs):
+        chamadas.append(1)
+        return original(*args, **kwargs)
+    banco.main.calcular_painel = contando
+    try:
+        vazio = cliente.get("/api/painel", params=PERIODO).json()["resumo"]["faturamento"]
+        assert cliente.get("/api/painel", params=PERIODO).json()["resumo"]["faturamento"] == vazio
+        assert len(chamadas) == 1                       # a 2ª veio guardada
+        _, resposta = importar_faturamento(cliente)
+        com_faturamento = cliente.get("/api/painel", params=PERIODO).json()["resumo"]["faturamento"]
+        assert com_faturamento > vazio and len(chamadas) == 2
+        # Filtro diferente é outra resposta.
+        cliente.get("/api/painel", params={**PERIODO, "uf": "SC"})
+        assert len(chamadas) == 3
+        # Editar um cadastro também invalida.
+        promotor = cliente.get("/api/promotores").json()[0]
+        cliente.post(f"/api/promotores/{promotor['id']}/inativar", json={"data": "2026-01-01"})
+        cliente.get("/api/painel", params=PERIODO)
+        assert len(chamadas) == 4
+        assert cliente.post(f"/api/importacoes/{resposta.json()['importacao_id']}/desfazer").status_code == 200
+        assert cliente.get("/api/painel", params=PERIODO).json()["resumo"]["faturamento"] == 0
+    finally:
+        banco.main.calcular_painel = original
+
+
+def test_respostas_grandes_vao_comprimidas(cliente):
+    entrar(cliente)
+    importar_cadastros(cliente)
+    importar_faturamento(cliente)
+    resposta = cliente.get("/api/painel", params=PERIODO, headers={"Accept-Encoding": "gzip"})
+    assert resposta.status_code == 200 and resposta.headers.get("content-encoding") == "gzip"
+    assert resposta.json()["resumo"]["faturamento"] > 0

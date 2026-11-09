@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from . import db
 from .autenticacao import exigir_admin, usuario_logado
-from .carga import custo_vigente
+from .carga import custo_vigente, trava_cadastros
 from .faturamento import dados_do_cliente
 from .importacao import LIMITE_CUSTO_MENSAL, normalizar_cnpj, normalizar_texto
 from .modelos import CustoPromotor, Pdv, Promotor, Roteiro, Supervisor
@@ -607,6 +607,18 @@ def apagar_cadastros(dados: ConfirmacaoApagar, sessao: Session = Depends(db.sess
 
     if dados.confirmacao.strip().upper() != PALAVRA_DE_CONFIRMACAO:
         _erro(f'Para apagar, digite {PALAVRA_DE_CONFIRMACAO} na confirmação.')
+    if not trava_cadastros.acquire(blocking=False):
+        _erro("Tem uma importação de cadastros em andamento. Espere ela terminar para apagar.")
+    try:
+        return _apagar(sessao, usuario)
+    finally:
+        trava_cadastros.release()
+
+
+def _apagar(sessao: Session, usuario) -> dict:
+    from .faturamento import registrar
+    from .modelos import ApelidoColaborador, Importacao, RoteiroPendente, Usuario
+
     supervisores_de_usuarios = select(Usuario.supervisor_id).where(Usuario.supervisor_id.is_not(None))
     apagados = {
         "ligacoes_lembradas": sessao.query(ApelidoColaborador).delete(),

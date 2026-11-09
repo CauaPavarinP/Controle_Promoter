@@ -163,8 +163,10 @@ def ler_tabelas(conteudo: bytes, nome_arquivo: str, apelidos: dict, valida) -> l
             continue
         linha_cabecalho, mapa = melhor
         dados = ler(skiprows=linha_cabecalho + 1)
-        tabela = pd.DataFrame({campo: dados.iloc[:, posicao] for campo, posicao in mapa.items()
-                               if posicao < dados.shape[1]})
+        # Coluna do cabeçalho sem nenhum dado embaixo (ou planilha só com o cabeçalho): fica vazia, mas existe.
+        tabela = pd.DataFrame({campo: dados.iloc[:, posicao] if posicao < dados.shape[1]
+                               else pd.Series([None] * len(dados), index=dados.index, dtype=object)
+                               for campo, posicao in mapa.items()})
         encontradas.append((aba, tabela))
     return encontradas
 
@@ -542,6 +544,8 @@ def importar_promotores(conteudo: bytes, nome_arquivo: str):
     df["codigo"] = df["codigo"].map(normalizar_codigo)
     df["nome"] = df["nome"].fillna("").astype(str).str.strip()
     df = df[(df["codigo"] != "") & (df["nome"] != "")]
+    if df.empty:
+        raise ErroImportacao(f'A aba "{aba}" tem o cabeçalho dos promotores, mas nenhuma linha com código e nome.')
 
     avisos = []
     df["custo_em_texto"] = ""  # campos que vieram como "600 + 120m" (para refazer o custo e corrigir o já gravado)
@@ -667,6 +671,10 @@ def importar_roteiro(conteudo: bytes, nome_arquivo: str):
     df.loc[vazia, "uf"] = uf_da_aba[vazia]
     df = df[(df["loja"] != "") & ((df["codigo_promotor"] != "") | (df["colaborador"] != ""))]
     df = df.drop_duplicates(["codigo_promotor", "colaborador", "cnpj", "loja"]).copy()
+    if df.empty:
+        # Sem isso, importar um arquivo vazio apagava a lista de colaboradores não encontrados.
+        raise ErroImportacao("As abas de lojas (" + ", ".join(aba for aba, _ in tabelas) + ") não têm nenhuma linha "
+                             "com loja e colaborador.")
 
     avisos = []
     cnpj_invalido = cnpj_invalido.reindex(df.index, fill_value=False)

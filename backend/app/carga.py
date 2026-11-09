@@ -6,6 +6,7 @@
 - Na inicialização: converte os dados das versões antigas e cria o primeiro administrador.
 """
 import logging
+import threading
 import re
 from datetime import date
 
@@ -59,6 +60,11 @@ def obter_supervisor(sessao: Session, nome: str) -> Supervisor | None:
 def custo_vigente(promotor: Promotor, ano: int, mes: int) -> CustoPromotor | None:
     vigentes = [c for c in promotor.custos if (c.ano, c.mes) <= (ano, mes)]
     return vigentes[-1] if vigentes else None
+
+
+# Uma importação de cadastros (ou a limpeza deles) por vez: duas juntas misturariam os dados e somariam a
+# memória. Também não roda junto com a leitura do faturamento (ver main.OCUPADO).
+trava_cadastros = threading.Lock()
 
 
 def aplicar_promotores(sessao: Session, df: pd.DataFrame) -> dict:
