@@ -9,27 +9,25 @@ Fluxo da importação:
 """
 import json
 import logging
+import multiprocessing
 import os
+import pickle
 import secrets
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import and_, delete, func, inspect, literal_column, or_, select, text
 from sqlalchemy.orm import Session
 
 from . import db
-from .importacao import ErroImportacao, ler_faturamento, normalizar_texto
+from .importacao import ErroImportacao, devolver_memoria, ler_faturamento, normalizar_texto
 from .modelos import FaturamentoItem, Importacao
 
 VALIDADE_PREVIA = 30 * 60
 _previas: dict[str, dict] = {}
-
-
-def _limpar_previas():
-    agora = time.time()
-    for token in [t for t, p in _previas.items() if agora - p["criado"] > VALIDADE_PREVIA]:
-        _previas.pop(token, None)
 
 
 def _rotulo(ano: int, mes: int) -> str:
@@ -45,17 +43,60 @@ def _filtro_meses(meses):
     return or_(*[and_(FaturamentoItem.ano == a, FaturamentoItem.mes == m) for a, m in meses])
 
 
-def preparar_previa(conteudo, nome: str, usuario: str, cnpjs_no_roteiro: set[str], ao_progredir=None) -> dict:
-    """`conteudo`: bytes do arquivo ou caminho dele no disco."""
-    _limpar_previas()
-    itens, erros, avisos, aba = ler_faturamento(conteudo, nome, ao_progredir=ao_progredir)
+# ---------------------------------------------------------------------------
+# Itens lidos ficam num arquivo temporário (não na memória) até a confirmação. Arquivo grande é lido e gravado
+# num processo separado: ler 317 mil linhas cria milhões de textos pequenos e o Python não devolve toda essa
+# memória ao sistema; com 512 MB no servidor gratuito, a 3ª importação seguida derrubava o servidor. O processo
+# separado termina no fim e devolve tudo.
+# ---------------------------------------------------------------------------
+
+PASTA_PREVIAS = Path(tempfile.gettempdir()) / "controle-promotores-previas"
+LIMITE_ARQUIVO_PROCESSO = 5 * 1024 * 1024   # bytes: acima disso a leitura vai para o processo separado
+LIMITE_LINHAS_PROCESSO = 50_000             # itens: acima disso a gravação vai para o processo separado
+
+
+def limpar_pasta_previas() -> None:
+    """Ao ligar o servidor: apaga itens de prévias que ficaram de antes (o servidor reiniciou no meio).
+
+    Só os com mais de 1 hora: um arquivo novo pode ser de uma importação ainda em andamento.
+    """
+    limite = time.time() - 3600
+    for arquivo in PASTA_PREVIAS.glob("*") if PASTA_PREVIAS.is_dir() else []:
+        try:
+            if arquivo.stat().st_mtime < limite:
+                arquivo.unlink()
+        except OSError:
+            pass
+
+
+def _apagar_arquivo(caminho) -> None:
+    try:
+        os.remove(caminho)
+    except OSError:
+        pass
+
+
+def _descartar_previa(token: str) -> None:
+    previa = _previas.pop(token, None)
+    if previa is not None:
+        _apagar_arquivo(previa["caminho_itens"])
+
+
+def _descartar_previas() -> None:
+    for token in list(_previas):
+        _descartar_previa(token)
+
+
+def _ler_para_arquivo(fonte, nome: str, cnpjs_no_roteiro: set[str], ao_progredir=None) -> dict:
+    """Lê o arquivo do ERP, monta o resumo da prévia e grava os itens num arquivo temporário."""
+    itens, erros, avisos, aba = ler_faturamento(fonte, nome, ao_progredir=ao_progredir)
     if itens.empty:
         raise ErroImportacao("O arquivo não tem nenhuma linha válida (com CNPJ, data e valor).")
     meses = sorted({(int(a), int(m)) for a, m in zip(itens["ano"], itens["mes"])})
     with db.engine.connect() as conexao:
         existentes = sorted(set(meses) & meses_com_itens(conexao))
 
-    por_cnpj = (itens.groupby("cnpj_cpf")
+    por_cnpj = (itens.groupby("cnpj_cpf", observed=True)
                      .agg(valor=("total_venda", "sum"), razao_social=("razao_social", "first"),
                           cidade=("cidade", "first"), uf=("uf", "first"))
                      .reset_index())
@@ -63,11 +104,12 @@ def preparar_previa(conteudo, nome: str, usuario: str, cnpjs_no_roteiro: set[str
         por_cnpj[coluna] = por_cnpj[coluna].astype(object).where(por_cnpj[coluna].notna(), "")
     sem_roteiro = por_cnpj[~por_cnpj["cnpj_cpf"].isin(cnpjs_no_roteiro)].sort_values("valor", ascending=False)
 
-    token = secrets.token_urlsafe(16)
-    _previas[token] = {"criado": time.time(), "itens": itens, "erros": erros, "avisos": avisos,
-                       "arquivo": nome, "usuario": usuario}
-    return {
-        "token": token, "arquivo": nome, "aba": aba,
+    PASTA_PREVIAS.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=PASTA_PREVIAS, suffix=".itens", delete=False) as arquivo:
+        caminho_itens = arquivo.name
+    itens.to_pickle(caminho_itens)
+    resumo = {
+        "arquivo": nome, "aba": aba,
         "linhas_lidas": len(itens) + len(erros), "linhas_validas": len(itens), "linhas_com_erro": len(erros),
         "erros": erros[:100], "avisos": avisos,
         "meses": [_rotulo(a, m) for a, m in meses],
@@ -81,6 +123,87 @@ def preparar_previa(conteudo, nome: str, usuario: str, cnpjs_no_roteiro: set[str
                           "valor": round(float(r.valor), 2)} for r in sem_roteiro.head(20).itertuples()],
         },
     }
+    return {"resumo": resumo, "caminho_itens": caminho_itens, "erros": erros, "avisos": avisos,
+            "linhas": len(itens)}
+
+
+def _registrar_previa(lido: dict, nome: str, usuario: str) -> dict:
+    """Guarda a prévia lida (só a mais recente) e devolve o resumo com o token para confirmar."""
+    _descartar_previas()  # cada prévia segura um arquivo de itens; só a mais recente vale
+    token = secrets.token_urlsafe(16)
+    _previas[token] = {"criado": time.time(), "caminho_itens": lido["caminho_itens"], "linhas": lido["linhas"],
+                       "erros": lido["erros"], "avisos": lido["avisos"], "arquivo": nome, "usuario": usuario}
+    # Prévia não confirmada em 30 minutos é descartada.
+    relogio = threading.Timer(VALIDADE_PREVIA, _descartar_previa, args=[token])
+    relogio.daemon = True
+    relogio.start()
+    return {"token": token, **lido["resumo"]}
+
+
+def preparar_previa(conteudo, nome: str, usuario: str, cnpjs_no_roteiro: set[str], ao_progredir=None) -> dict:
+    """Lê aqui mesmo (arquivo pequeno). `conteudo`: bytes do arquivo ou caminho dele no disco."""
+    lido = _ler_para_arquivo(conteudo, nome, cnpjs_no_roteiro, ao_progredir)
+    try:
+        return _registrar_previa(lido, nome, usuario)
+    finally:
+        devolver_memoria()
+
+
+# --- Processo separado ------------------------------------------------------
+
+def _rodar_no_filho(funcao, argumentos, contador, caminho_resultado) -> None:
+    """Corpo do processo separado: roda `funcao` e grava o resultado (ou o erro) num arquivo."""
+    def ao_progredir(linhas):
+        contador.value = linhas
+    try:
+        resultado = {"ok": funcao(*argumentos, ao_progredir=ao_progredir)}
+    except ErroImportacao as erro:
+        resultado = {"erro_importacao": str(erro)}
+    except Exception as erro:  # noqa: BLE001 - o detalhe vai para o log do processo principal
+        import traceback
+        resultado = {"erro": f"{erro!r}\n{traceback.format_exc()}"}
+    Path(caminho_resultado).parent.mkdir(parents=True, exist_ok=True)
+    with open(caminho_resultado, "wb") as arquivo:
+        pickle.dump(resultado, arquivo)
+
+
+def _em_processo(funcao, argumentos: tuple, ao_progredir=None):
+    """Roda `funcao(*argumentos, ao_progredir=...)` num processo novo e devolve o resultado."""
+    soltar_cache()  # ~60 MB a mais de folga enquanto o processo separado trabalha
+    contexto = multiprocessing.get_context("spawn")  # processo limpo (fork copiaria travas das outras threads)
+    contador = contexto.Value("q", 0)
+    PASTA_PREVIAS.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=PASTA_PREVIAS, suffix=".resultado", delete=False) as arquivo:
+        caminho_resultado = arquivo.name
+    try:
+        processo = contexto.Process(target=_rodar_no_filho, args=(funcao, argumentos, contador, caminho_resultado),
+                                    daemon=True)
+        processo.start()
+        while processo.is_alive():
+            processo.join(1)
+            if ao_progredir:
+                ao_progredir(contador.value)
+        try:
+            with open(caminho_resultado, "rb") as arquivo:
+                resultado = pickle.load(arquivo)
+        except (OSError, EOFError, pickle.UnpicklingError):
+            resultado = None
+    finally:
+        _apagar_arquivo(caminho_resultado)
+    if resultado is None:
+        log.error("Processo de importação terminou sem resultado (código %s)", processo.exitcode)
+        raise ErroImportacao("A importação parou no meio (provavelmente faltou memória no servidor). "
+                             "Tente de novo; se repetir, avise o suporte.")
+    if "erro_importacao" in resultado:
+        raise ErroImportacao(resultado["erro_importacao"])
+    if "erro" in resultado:
+        log.error("Erro no processo de importação: %s", resultado["erro"])
+        raise RuntimeError("Erro no processo de importação")
+    return resultado["ok"]
+
+
+def _ler_no_filho(caminho: str, nome: str, cnpjs_no_roteiro: set[str], ao_progredir=None) -> dict:
+    return _ler_para_arquivo(caminho, nome, cnpjs_no_roteiro, ao_progredir)
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +216,7 @@ _leituras: dict[str, dict] = {}
 
 
 def iniciar_leitura(caminho: str, nome: str, usuario: str, cnpjs_no_roteiro: set[str]) -> str:
-    """Começa a ler o arquivo (já salvo no disco) numa thread e devolve o código da leitura."""
+    """Começa a ler o arquivo (já salvo no disco) em segundo plano e devolve o código da leitura."""
     agora = time.time()
     for codigo in [c for c, l in _leituras.items() if agora - l["criado"] > 3600]:
         _leituras.pop(codigo, None)
@@ -103,10 +226,17 @@ def iniciar_leitura(caminho: str, nome: str, usuario: str, cnpjs_no_roteiro: set
     codigo = secrets.token_urlsafe(12)
     estado = _leituras[codigo] = {"situacao": "lendo", "linhas": 0, "criado": agora}
 
+    def progredir(linhas):
+        estado["linhas"] = linhas
+
     def trabalhar():
         try:
-            estado["previa"] = preparar_previa(caminho, nome, usuario, cnpjs_no_roteiro,
-                                               ao_progredir=lambda linhas: estado.update(linhas=linhas))
+            if os.path.getsize(caminho) > LIMITE_ARQUIVO_PROCESSO:
+                _descartar_previas()  # libera o disco/memória da prévia anterior antes de ler a nova
+                lido = _em_processo(_ler_no_filho, (caminho, nome, cnpjs_no_roteiro), progredir)
+                estado["previa"] = _registrar_previa(lido, nome, usuario)
+            else:
+                estado["previa"] = preparar_previa(caminho, nome, usuario, cnpjs_no_roteiro, ao_progredir=progredir)
             estado["situacao"] = "pronto"
         except ErroImportacao as erro:
             estado.update(situacao="erro", erro=str(erro))
@@ -114,13 +244,14 @@ def iniciar_leitura(caminho: str, nome: str, usuario: str, cnpjs_no_roteiro: set
             log.exception("Erro ao ler o arquivo de faturamento %s", nome)
             estado.update(situacao="erro", erro="Erro inesperado ao ler o arquivo. Confira se é a exportação do ERP.")
         finally:
-            try:
-                os.remove(caminho)
-            except OSError:
-                pass
+            _apagar_arquivo(caminho)
 
     threading.Thread(target=trabalhar, name=f"leitura-{codigo}", daemon=True).start()
     return codigo
+
+
+def lendo_agora() -> bool:
+    return any(l["situacao"] == "lendo" for l in _leituras.values())
 
 
 def andamento_da_leitura(codigo: str) -> dict:
@@ -159,11 +290,9 @@ def _gravar_itens(conexao, itens: pd.DataFrame, importacao_id: int) -> None:
                 copia.write_row(linha)
 
 
-def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = None) -> dict:
-    previa = _previas.get(token)
-    if previa is None:
-        raise ErroImportacao("A pré-visualização expirou ou já foi usada. Envie o arquivo de novo.")
-    itens = previa["itens"]
+def _gravar(previa: dict, substituir: bool, avisos_extra: list[str] | None, ao_progredir=None) -> dict:
+    """Grava os itens da prévia numa transação (tudo ou nada). Roda aqui ou no processo separado."""
+    itens = pd.read_pickle(previa["caminho_itens"])
     meses = sorted({(int(a), int(m)) for a, m in zip(itens["ano"], itens["mes"])})
 
     with db.engine.begin() as conexao:   # tudo ou nada
@@ -189,10 +318,25 @@ def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = Non
             "UPDATE importacoes SET situacao = 'substituida' WHERE tipo = 'faturamento' AND situacao = 'ativa' "
             "AND id <> :atual AND NOT EXISTS (SELECT 1 FROM faturamento_itens f WHERE f.importacao_id = importacoes.id)"),
             {"atual": importacao_id})
-    limpar_cache()
-    _previas.pop(token, None)
     return {"importacao_id": importacao_id, "linhas_importadas": len(itens),
             "meses": [_rotulo(a, m) for a, m in meses], "meses_substituidos": [_rotulo(a, m) for a, m in existentes]}
+
+
+def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = None) -> dict:
+    previa = _previas.get(token)
+    if previa is None:
+        raise ErroImportacao("A pré-visualização expirou, já foi usada ou foi trocada por um arquivo lido depois. "
+                             "Envie o arquivo de novo.")
+    if previa["linhas"] > LIMITE_LINHAS_PROCESSO:
+        resultado = _em_processo(_gravar, (previa, substituir, avisos_extra))
+    else:
+        try:
+            resultado = _gravar(previa, substituir, avisos_extra)
+        finally:
+            devolver_memoria()
+    limpar_cache()
+    _descartar_previa(token)
+    return resultado
 
 
 def desfazer(sessao: Session, importacao_id: int) -> dict:
@@ -272,8 +416,10 @@ def _do_cache(chave: str, calcular) -> pd.DataFrame:
     with entrada["trava"]:
         if entrada["versao"] != _versao_cache:
             versao = _versao_cache  # se o faturamento mudar durante a soma, o próximo pedido refaz
+            entrada["valor"] = None  # solta a soma antiga antes de montar a nova
             entrada["valor"] = calcular()
             entrada["versao"] = versao
+            devolver_memoria()
         return entrada["valor"].copy()  # cópia: quem usa pode alterar à vontade
 
 
@@ -282,6 +428,20 @@ def limpar_cache() -> None:
     global _versao_cache
     with _trava_cache:
         _versao_cache += 1
+
+
+def soltar_cache() -> None:
+    """Descarta as somas guardadas (sem marcar o faturamento como mudado): libera memória para uma tarefa pesada.
+
+    A próxima tela que precisar refaz a soma.
+    """
+    with _trava_cache:
+        entradas = list(_cache.values())
+    for entrada in entradas:
+        with entrada["trava"]:
+            entrada["valor"] = None
+            entrada["versao"] = None
+    devolver_memoria()
 
 
 def aquecer_cache() -> None:

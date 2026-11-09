@@ -257,3 +257,69 @@ def test_erro_inesperado_vira_mensagem_para_a_tela(banco, monkeypatch):
         resposta = cliente.get("/api/painel", params=PERIODO)
     assert resposta.status_code == 500
     assert resposta.json()["detail"].startswith("Erro inesperado no servidor. (ref. ")
+
+
+def test_so_a_previa_mais_recente_fica_guardada(cliente, banco, monkeypatch):
+    """Cada prévia segura os itens na memória até confirmar: uma nova descarta a anterior, e ela expira sozinha."""
+    entrar(cliente)
+    with open(EXEMPLOS / "faturamento_exemplo.xlsx", "rb") as arquivo:
+        conteudo = arquivo.read()
+    primeira = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("f.xlsx", conteudo)}).json()
+    segunda = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("f.xlsx", conteudo)}).json()
+    assert list(banco.faturamento._previas) == [segunda["token"]]
+    velha = cliente.post(f"/api/importacoes/faturamento/{primeira['token']}/confirmar", json={"substituir": False})
+    assert velha.status_code == 400 and "lido depois" in velha.json()["detail"]
+    import os
+    arquivo_itens = banco.faturamento._previas[segunda["token"]]["caminho_itens"]
+    assert os.path.exists(arquivo_itens)          # os itens ficam em disco, não na memória
+    banco.faturamento._descartar_previa(segunda["token"])   # o que o relógio de 30 minutos faz
+    assert banco.faturamento._previas == {} and not os.path.exists(arquivo_itens)
+
+
+def test_arquivo_grande_e_lido_e_gravado_em_processo_separado(cliente, banco, monkeypatch):
+    """Acima do limite, ler e gravar rodam num processo que termina no fim e devolve toda a memória."""
+    entrar(cliente)
+    importar_cadastros(cliente)
+    monkeypatch.setattr(banco.faturamento, "LIMITE_ARQUIVO_PROCESSO", 0)
+    monkeypatch.setattr(banco.faturamento, "LIMITE_LINHAS_PROCESSO", 0)
+    monkeypatch.setattr(banco.main, "ESPERA_PREVIA_SEGUNDOS", 0)
+    with open(EXEMPLOS / "faturamento_exemplo.xlsx", "rb") as arquivo:
+        resposta = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("f.xlsx", arquivo)}).json()
+    import time
+    for _ in range(300):
+        if resposta["situacao"] != "lendo":
+            break
+        time.sleep(0.1)
+        resposta = cliente.get(f"/api/importacoes/faturamento/leitura/{resposta['leitura']}").json()
+    assert resposta["situacao"] == "pronto" and resposta["linhas_validas"] > 0, resposta
+    confirmado = cliente.post(f"/api/importacoes/faturamento/{resposta['token']}/confirmar", json={"substituir": False})
+    assert confirmado.status_code == 200, confirmado.text
+    assert confirmado.json()["linhas_importadas"] == resposta["linhas_validas"]
+    assert _faturamento_total(cliente) > 0
+    # Erro de regra (mês que já existe) também volta do processo separado como mensagem.
+    with open(EXEMPLOS / "faturamento_exemplo.xlsx", "rb") as arquivo:
+        resposta = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("f.xlsx", arquivo)}).json()
+    for _ in range(300):
+        if resposta["situacao"] != "lendo":
+            break
+        time.sleep(0.1)
+        resposta = cliente.get(f"/api/importacoes/faturamento/leitura/{resposta['leitura']}").json()
+    repetido = cliente.post(f"/api/importacoes/faturamento/{resposta['token']}/confirmar", json={"substituir": False})
+    assert repetido.status_code == 400 and "Já existe faturamento" in repetido.json()["detail"]
+
+
+def test_uma_leitura_pesada_por_vez(cliente, banco):
+    """Importar cadastros enquanto outra planilha é lida somaria a memória: o servidor recusa com aviso."""
+    entrar(cliente)
+    banco.carga.trava_cadastros.acquire()
+    try:
+        with open(EXEMPLOS / "promotores_exemplo.xlsx", "rb") as arquivo:
+            resposta = cliente.post("/api/importacoes/promotores", files={"arquivo": ("p.xlsx", arquivo)})
+        assert resposta.status_code == 400 and "outra planilha" in resposta.json()["detail"]
+        with open(EXEMPLOS / "faturamento_exemplo.xlsx", "rb") as arquivo:
+            resposta = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("f.xlsx", arquivo)})
+        assert resposta.status_code == 400
+        assert cliente.post("/api/cadastros/apagar", json={"confirmacao": "APAGAR"}).status_code == 400
+    finally:
+        banco.carga.trava_cadastros.release()
+    importar_cadastros(cliente, "promotores")   # liberado, volta a funcionar

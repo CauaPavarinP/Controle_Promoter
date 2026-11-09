@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,9 +26,10 @@ from . import cadastros, db, exportar, faturamento, pendencias, usuarios
 from .autenticacao import exigir_admin, usuario_logado
 from .calculos import Filtros, calcular_painel, indice_mes, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
 from .carga import aplicar_promotores, aplicar_roteiro, preparar_banco
+from .carga import trava_cadastros as _trava_cadastros
 from .config import FRONTEND_DIST, PRODUCAO, SECRET_KEY, SESSAO_HORAS
 from .dados import colaboradores_pendentes, tabelas_do_calculo
-from .importacao import ErroImportacao, importar_promotores, importar_roteiro, ler_totais_abas_uf
+from .importacao import ErroImportacao, devolver_memoria, importar_promotores, importar_roteiro, ler_totais_abas_uf
 from .modelos import Pdv, Roteiro, Usuario
 from .regras import gravar_regras, ler_regras
 
@@ -38,6 +40,7 @@ log = logging.getLogger("uvicorn.error")
 async def ciclo_de_vida(_app):
     # Cria/atualiza as tabelas (migrations), o primeiro administrador e converte dados antigos.
     preparar_banco()
+    faturamento.limpar_pasta_previas()
     if PRODUCAO:  # soma o faturamento já ao ligar (no servidor gratuito leva de segundos a minutos)
         threading.Thread(target=faturamento.aquecer_cache, daemon=True).start()
     yield
@@ -137,6 +140,8 @@ def _erro(mensagem: str, status: int = 400):
 
 # A planilha inteira tem ~63 MB; o limite evita que um arquivo enorme derrube o servidor.
 TAMANHO_MAXIMO_MB = 150
+OCUPADO = ("O servidor já está lendo outra planilha (faturamento ou cadastros). Espere ela terminar e envie de "
+           "novo: duas leituras juntas passariam do limite de memória do servidor.")
 
 
 async def _ler_arquivo(arquivo: UploadFile) -> tuple[bytes, str]:
@@ -150,6 +155,16 @@ async def _ler_arquivo(arquivo: UploadFile) -> tuple[bytes, str]:
 
 def _cnpjs_no_roteiro(sessao: Session) -> set[str]:
     return set(sessao.scalars(select(Pdv.cnpj_cpf).join(Roteiro, Roteiro.pdv_id == Pdv.id)).all())
+
+
+def _importar_cadastro_uma_vez(sessao: Session, tipo: str, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
+    if faturamento.lendo_agora() or not _trava_cadastros.acquire(blocking=False):
+        raise ErroImportacao(OCUPADO)
+    try:
+        return _importar_cadastro(sessao, tipo, conteudo, nome, usuario)
+    finally:
+        _trava_cadastros.release()
+        devolver_memoria()
 
 
 def _importar_cadastro(sessao: Session, tipo: str, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
@@ -183,8 +198,14 @@ async def previa_faturamento(arquivo: UploadFile = File(...), sessao: Session = 
         _erro("Envie um arquivo .xlsx, .xlsm ou .csv.")
     if arquivo.size is not None and arquivo.size > TAMANHO_MAXIMO_MB * 1024 * 1024:
         _erro(f"Arquivo grande demais (máximo {TAMANHO_MAXIMO_MB} MB).", 413)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(nome)[1].lower()) as destino:
-        shutil.copyfileobj(arquivo.file, destino, length=1024 * 1024)
+    if _trava_cadastros.locked():
+        _erro(OCUPADO)
+
+    def salvar():
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(nome)[1].lower()) as arquivo_disco:
+            shutil.copyfileobj(arquivo.file, arquivo_disco, length=1024 * 1024)
+        return arquivo_disco
+    destino = await run_in_threadpool(salvar)
     try:
         codigo = faturamento.iniciar_leitura(destino.name, nome, usuario.usuario, _cnpjs_no_roteiro(sessao))
         resposta = faturamento.andamento_da_leitura(codigo)
@@ -216,6 +237,16 @@ async def importar_planilha(arquivo: UploadFile = File(...), sessao: Session = D
     e devolve a pré-visualização do faturamento (que o usuário ainda precisa confirmar).
     """
     conteudo, nome = await _ler_arquivo(arquivo)
+    if faturamento.lendo_agora() or not _trava_cadastros.acquire(blocking=False):
+        _erro(OCUPADO)
+    try:
+        return await run_in_threadpool(_importar_planilha_inteira, sessao, conteudo, nome, usuario)
+    finally:
+        _trava_cadastros.release()
+        devolver_memoria()
+
+
+def _importar_planilha_inteira(sessao: Session, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
     resultado = {}
     for tipo in ("promotores", "roteiro"):
         try:
@@ -245,7 +276,9 @@ async def importar_cadastro(tipo: str, arquivo: UploadFile = File(...), sessao: 
         _erro("Tipo de importação inválido.", 404)
     conteudo, nome = await _ler_arquivo(arquivo)
     try:
-        return _importar_cadastro(sessao, tipo, conteudo, nome, usuario)
+        # Ler a planilha de 64 MB leva até 1 minuto no servidor gratuito: fora da linha principal, para as outras
+        # telas continuarem respondendo enquanto isso.
+        return await run_in_threadpool(_importar_cadastro_uma_vez, sessao, tipo, conteudo, nome, usuario)
     except ErroImportacao as erro:
         _erro(str(erro))
 
