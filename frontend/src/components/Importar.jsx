@@ -4,7 +4,7 @@ import { http } from '../api.js'
 import { formatarCnpj, formatarMoeda, formatarMes } from '../formato.js'
 import { exportarExcel, Tabela, useLista } from './ui.jsx'
 
-const NOMES_TIPO = { faturamento: 'Faturamento', promotores: 'Promotores', roteiro: 'Roteiro', planilha: 'Planilha completa' }
+const NOMES_TIPO = { faturamento: 'Faturamento', promotores: 'Promotores', roteiro: 'Roteiro', planilha: 'Planilha completa', limpeza: 'Apagar cadastros' }
 
 export function ResultadoCadastro({ titulo, resultado }) {
   if (!resultado) return null
