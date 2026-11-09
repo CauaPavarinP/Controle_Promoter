@@ -22,7 +22,7 @@ import pandas as pd
 from sqlalchemy import and_, delete, func, inspect, literal_column, or_, select, text
 from sqlalchemy.orm import Session
 
-from . import db
+from . import db, respostas_guardadas
 from .importacao import ErroImportacao, devolver_memoria, ler_faturamento, normalizar_texto
 from .modelos import FaturamentoItem, Importacao
 
@@ -428,6 +428,7 @@ def limpar_cache() -> None:
     global _versao_cache
     with _trava_cache:
         _versao_cache += 1
+    respostas_guardadas.dados_mudaram()
 
 
 def soltar_cache() -> None:

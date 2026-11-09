@@ -24,6 +24,8 @@ import re
 from bisect import bisect_right
 from calendar import monthrange
 from datetime import date
+from functools import lru_cache
+from datetime import date
 from dataclasses import dataclass
 
 import pandas as pd
@@ -57,20 +59,34 @@ def indice_mes(ano_mes: str) -> int:
     return ano * 12 + mes - 1
 
 
-def _indice_data(texto):
-    """'2026-03-15' -> índice do mês (ano × 12 + mês − 1); vazio -> None."""
+@lru_cache(maxsize=4096)
+def _ler_data(texto):
+    """'2026-03-15' (ou date) -> date; vazio ou inválido -> None.
+
+    As datas dos cadastros vêm sempre como AAAA-MM-DD: lidas direto, sem o pd.to_datetime (genérico, que tenta
+    adivinhar o formato a cada chamada e respondia por mais da metade do tempo do Resumo).
+    """
     if texto is None or texto == "" or (isinstance(texto, float) and pd.isna(texto)):
         return None
-    data = pd.to_datetime(texto, errors="coerce")
-    return None if pd.isna(data) else data.year * 12 + data.month - 1
+    if isinstance(texto, date):
+        return texto
+    try:
+        return date.fromisoformat(str(texto).strip()[:10])
+    except ValueError:
+        data = pd.to_datetime(texto, errors="coerce")
+        return None if pd.isna(data) else data.date()
+
+
+def _indice_data(texto):
+    """'2026-03-15' -> índice do mês (ano × 12 + mês − 1); vazio -> None."""
+    data = _ler_data(texto)
+    return None if data is None else data.year * 12 + data.month - 1
 
 
 def _ultimo_mes_vigente(texto):
     """Último mês em que o vínculo vale: só conta o mês se estava vigente no último dia dele."""
-    if texto is None or texto == "" or (isinstance(texto, float) and pd.isna(texto)):
-        return None
-    data = pd.to_datetime(texto, errors="coerce")
-    if pd.isna(data):
+    data = _ler_data(texto)
+    if data is None:
         return None
     indice = data.year * 12 + data.month - 1
     return indice if data.day == monthrange(data.year, data.month)[1] else indice - 1
@@ -546,9 +562,14 @@ def resumo_faturamento(faturamento: pd.DataFrame, regras: dict, cnpjs_no_roteiro
     # Razão social, cidade e UF do último mês em que o cliente comprou.
     dados = fat.sort_values(["ano", "mes"]).drop_duplicates("cnpj", keep="last").set_index("cnpj")
     notas = fat.groupby("cnpj")["notas"].sum()
-    clientes = [{"cnpj": cnpj, "razao_social": dados.at[cnpj, "razao_social"], "cidade": dados.at[cnpj, "cidade"],
-                 "uf": dados.at[cnpj, "uf"], "meses": {m: _arredondar(v) for m, v in linha.items()},
-                 "total": _arredondar(linha.sum()), "notas": int(notas[cnpj]), "no_roteiro": cnpj in cnpjs_no_roteiro}
-                for cnpj, linha in tabela("cnpj").iterrows()]
+    # Montado a partir de listas e dicionários: iterrows/.at do pandas nas ~6 mil linhas levavam ~1 s.
+    info = dados[["razao_social", "cidade", "uf"]].to_dict("index")
+    notas = notas.to_dict()
+    por_cliente = tabela("cnpj")
+    colunas = list(por_cliente.columns)
+    clientes = [{"cnpj": cnpj, "razao_social": info[cnpj]["razao_social"], "cidade": info[cnpj]["cidade"],
+                 "uf": info[cnpj]["uf"], "meses": {m: round(float(v), 2) for m, v in zip(colunas, linha)},
+                 "total": round(float(linha.sum()), 2), "notas": int(notas[cnpj]), "no_roteiro": cnpj in cnpjs_no_roteiro}
+                for cnpj, linha in zip(por_cliente.index, por_cliente.to_numpy())]
     clientes.sort(key=lambda c: -c["total"])
     return {"meses": meses, "por_uf": por_uf, "totais": {**totais, "total": total}, "clientes": clientes}

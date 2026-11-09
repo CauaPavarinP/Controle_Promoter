@@ -1,5 +1,6 @@
 """API do Controle de Promotores (FastAPI)."""
 import asyncio
+from dataclasses import astuple
 import logging
 import os
 import shutil
@@ -20,9 +21,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import cadastros, db, exportar, faturamento, pendencias, usuarios
+from . import cadastros, db, exportar, faturamento, pendencias, respostas_guardadas, usuarios
 from .autenticacao import exigir_admin, usuario_logado
 from .calculos import Filtros, calcular_painel, indice_mes, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
 from .carga import aplicar_promotores, aplicar_roteiro, preparar_banco
@@ -49,6 +51,8 @@ async def ciclo_de_vida(_app):
 app = FastAPI(title="Controle de Promotores", lifespan=ciclo_de_vida,
               docs_url=None if PRODUCAO else "/docs", redoc_url=None,
               openapi_url=None if PRODUCAO else "/openapi.json")
+# Respostas JSON comprimidas: o Resumo (~800 KB) e o Faturamento (~1,5 MB) viajam ~10x menores.
+app.add_middleware(GZipMiddleware, minimum_size=2000)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=SESSAO_HORAS * 3600,
                    same_site="lax", https_only=PRODUCAO)
 
@@ -74,6 +78,8 @@ async def protecoes(request: Request, chamar_proximo):
         if origem and urlsplit(origem).hostname != (request.url.hostname or ""):
             return JSONResponse({"detail": "Pedido recusado: origem diferente do site."}, status_code=403)
     resposta = await chamar_proximo(request)
+    if request.method in METODOS_QUE_ALTERAM:
+        respostas_guardadas.dados_mudaram()  # qualquer alteração invalida o Resumo/Faturamento guardados
     for nome, valor in CABECALHOS_SEGURANCA.items():
         resposta.headers.setdefault(nome, valor)
     if PRODUCAO:
@@ -324,12 +330,14 @@ def desfazer(ident: int, sessao: Session = Depends(db.sessao_db), _=Depends(exig
 # ---------------------------------------------------------------------------
 
 @app.get("/api/opcoes")
-def opcoes(sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
-    promotores, _custos, roteiro = tabelas_do_calculo(sessao)
-    dados = opcoes_de_filtro(faturamento.faturamento_mensal(), promotores, roteiro, colaboradores_pendentes(sessao))
-    dados["importacoes"] = faturamento.ultimas_por_tipo(sessao)
-    dados["reimportar_faturamento"] = faturamento.tem_faturamento_antigo()
-    return dados
+def opcoes(pedido: Request, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
+    def calcular():
+        promotores, _custos, roteiro = tabelas_do_calculo(sessao)
+        dados = opcoes_de_filtro(faturamento.faturamento_mensal(), promotores, roteiro, colaboradores_pendentes(sessao))
+        dados["importacoes"] = faturamento.ultimas_por_tipo(sessao)
+        dados["reimportar_faturamento"] = faturamento.tem_faturamento_antigo()
+        return dados
+    return respostas_guardadas.responder(pedido, ("opcoes",), calcular)
 
 
 # Até 5 anos por consulta (60 meses).
@@ -337,7 +345,7 @@ MESES_MAXIMOS = 60
 
 
 @app.get("/api/painel")
-def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: str = "", cidade: str = "",
+def painel(pedido: Request, inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: str = "", cidade: str = "",
            pdv: str = "", sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     try:
         indice_inicio, indice_fim = indice_mes(inicio), indice_mes(fim)
@@ -346,8 +354,11 @@ def painel(inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: 
     if abs(indice_fim - indice_inicio) >= MESES_MAXIMOS:
         _erro("Escolha um período de até 5 anos.")
     filtros = Filtros(inicio=inicio, fim=fim, supervisor=supervisor, promotor=promotor, uf=uf, cidade=cidade, pdv=pdv)
-    promotores, custos, roteiro = tabelas_do_calculo(sessao)
-    return calcular_painel(faturamento.faturamento_mensal(), promotores, roteiro, filtros, ler_regras(), custos)
+
+    def calcular():
+        promotores, custos, roteiro = tabelas_do_calculo(sessao)
+        return calcular_painel(faturamento.faturamento_mensal(), promotores, roteiro, filtros, ler_regras(), custos)
+    return respostas_guardadas.responder(pedido, ("painel", *astuple(filtros)), calcular)
 
 
 def _ano_mes(texto: str) -> tuple[int, int]:
@@ -359,11 +370,12 @@ def _ano_mes(texto: str) -> tuple[int, int]:
 
 
 @app.get("/api/faturamento")
-def faturamento_do_erp(inicio: str, fim: str, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
+def faturamento_do_erp(pedido: Request, inicio: str, fim: str, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     """Aba Faturamento: o que veio do ERP no período, por UF e por cliente."""
     inicio_, fim_ = sorted([_ano_mes(inicio), _ano_mes(fim)])  # "De" depois de "Até": inverte
-    dados = faturamento.mensal_por_cliente(inicio_, fim_)
-    return resumo_faturamento(dados, ler_regras(), _cnpjs_no_roteiro(sessao))
+    return respostas_guardadas.responder(
+        pedido, ("faturamento", inicio_, fim_),
+        lambda: resumo_faturamento(faturamento.mensal_por_cliente(inicio_, fim_), ler_regras(), _cnpjs_no_roteiro(sessao)))
 
 
 @app.get("/api/faturamento/itens")
