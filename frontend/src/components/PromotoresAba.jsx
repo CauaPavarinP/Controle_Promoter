@@ -35,6 +35,46 @@ export default function PromotoresAba({ admin }) {
         <summary>Supervisores</summary>
         <Supervisores key={versao} podeEditar={admin} />
       </details>
+      {admin && <ApagarCadastros />}
     </>
+  )
+}
+
+/** Apaga promotores, custos, lojas e roteiros para importar a planilha do zero. Não tem volta. */
+function ApagarCadastros() {
+  const [apagando, setApagando] = useState(false)
+
+  async function apagar() {
+    const resposta = window.prompt(
+      'Isto apaga TODOS os promotores, custos, lojas (PDVs), roteiros, colaboradores não encontrados e ligações ' +
+      'lembradas. Não tem volta.\n\nFica: faturamento do ERP, usuários, regras e o histórico de importações.\n\n' +
+      'Para confirmar, digite APAGAR:')
+    if (resposta === null) return
+    setApagando(true)
+    try {
+      const apagados = await http.post('/api/cadastros/apagar', { confirmacao: resposta })
+      window.alert(`Cadastros apagados: ${apagados.promotores} promotores, ${apagados.custos} custos, ` +
+        `${apagados.lojas} lojas, ${apagados.roteiros} roteiros e ${apagados.supervisores} supervisores.\n\n` +
+        'Agora importe a aba PROMOTORES BRASIL e depois as abas SC, SP, PR, MG e RS.')
+      window.location.reload()
+    } catch (e) {
+      window.alert(e.message)
+    } finally {
+      setApagando(false)
+    }
+  }
+
+  return (
+    <details className="bloco nao-imprimir">
+      <summary>Apagar cadastros e começar do zero</summary>
+      <p className="dica">
+        Apaga todos os promotores, custos, lojas (PDVs), roteiros, colaboradores não encontrados e ligações lembradas,
+        para importar a planilha de novo do zero. <b>Não tem volta.</b> O faturamento do ERP, os usuários, as regras
+        do cálculo e o histórico de importações ficam. Supervisor ligado a um usuário também fica.
+      </p>
+      <button className="secundario perigo" disabled={apagando} onClick={apagar}>
+        {apagando ? 'Apagando…' : 'Apagar cadastros…'}
+      </button>
+    </details>
   )
 }

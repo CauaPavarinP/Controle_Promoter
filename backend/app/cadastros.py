@@ -582,3 +582,48 @@ def transferir_lote(dados: TransferenciaLote, sessao: Session = Depends(db.sessa
         _trocar(sessao, roteiro, destino, dados.data)
     sessao.commit()
     return {"transferidos": len(vigentes)}
+
+
+# ---------------------------------------------------------------------------
+# Apagar os cadastros para começar do zero
+# ---------------------------------------------------------------------------
+
+PALAVRA_DE_CONFIRMACAO = "APAGAR"
+
+
+class ConfirmacaoApagar(BaseModel):
+    confirmacao: str = Field(max_length=20)
+
+
+@rotas.post("/cadastros/apagar")
+def apagar_cadastros(dados: ConfirmacaoApagar, sessao: Session = Depends(db.sessao_db), usuario=Depends(exigir_admin)):
+    """Apaga promotores, custos, lojas (PDVs), roteiros, colaboradores não encontrados e ligações lembradas.
+
+    Fica: faturamento do ERP, usuários, regras do cálculo e o histórico de importações. Supervisor que está
+    ligado a um usuário (perfil supervisor) também fica, para o acesso dele não quebrar. Não tem volta.
+    """
+    from .faturamento import registrar
+    from .modelos import ApelidoColaborador, Importacao, RoteiroPendente, Usuario
+
+    if dados.confirmacao.strip().upper() != PALAVRA_DE_CONFIRMACAO:
+        _erro(f'Para apagar, digite {PALAVRA_DE_CONFIRMACAO} na confirmação.')
+    supervisores_de_usuarios = select(Usuario.supervisor_id).where(Usuario.supervisor_id.is_not(None))
+    apagados = {
+        "ligacoes_lembradas": sessao.query(ApelidoColaborador).delete(),
+        "roteiros": sessao.query(Roteiro).delete(),
+        "colaboradores_nao_encontrados": sessao.query(RoteiroPendente).delete(),
+        "custos": sessao.query(CustoPromotor).delete(),
+        "promotores": sessao.query(Promotor).delete(),
+        "lojas": sessao.query(Pdv).delete(),
+        "supervisores": sessao.query(Supervisor).filter(Supervisor.id.not_in(supervisores_de_usuarios))
+                        .delete(synchronize_session=False),
+    }
+    # Importações de promotores e lojas no histórico deixam de valer (o histórico em si fica).
+    sessao.query(Importacao).filter(Importacao.tipo.in_(["promotores", "roteiro"]),
+                                    Importacao.situacao == "ativa").update({"situacao": "apagada"})
+    sessao.commit()
+    # Totais das abas por UF guardados para a conferência: vêm junto com a importação das lojas.
+    db.substituir_tabela("conferencia_planilha", db.ler_tabela("conferencia_planilha").iloc[0:0])
+    registrar(sessao, "limpeza", "Apagar cadastros", usuario.usuario, sum(apagados.values()),
+              [f"{nome.replace('_', ' ')}: {quantidade}" for nome, quantidade in apagados.items()])
+    return apagados

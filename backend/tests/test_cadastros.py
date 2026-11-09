@@ -198,3 +198,43 @@ def test_converte_dados_da_versao_anterior(banco):
         assert [(c.ano, c.mes, c.total) for c in promotor.custos] == [(2025, 3, 2800.0)]
         assert sessao.query(Roteiro).count() == 1
         assert banco.dados.colaboradores_pendentes(sessao) == ["FULANO"]
+
+
+def test_apagar_cadastros_para_comecar_do_zero(cliente, banco):
+    from conftest import importar_cadastros, importar_faturamento
+    entrar(cliente)
+    importar_cadastros(cliente)
+    importar_faturamento(cliente)
+    supervisor = cliente.get("/api/supervisores").json()[0]
+    assert cliente.post("/api/usuarios", json={"nome": "Sup", "usuario": "sup", "perfil": "supervisor",
+                                               "supervisor_id": supervisor["id"]}).status_code == 200
+    meses = cliente.get("/api/opcoes").json()["meses"]
+    assert cliente.get("/api/promotores").json() and cliente.get("/api/pdvs").json()
+
+    # Sem digitar APAGAR, não apaga nada.
+    assert cliente.post("/api/cadastros/apagar", json={"confirmacao": "sim"}).status_code == 400
+    assert cliente.get("/api/promotores").json()
+
+    resposta = cliente.post("/api/cadastros/apagar", json={"confirmacao": "apagar"})
+    assert resposta.status_code == 200, resposta.text
+    assert resposta.json()["promotores"] > 0 and resposta.json()["lojas"] > 0
+    assert cliente.get("/api/promotores").json() == [] and cliente.get("/api/pdvs").json() == []
+    assert cliente.get("/api/roteiros").json() == []
+    # Fica: faturamento, usuários e o supervisor ligado a um usuário.
+    assert cliente.get("/api/opcoes").json()["meses"] == meses
+    assert [s["id"] for s in cliente.get("/api/supervisores").json()] == [supervisor["id"]]
+    assert any(u["usuario"] == "sup" for u in cliente.get("/api/usuarios").json())
+    historico = cliente.get("/api/importacoes").json()
+    assert historico[0]["tipo"] == "limpeza"
+    assert all(i["situacao"] == "apagada" for i in historico if i["tipo"] in ("promotores", "roteiro"))
+    # Dá para importar de novo depois.
+    importar_cadastros(cliente)
+    assert cliente.get("/api/promotores").json()
+
+
+def test_so_administrador_apaga_cadastros(cliente):
+    entrar(cliente)
+    novo = cliente.post("/api/usuarios", json={"nome": "Consulta", "usuario": "consulta", "perfil": "consulta"}).json()
+    cliente.post("/api/logout")
+    entrar(cliente, "consulta", novo["senha_provisoria"])
+    assert cliente.post("/api/cadastros/apagar", json={"confirmacao": "APAGAR"}).status_code == 403
