@@ -161,7 +161,8 @@ export function FichaSePaga({ linha, lojas, periodo }) {
         <div className="card"><span>Custo dele no período</span><strong>{formatarMoeda(linha.custo_periodo)}</strong></div>
         <div className={`card ${!temMargem ? '' : linha.resultado >= 0 ? 'pct-ok' : 'pct-critico'}`}>
           <span>Sobra para a 101</span><strong>{temMargem ? formatarMoeda(linha.resultado) : "—"}</strong>
-          <small><EtiquetaSituacao linha={linha} />{linha.percentual_do_lucro != null && ` · ${formatarPercentual(linha.percentual_do_lucro)} do lucro vai para ele`}</small>
+          {!temMargem && <small>Informe a margem da 101 no topo da aba Promotores.</small>}
+          {temMargem && <small><EtiquetaSituacao linha={linha} />{linha.percentual_do_lucro != null && ` · ${formatarPercentual(linha.percentual_do_lucro)} do lucro vai para ele`}</small>}
         </div>
       </div>
       <Tabela

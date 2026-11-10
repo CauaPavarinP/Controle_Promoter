@@ -139,16 +139,6 @@ function DetalhePromotor({ id, supervisores, promotores, pdvs, podeEditar, aoFec
     <Modal titulo={`${promotor.nome} (${promotor.codigo})`} aoFechar={aoFechar} largo>
       {erro && <div className="erro-caixa">{erro}</div>}
 
-      {sePaga && (
-        <section className="detalhe-secao">
-          <h3>Está se pagando?</h3>
-          <FichaSePaga
-            linha={sePaga.dados?.promotores.find((p) => p.codigo === promotor.codigo)}
-            lojas={(sePaga.dados?.lojas || []).filter((l) => l.codigo_promotor === promotor.codigo)}
-            periodo={sePaga.periodo}
-          />
-        </section>
-      )}
 
       <section className="detalhe-secao">
         <div className="secao-titulo">
@@ -206,6 +196,17 @@ function DetalhePromotor({ id, supervisores, promotores, pdvs, podeEditar, aoFec
           </div>
         )}
       </section>
+
+      {sePaga && (
+        <section className="detalhe-secao">
+          <h3>Está se pagando?</h3>
+          <FichaSePaga
+            linha={sePaga.dados?.promotores.find((p) => p.codigo === promotor.codigo)}
+            lojas={(sePaga.dados?.lojas || []).filter((l) => l.codigo_promotor === promotor.codigo)}
+            periodo={sePaga.periodo}
+          />
+        </section>
+      )}
 
       <section className="detalhe-secao">
         <div className="secao-titulo">
