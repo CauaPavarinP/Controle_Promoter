@@ -368,3 +368,15 @@ details.colaboradores-pendentes > summary { color: var(--alerta, #b54708); }
 .ligar-colaborador select { max-width: 260px; }
 .sublinha { display: block; font-size: 12px; }
 details.lembrados > summary { cursor: pointer; color: var(--primaria); font-weight: 600; margin-top: 10px; }
+
+/* Protótipo: o promotor está se pagando? */
+.se-paga { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.se-paga-ok { background: var(--ok-fundo); color: var(--ok); }
+.se-paga-limite { background: var(--alerta-fundo); color: var(--alerta); }
+.se-paga-prejuizo, .se-paga-sem-faturamento { background: var(--critico-fundo); color: var(--critico); }
+.se-paga-margem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.se-paga-margem .dica { flex-basis: 100%; margin: 0; }
+.margem-campo { width: 80px; }
+.margem-valor { font-size: 18px; }
+.se-paga-legenda { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 0; }
+.se-paga-quadro .cards { margin-top: 12px; }

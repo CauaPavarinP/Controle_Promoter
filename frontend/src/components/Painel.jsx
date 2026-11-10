@@ -240,7 +240,7 @@ export default function Painel({ usuario, aoSair }) {
         {aba === 'faturamento' && opcoes && (
           <Faturamento admin={admin} meses={opcoes.meses} aoImportar={carregarOpcoes} />
         )}
-        {aba === 'promotores' && <PromotoresAba admin={admin} />}
+        {aba === 'promotores' && <PromotoresAba admin={admin} meses={opcoes?.meses || []} />}
         {aba === 'usuarios' && admin && <Usuarios eu={usuario} />}
         {aba === 'perfil' && <MeuPerfil usuario={usuario} />}
       </main>

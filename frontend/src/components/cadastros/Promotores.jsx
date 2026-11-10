@@ -3,6 +3,7 @@ import { http } from '../../api.js'
 import { formatarData, formatarMoeda, NOMES_MESES_LONGOS, UFS } from '../../formato.js'
 import { Campo, Modal, Situacao, SituacaoRoteiro, Tabela, useLista } from '../ui.jsx'
 import { EditarRoteiroModal, EncerrarModal, TrocarModal, VincularModal } from './RoteiroModais.jsx'
+import { EtiquetaSituacao, FichaSePaga, QuadroSePaga, situacao, textoSituacao, useSePaga } from './SePaga.jsx'
 
 const agora = new Date()
 const CUSTO_VAZIO = { ano: agora.getFullYear(), mes: agora.getMonth() + 1, salario: '', ajuda_custo: '', vale_transporte: '', outros: '' }
@@ -104,7 +105,7 @@ function NovoPromotor({ supervisores, aoFechar, aoSalvar }) {
   )
 }
 
-function DetalhePromotor({ id, supervisores, promotores, pdvs, podeEditar, aoFechar, aoAlterar }) {
+function DetalhePromotor({ id, supervisores, promotores, pdvs, podeEditar, aoFechar, aoAlterar, sePaga }) {
   const [promotor, setPromotor] = useState(null)
   const [edicao, setEdicao] = useState(null)
   const [reajuste, setReajuste] = useState(null)
@@ -137,6 +138,17 @@ function DetalhePromotor({ id, supervisores, promotores, pdvs, podeEditar, aoFec
   return (
     <Modal titulo={`${promotor.nome} (${promotor.codigo})`} aoFechar={aoFechar} largo>
       {erro && <div className="erro-caixa">{erro}</div>}
+
+      {sePaga && (
+        <section className="detalhe-secao">
+          <h3>Está se pagando?</h3>
+          <FichaSePaga
+            linha={sePaga.dados?.promotores.find((p) => p.codigo === promotor.codigo)}
+            lojas={(sePaga.dados?.lojas || []).filter((l) => l.codigo_promotor === promotor.codigo)}
+            periodo={sePaga.periodo}
+          />
+        </section>
+      )}
 
       <section className="detalhe-secao">
         <div className="secao-titulo">
@@ -275,11 +287,13 @@ function DetalhePromotor({ id, supervisores, promotores, pdvs, podeEditar, aoFec
   )
 }
 
-export default function Promotores({ podeEditar }) {
+export default function Promotores({ podeEditar, meses = [] }) {
   const [promotores, recarregar, erroLista] = useLista(() => http.get('/api/promotores'))
   const [supervisores] = useLista(() => http.get('/api/supervisores'))
   const [pdvs] = useLista(() => http.get('/api/pdvs'))
-  const [filtros, setFiltros] = useState({ busca: '', supervisor: '', situacao: 'ativos' })
+  const [filtros, setFiltros] = useState({ busca: '', supervisor: '', situacao: 'ativos', resultado: '' })
+  const sePaga = useSePaga(meses)
+  const porCodigo = Object.fromEntries((sePaga.dados?.promotores || []).map((p) => [p.codigo, p]))
   const [novo, setNovo] = useState(false)
   const [aberto, setAberto] = useState(null)
 
@@ -288,9 +302,16 @@ export default function Promotores({ podeEditar }) {
   const visiveis = promotores.filter((p) =>
     (filtros.situacao === 'todos' || (filtros.situacao === 'ativos') === p.ativo) &&
     (!filtros.supervisor || String(p.supervisor_id) === filtros.supervisor || (filtros.supervisor === 'sem' && !p.supervisor_id)) &&
-    (!termo || `${p.nome} ${p.codigo} ${p.municipio}`.toLowerCase().includes(termo)))
+    (!termo || `${p.nome} ${p.codigo} ${p.municipio}`.toLowerCase().includes(termo)) &&
+    (!filtros.resultado || filtros.resultado.split(',').includes(situacao(porCodigo[p.codigo]))))
+  const conta = (p) => porCodigo[p.codigo]
 
   return (
+    <>
+    {meses.length > 0 && (
+      <QuadroSePaga meses={meses} periodo={sePaga.periodo} setPeriodo={sePaga.setPeriodo} dados={sePaga.dados}
+        podeEditar={podeEditar} aoMudarMargem={sePaga.recarregar} />
+    )}
     <section className="bloco">
       <div className="bloco-cabecalho">
         <div className="bloco-ferramentas">
@@ -305,10 +326,16 @@ export default function Promotores({ podeEditar }) {
             <option value="inativos">Desligados</option>
             <option value="todos">Todos</option>
           </select>
+          <select value={filtros.resultado} onChange={(e) => setFiltros({ ...filtros, resultado: e.target.value })}>
+            <option value="">Se paga ou não: todos</option>
+            <option value="prejuizo,sem-faturamento">🔴 Só quem não se paga</option>
+            <option value="limite">🟡 Só no limite</option>
+            <option value="ok">🟢 Só quem se paga</option>
+          </select>
         </div>
         {podeEditar && <button onClick={() => setNovo(true)}>+ Novo promotor</button>}
       </div>
-      <p className="dica">Clique num promotor para ver custos, roteiro e editar.</p>
+      <p className="dica">Clique num promotor para ver se ele se paga loja por loja, os custos, o roteiro e editar.</p>
       <Tabela
         linhas={visiveis}
         arquivo="promotores"
@@ -318,16 +345,32 @@ export default function Promotores({ podeEditar }) {
           { campo: 'nome', titulo: 'Nome', quebra: true },
           { campo: 'supervisor', titulo: 'Supervisor', mostrar: (p) => p.supervisor || <span className="texto-critico">sem supervisor</span> },
           { campo: 'municipio', titulo: 'Município', mostrar: (p) => `${p.municipio}${p.uf ? ` - ${p.uf}` : ''}` },
-          { campo: 'custo_atual', titulo: 'Custo atual', num: true, mostrar: (p) => formatarMoeda(p.custo_atual) },
+          { campo: 'custo_atual', titulo: 'Custo/mês', num: true, mostrar: (p) => formatarMoeda(p.custo_atual) },
           { campo: 'lojas_vigentes', titulo: 'PDVs', num: true },
+          { campo: 'faturamento', titulo: 'Lojas compraram', num: true, formato: 'moeda',
+            ordenar: (p) => conta(p)?.faturamento ?? -1, exportar: (p) => conta(p)?.faturamento ?? null,
+            mostrar: (p) => (conta(p) ? formatarMoeda(conta(p).faturamento) : '—') },
+          { campo: 'lucro_estimado', titulo: 'Lucro da 101', num: true, formato: 'moeda',
+            ordenar: (p) => conta(p)?.lucro_estimado ?? -1, exportar: (p) => conta(p)?.lucro_estimado ?? null,
+            mostrar: (p) => (conta(p)?.lucro_estimado != null ? formatarMoeda(conta(p).lucro_estimado) : '—') },
+          { campo: 'custo_periodo', titulo: 'Custo no período', num: true, formato: 'moeda',
+            ordenar: (p) => conta(p)?.custo_periodo ?? -1, exportar: (p) => conta(p)?.custo_periodo ?? null,
+            mostrar: (p) => (conta(p) ? formatarMoeda(conta(p).custo_periodo) : '—') },
+          { campo: 'resultado', titulo: 'Sobra p/ 101', num: true, formato: 'moeda',
+            ordenar: (p) => conta(p)?.resultado ?? -1e12, exportar: (p) => conta(p)?.resultado ?? null,
+            mostrar: (p) => (conta(p)?.resultado != null
+              ? <b className={conta(p).resultado >= 0 ? 'texto-ok' : 'texto-critico'}>{formatarMoeda(conta(p).resultado)}</b> : '—') },
+          { campo: 'se_paga', titulo: 'Se paga?', ordenar: (p) => conta(p)?.percentual_do_lucro ?? 9999,
+            exportar: (p) => textoSituacao(conta(p)), mostrar: (p) => <EtiquetaSituacao linha={conta(p)} /> },
           { campo: 'ativo', titulo: 'Situação', mostrar: (p) => <Situacao ativo={p.ativo} textoInativo="Desligado" />, exportar: (p) => (p.ativo ? 'Ativo' : 'Desligado') },
         ]}
       />
       {novo && <NovoPromotor supervisores={supervisores} aoFechar={() => setNovo(false)} aoSalvar={() => { setNovo(false); recarregar() }} />}
       {aberto && (
         <DetalhePromotor id={aberto} supervisores={supervisores} promotores={promotores} pdvs={pdvs || []}
-          podeEditar={podeEditar} aoFechar={() => setAberto(null)} aoAlterar={recarregar} />
+          podeEditar={podeEditar} aoFechar={() => setAberto(null)} aoAlterar={recarregar} sePaga={sePaga} />
       )}
     </section>
+    </>
   )
 }

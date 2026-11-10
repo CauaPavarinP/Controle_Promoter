@@ -5,7 +5,7 @@ import { Envio, ResultadoCadastro } from './Importar.jsx'
 import Promotores from './cadastros/Promotores.jsx'
 import Supervisores from './cadastros/Supervisores.jsx'
 
-export default function PromotoresAba({ admin }) {
+export default function PromotoresAba({ admin, meses }) {
   const [resultado, setResultado] = useState(null)
   // Muda depois de importar, para a lista de promotores recarregar.
   const [versao, setVersao] = useState(0)
@@ -30,7 +30,7 @@ export default function PromotoresAba({ admin }) {
           </div>
         </details>
       )}
-      <Promotores key={versao} podeEditar={admin} />
+      <Promotores key={versao} podeEditar={admin} meses={meses} />
       <details className="bloco">
         <summary>Supervisores</summary>
         <Supervisores key={versao} podeEditar={admin} />

@@ -92,6 +92,24 @@ def _ultimo_mes_vigente(texto):
     return indice if data.day == monthrange(data.year, data.month)[1] else indice - 1
 
 
+def _se_paga(linha: dict, margem) -> None:
+    """Acrescenta à linha (promotor, loja ou resumo) o lucro estimado e o resultado.
+
+    lucro estimado = faturamento × margem da 101; resultado = lucro estimado − custo do promotor no período.
+    Resultado ≥ 0: o promotor se paga (o lucro das vendas às lojas dele cobre o que a 101 paga a ele).
+    Sem margem informada, os dois ficam vazios.
+    """
+    custo = linha.get("custo_periodo", linha.get("custo"))
+    if margem is None or custo is None:
+        linha["lucro_estimado"] = linha["resultado"] = linha["percentual_do_lucro"] = None
+        return
+    lucro = (linha.get("faturamento") or 0.0) * margem / 100
+    linha["lucro_estimado"] = round(lucro, 2)
+    linha["resultado"] = round(lucro - custo, 2)
+    # Quanto do lucro das lojas vai para pagar o promotor: abaixo de 100% ele se paga.
+    linha["percentual_do_lucro"] = round(custo / lucro * 100, 1) if lucro > 0 else None
+
+
 def _arredondar(valor):
     return None if valor is None or pd.isna(valor) else round(float(valor), 2)
 
@@ -385,7 +403,9 @@ def calcular_painel(faturamento: pd.DataFrame, promotores: pd.DataFrame, roteiro
         "cnpjs_compartilhados": int(unicas[unicas["compartilhado"]]["chave"].nunique()),
         "avisos": avisos,
     }
-    regras_usadas = {c: regras[c] for c in ("rateio_custo", "limite_percentual")}
+    regras_usadas = {c: regras[c] for c in ("rateio_custo", "limite_percentual", "margem_percentual")}
+    for linha in [*linhas_promotores, *linhas_lojas, resumo]:
+        _se_paga(linha, regras.get("margem_percentual"))
     return {"resumo": resumo, "promotores": linhas_promotores, "lojas": linhas_lojas, "regras": regras_usadas,
             "grade": _grade_mes_a_mes(lojas, ativos, meses, nomes, supervisores, separados),
             "custos": _bloco_custos(proms, custos, fim),
