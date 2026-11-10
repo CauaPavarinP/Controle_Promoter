@@ -204,6 +204,8 @@ function DetalhePromotor({ id, supervisores, promotores, pdvs, podeEditar, aoFec
             linha={sePaga.dados?.promotores.find((p) => p.codigo === promotor.codigo)}
             lojas={(sePaga.dados?.lojas || []).filter((l) => l.codigo_promotor === promotor.codigo)}
             periodo={sePaga.periodo}
+            carregado={Boolean(sePaga.dados)}
+            temFaturamento={sePaga.temFaturamento}
           />
         </section>
       )}
@@ -293,7 +295,7 @@ export default function Promotores({ podeEditar, meses = [] }) {
   const [supervisores] = useLista(() => http.get('/api/supervisores'))
   const [pdvs] = useLista(() => http.get('/api/pdvs'))
   const [filtros, setFiltros] = useState({ busca: '', supervisor: '', situacao: 'ativos', resultado: '' })
-  const sePaga = useSePaga(meses)
+  const sePaga = { ...useSePaga(meses), temFaturamento: meses.length > 0 }
   const porCodigo = Object.fromEntries((sePaga.dados?.promotores || []).map((p) => [p.codigo, p]))
   const [novo, setNovo] = useState(false)
   const [aberto, setAberto] = useState(null)

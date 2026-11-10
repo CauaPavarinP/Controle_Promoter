@@ -149,8 +149,24 @@ export function QuadroSePaga({ meses, periodo, setPeriodo, dados, podeEditar, ao
 }
 
 /** Ficha do promotor: o resultado dele e o de cada loja dele. */
-export function FichaSePaga({ linha, lojas, periodo }) {
-  if (!linha) return <p className="dica">Sem lojas ou sem custo no período escolhido.</p>
+export function FichaSePaga({ linha, lojas, periodo, carregado, temFaturamento }) {
+  if (!temFaturamento) {
+    return (
+      <div className="aviso">
+        Ainda não há faturamento importado neste sistema. Importe o arquivo do ERP na aba <b>Faturamento</b> para ver
+        quanto as lojas deste promotor compraram e se ele se paga.
+      </div>
+    )
+  }
+  if (!carregado) return <p className="dica">Calculando…</p>
+  if (!linha) {
+    return (
+      <div className="aviso">
+        Este promotor não entra na conta de {formatarMes(periodo.inicio)} a {formatarMes(periodo.fim)}: não tem lojas no
+        roteiro nesse período, não estava contratado ou é supervisor.
+      </div>
+    )
+  }
   const temMargem = linha.resultado != null
   return (
     <>
