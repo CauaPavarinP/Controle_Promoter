@@ -40,6 +40,42 @@ class ArquivoNaoSuportado(Exception):
     """O arquivo não tem a estrutura esperada; quem chama usa o leitor antigo (openpyxl)."""
 
 
+class ArquivoSuspeito(Exception):
+    """Zip "inflado" (zip bomb) ou com partes absurdas: não pode ser aberto por nenhum leitor."""
+
+
+# Limites de um .xlsx. A planilha real (317 mil linhas) tem 52 MB compactada e 562 MB aberta (557 MB numa aba), com
+# razão de compactação de ~11x e textos (sharedStrings) de 5 MB. Um arquivo malicioso de 1,6 MB que abria 1,5 GB de
+# textos derrubava o servidor (512 MB) antes de qualquer outra conferência.
+LIMITE_ABERTO_TOTAL = 3_000_000_000      # soma das partes abertas
+LIMITE_PARTE_INTEIRA = 100_000_000       # partes lidas inteiras na memória (textos, estilos, livro): real ~5 MB
+RAZAO_MAXIMA = 100                        # compactação acima disso, em parte grande, é bomba (real: ~11x)
+LIMITE_LINHA_XML = 64 * 1024 * 1024      # uma linha <row> sozinha maior que isso não é planilha de verdade
+
+
+def conferir_zip(fonte) -> None:
+    """Recusa (ArquivoSuspeito) zip que abriria grande demais. Não abre nenhuma parte: só lê o índice do zip.
+
+    O tamanho de cada parte vem do índice do arquivo; o zipfile do Python nunca descompacta além dele (uma parte que
+    "mente" o tamanho para no tamanho declarado e dá erro), então conferir o índice basta.
+    """
+    try:
+        arquivo = zipfile.ZipFile(io.BytesIO(fonte) if isinstance(fonte, (bytes, bytearray)) else fonte)
+    except (zipfile.BadZipFile, OSError, ValueError):
+        return  # não é zip: o leitor de cada formato dá a mensagem certa
+    with arquivo:
+        total = 0
+        for parte in arquivo.infolist():
+            total += parte.file_size
+            e_aba = parte.filename.startswith("xl/worksheets/")
+            razao = parte.file_size / max(parte.compress_size, 1)
+            if (not e_aba and parte.file_size > LIMITE_PARTE_INTEIRA) or \
+                    (parte.file_size > 50_000_000 and razao > RAZAO_MAXIMA):
+                raise ArquivoSuspeito(parte.filename)
+        if total > LIMITE_ABERTO_TOTAL:
+            raise ArquivoSuspeito("total")
+
+
 def _indice_coluna(letras: bytes) -> int:
     numero = 0
     for letra in letras:
@@ -67,6 +103,7 @@ class LivroXlsx:
     """Abre o .xlsx (caminho ou bytes) e lê as abas linha a linha."""
 
     def __init__(self, fonte):
+        conferir_zip(fonte)
         try:
             self._zip = zipfile.ZipFile(io.BytesIO(fonte) if isinstance(fonte, (bytes, bytearray)) else fonte)
             livro = self._zip.read("xl/workbook.xml").decode("utf-8")
@@ -107,6 +144,8 @@ class LivroXlsx:
                     resto += bloco
                     corte = resto.rfind(_FIM_LINHA)
                     if corte < 0:
+                        if len(resto) > LIMITE_LINHA_XML:
+                            raise ArquivoSuspeito(caminho)
                         continue
                     pedaco, resto = resto[:corte + len(_FIM_LINHA)], resto[corte + len(_FIM_LINHA):]
                 else:

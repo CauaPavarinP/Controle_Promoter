@@ -4,7 +4,7 @@ import { Campo } from '../ui.jsx'
 
 const NOMES_PERFIL = { admin: 'Administrador', consulta: 'Consulta', supervisor: 'Supervisor' }
 
-export default function MeuPerfil({ usuario }) {
+export default function MeuPerfil({ usuario, aoTrocarSenha }) {
   const [dados, setDados] = useState({ senha_atual: '', nova_senha: '', repetir: '' })
   const [mensagem, setMensagem] = useState(null)
 
@@ -18,6 +18,7 @@ export default function MeuPerfil({ usuario }) {
       await http.put('/api/minha-senha', { senha_atual: dados.senha_atual, nova_senha: dados.nova_senha })
       setDados({ senha_atual: '', nova_senha: '', repetir: '' })
       setMensagem({ erro: false, texto: 'Senha trocada.' })
+      aoTrocarSenha?.()
     } catch (e) {
       setMensagem({ erro: true, texto: e.message })
     }

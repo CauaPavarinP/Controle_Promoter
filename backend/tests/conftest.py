@@ -26,8 +26,9 @@ def recarregar_app():
     import app.pendencias
     import app.regras
     import app.respostas_guardadas
+    import app.seguranca
     import app.usuarios
-    for modulo in (app.config, app.respostas_guardadas, app.db, app.regras, app.faturamento, app.carga, app.dados, app.autenticacao,
+    for modulo in (app.config, app.respostas_guardadas, app.seguranca, app.db, app.regras, app.faturamento, app.carga, app.dados, app.autenticacao,
                    app.usuarios, app.cadastros, app.pendencias, app.exportar, app.main):
         importlib.reload(modulo)
     return app

@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from .limites import LimiteDeTamanho
 from . import cadastros, db, exportar, faturamento, pendencias, respostas_guardadas, usuarios
 from .autenticacao import exigir_admin, usuario_logado
 from .calculos import Filtros, calcular_painel, indice_mes, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
@@ -51,6 +52,8 @@ async def ciclo_de_vida(_app):
 app = FastAPI(title="Controle de Promotores", lifespan=ciclo_de_vida,
               docs_url=None if PRODUCAO else "/docs", redoc_url=None,
               openapi_url=None if PRODUCAO else "/openapi.json")
+# Tamanho máximo de cada envio, conferido antes de receber tudo (app/limites.py).
+app.add_middleware(LimiteDeTamanho)
 # Respostas JSON comprimidas: o Resumo (~800 KB) e o Faturamento (~1,5 MB) viajam ~10x menores.
 app.add_middleware(GZipMiddleware, minimum_size=2000)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=SESSAO_HORAS * 3600,

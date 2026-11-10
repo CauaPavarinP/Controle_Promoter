@@ -47,3 +47,34 @@ def test_caminhos_fora_do_front_nao_vazam(cliente):
 
 def test_login_limita_tamanho(cliente):
     assert cliente.post("/api/login", json={"usuario": "x" * 500, "senha": "y"}).status_code == 422
+
+
+def test_envio_grande_demais_e_recusado_antes_de_receber(cliente):
+    """400 MB numa rota comum levavam o servidor a 1,37 GB de memória (o do Render tem 512 MB)."""
+    entrar(cliente)
+    from app.limites import LIMITE_EXPORTACAO, LIMITE_PADRAO
+    corpo = b'{"titulo":"x","colunas":[{"titulo":"a"}],"linhas":[["' + b"A" * (LIMITE_EXPORTACAO + 10) + b'"]]}'
+    resposta = cliente.post("/api/exportar", content=corpo, headers={"Content-Type": "application/json"})
+    assert resposta.status_code == 413 and "grande demais" in resposta.json()["detail"]
+    # Sem Content-Length (envio em partes): conta os bytes e para no limite.
+    def em_partes():
+        for _ in range(3):
+            yield b"x" * LIMITE_PADRAO
+    resposta = cliente.put("/api/regras", content=em_partes(), headers={"Content-Type": "application/json"})
+    assert resposta.status_code == 413
+    # Tamanho normal continua passando.
+    ok = cliente.post("/api/exportar", json={"titulo": "x", "colunas": [{"titulo": "a"}], "linhas": [["b"]]})
+    assert ok.status_code == 200
+
+
+def test_bloqueio_nao_entrega_quais_usuarios_existem(cliente):
+    """Antes, só usuário que existe aparecia como "bloqueado": dava para descobrir os logins válidos."""
+    respostas = {}
+    for nome in ("mauricio", "nao-existe"):
+        for _ in range(5):
+            assert cliente.post("/api/login", json={"usuario": nome, "senha": "errada"}).status_code == 401
+        respostas[nome] = cliente.post("/api/login", json={"usuario": nome, "senha": "errada"}).json()["detail"]
+    assert respostas["mauricio"] == respostas["nao-existe"]
+    assert "Muitas tentativas" in respostas["nao-existe"]
+    # Bloqueado mesmo com a senha certa, até passar o tempo.
+    assert cliente.post("/api/login", json={"usuario": "mauricio", "senha": "senha-teste"}).status_code == 401

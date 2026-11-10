@@ -144,6 +144,8 @@ class Usuario(Carimbo, Base):
     bloqueado_ate: Mapped[datetime | None] = mapped_column(DateTime)
     # Vai junto no cookie de sessão; trocar a chave derruba as sessões abertas desse usuário.
     sessao_chave: Mapped[str] = mapped_column(String(64), default="")
+    # Senha provisória (criada ou trocada pelo administrador): o usuário precisa trocar no primeiro acesso.
+    trocar_senha: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Importacao(Base):
