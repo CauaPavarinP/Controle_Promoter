@@ -57,3 +57,41 @@ def test_arquivo_ruim_vira_mensagem(cliente, rota, nome):
     assert resposta.status_code in (400, 413), (rota, nome, resposta.status_code, resposta.text[:300])
     assert resposta.json()["detail"]
     assert cliente.get("/api/opcoes").status_code == 200   # o servidor continua de pé
+
+
+def _bomba(parte: str, conteudo_inicio: bytes, tamanho: int, fim: bytes) -> bytes:
+    """Pega o exemplo e troca uma parte por texto repetido: poucos KB no disco, `tamanho` bytes aberto."""
+    saida = io.BytesIO()
+    with zipfile.ZipFile(EXEMPLOS / "faturamento_exemplo.xlsx") as original, \
+            zipfile.ZipFile(saida, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as novo:
+        for item in original.infolist():
+            if item.filename != parte:
+                novo.writestr(item, original.read(item))
+        with novo.open(parte, "w", force_zip64=True) as destino:
+            destino.write(conteudo_inicio)
+            bloco = b"A" * (1 << 20)
+            for _ in range(tamanho // len(bloco)):
+                destino.write(bloco)
+            destino.write(fim)
+    return saida.getvalue()
+
+
+@pytest.mark.parametrize("rota", ["promotores", "roteiro", "faturamento/previa"])
+def test_excel_inflado_e_recusado_sem_abrir(cliente, rota):
+    """Zip bomb: um arquivo de poucos KB que abriria centenas de MB derrubava o servidor (512 MB)."""
+    entrar(cliente)
+    textos = _bomba("xl/sharedStrings.xml", b'<sst><si><t>', 120 * 1024 * 1024, b"</t></si></sst>")
+    assert len(textos) < 2 * 1024 * 1024
+    resposta = _esperar_leitura(cliente, cliente.post(f"/api/importacoes/{rota}", files={"arquivo": ("b.xlsx", textos)}))
+    assert resposta.status_code == 400 and "muito mais espaço aberto" in resposta.json()["detail"]
+
+
+def test_linha_gigante_na_aba_e_recusada():
+    """Uma única linha de 70 MB dentro da aba (sem fim de linha) para a leitura em vez de encher a memória."""
+    from app.importacao import ErroImportacao, ler_faturamento
+    with zipfile.ZipFile(EXEMPLOS / "faturamento_exemplo.xlsx") as z:
+        aba = next(n for n in z.namelist() if n.startswith("xl/worksheets/sheet"))
+    arquivo = _bomba(aba, b'<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>', 70 * 1024 * 1024,
+                     b"</t></is></c></row></sheetData></worksheet>")
+    with pytest.raises(ErroImportacao, match="muito mais espaço aberto"):
+        ler_faturamento(arquivo, "b.xlsx")

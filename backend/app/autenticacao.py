@@ -8,6 +8,9 @@ from . import db
 from .modelos import Usuario
 
 
+ROTAS_COM_SENHA_PROVISORIA = {"/api/sessao", "/api/minha-senha"}
+
+
 def usuario_logado(request: Request, sessao: Session = Depends(db.sessao_db)) -> Usuario:
     usuario_id = request.session.get("usuario_id")
     usuario = sessao.get(Usuario, usuario_id) if usuario_id else None
@@ -17,6 +20,9 @@ def usuario_logado(request: Request, sessao: Session = Depends(db.sessao_db)) ->
     if usuario is None or not usuario.ativo or not chave_valida:
         request.session.clear()
         raise HTTPException(status_code=401, detail="Sessão expirada. Entre novamente.")
+    # Com senha provisória, só dá para ver a própria sessão e trocar a senha (o administrador sabe a provisória).
+    if usuario.trocar_senha and request.url.path not in ROTAS_COM_SENHA_PROVISORIA:
+        raise HTTPException(status_code=403, detail="Troque a senha provisória antes de continuar.")
     return usuario
 
 

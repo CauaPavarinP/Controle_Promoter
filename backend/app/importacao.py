@@ -10,7 +10,7 @@ import unicodedata
 import numpy as np
 import pandas as pd
 
-from .leitor_xlsx import ArquivoNaoSuportado, LivroXlsx
+from .leitor_xlsx import ArquivoNaoSuportado, ArquivoSuspeito, LivroXlsx, conferir_zip
 
 SEM_TIPO = "Sem tipo"
 
@@ -107,6 +107,26 @@ def converter_numero(valor) -> float:
 # Localizar cabeçalho e colunas
 # ---------------------------------------------------------------------------
 
+MENSAGEM_SUSPEITO = ("Este arquivo ocupa muito mais espaço aberto do que parece (pode estar corrompido ou ter sido "
+                     "feito para travar o sistema) e não foi aberto. Abra no Excel, salve como uma nova pasta de "
+                     "trabalho (.xlsx) e envie de novo.")
+
+
+def _recusar_suspeito(fonte) -> None:
+    try:
+        conferir_zip(fonte)
+    except ArquivoSuspeito as erro:
+        raise ErroImportacao(MENSAGEM_SUSPEITO) from erro
+
+
+def _linhas_protegidas(linhas):
+    """Linha gigante no meio da aba (arquivo malicioso) vira a mesma mensagem, não "erro inesperado"."""
+    try:
+        yield from linhas
+    except ArquivoSuspeito as erro:
+        raise ErroImportacao(MENSAGEM_SUSPEITO) from erro
+
+
 def _ler_abas(conteudo: bytes, nome_arquivo: str):
     """Devolve (nome_da_aba, função que lê a aba com header=None)."""
     if nome_arquivo.lower().endswith(".csv"):
@@ -120,6 +140,7 @@ def _ler_abas(conteudo: bytes, nome_arquivo: str):
                 raise ErroImportacao(f"Não consegui ler o CSV (vazio ou mal formado): {erro}") from erro
         return [("CSV", ler_csv)]
 
+    _recusar_suspeito(conteudo)
     try:
         excel = pd.ExcelFile(io.BytesIO(conteudo))
     except Exception as erro:
@@ -304,10 +325,11 @@ def _partes_do_arquivo(fonte, nome_arquivo: str, apelidos: dict, valida):
         return "CSV", mapa, indice + 2, [], em_partes(chain(primeiras[indice + 1:], linhas), mapa)
 
     candidatas = []
+    _recusar_suspeito(fonte)
     try:
         # Leitor rápido (app/leitor_xlsx.py): ~3x mais rápido e ~8x menos memória que o openpyxl.
         livro = LivroXlsx(fonte)
-        abas = [(nome, livro.linhas(caminho)) for nome, caminho in livro.abas]
+        abas = [(nome, _linhas_protegidas(livro.linhas(caminho))) for nome, caminho in livro.abas]
     except ArquivoNaoSuportado:
         from openpyxl import load_workbook
         try:

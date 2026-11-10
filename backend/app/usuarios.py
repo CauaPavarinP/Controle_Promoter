@@ -8,7 +8,8 @@ from . import db
 from .autenticacao import exigir_admin, usuario_logado
 from .modelos import PERFIS, Supervisor, Usuario
 from .seguranca import (HASH_FALSO, MINUTOS_BLOQUEIO, conferir_senha, esta_bloqueado, gerar_hash, gerar_senha,
-                        nova_chave_de_sessao, registrar_falha, registrar_sucesso, validar_nova_senha)
+                        limpar_falhas_nome, nome_bloqueado, nova_chave_de_sessao, registrar_falha,
+                        registrar_falha_nome, registrar_sucesso, validar_nova_senha)
 
 rotas = APIRouter(prefix="/api")
 
@@ -19,7 +20,8 @@ def _erro(mensagem: str, status: int = 400):
 
 def _usuario_json(u: Usuario) -> dict:
     return {"id": u.id, "nome": u.nome, "usuario": u.usuario, "perfil": u.perfil,
-            "supervisor_id": u.supervisor_id, "ativo": u.ativo, "bloqueado": esta_bloqueado(u)}
+            "supervisor_id": u.supervisor_id, "ativo": u.ativo, "bloqueado": esta_bloqueado(u),
+            "trocar_senha": bool(u.trocar_senha)}
 
 
 # ---------------------------------------------------------------------------
@@ -33,16 +35,20 @@ class Credenciais(BaseModel):
 
 @rotas.post("/login")
 def login(dados: Credenciais, request: Request, sessao: Session = Depends(db.sessao_db)):
-    usuario = sessao.scalar(select(Usuario).where(Usuario.usuario == dados.usuario.strip().lower()))
-    if usuario is not None and esta_bloqueado(usuario):
-        _erro(f"Usuário bloqueado por excesso de tentativas. Tente de novo em até {MINUTOS_BLOQUEIO} minutos.", 401)
+    nome = dados.usuario.strip().lower()
+    usuario = sessao.scalar(select(Usuario).where(Usuario.usuario == nome))
+    # Mesma mensagem para usuário que existe e que não existe (antes, só os que existem apareciam como bloqueados).
+    if nome_bloqueado(nome) or (usuario is not None and esta_bloqueado(usuario)):
+        _erro(f"Muitas tentativas erradas com este usuário. Espere {MINUTOS_BLOQUEIO} minutos e tente de novo.", 401)
     # Sempre confere um hash (o falso quando o usuário não existe): o tempo de resposta não entrega quem existe.
     senha_certa = conferir_senha(dados.senha, usuario.senha_hash if usuario is not None else HASH_FALSO)
     if usuario is None or not usuario.ativo or not senha_certa:
+        registrar_falha_nome(nome)
         if usuario is not None:
             registrar_falha(usuario)
             sessao.commit()
         _erro("Usuário ou senha inválidos.", 401)
+    limpar_falhas_nome(nome)
     registrar_sucesso(usuario)
     if not usuario.sessao_chave:
         nova_chave_de_sessao(usuario)
@@ -85,7 +91,10 @@ def trocar_minha_senha(dados: TrocaSenha, request: Request, usuario: Usuario = D
         validar_nova_senha(dados.nova_senha)
     except ValueError as erro:
         _erro(str(erro))
+    if dados.nova_senha == dados.senha_atual:
+        _erro("A nova senha precisa ser diferente da atual.")
     usuario.senha_hash = gerar_hash(dados.nova_senha)
+    usuario.trocar_senha = False
     # Derruba as outras sessões (ex.: alguém que pegou a senha antiga); esta continua aberta.
     request.session["chave"] = nova_chave_de_sessao(usuario)
     sessao.commit()
@@ -131,7 +140,8 @@ def criar_usuario(dados: UsuarioNovo, sessao: Session = Depends(db.sessao_db), _
         _erro("Já existe um usuário com esse login.")
     senha = gerar_senha()
     usuario = Usuario(nome=dados.nome.strip(), usuario=login_novo, senha_hash=gerar_hash(senha),
-                      perfil=dados.perfil, supervisor_id=dados.supervisor_id if dados.perfil == "supervisor" else None)
+                      perfil=dados.perfil, supervisor_id=dados.supervisor_id if dados.perfil == "supervisor" else None,
+                      trocar_senha=True)
     sessao.add(usuario)
     sessao.commit()
     # A senha provisória só aparece agora; no banco fica apenas o hash.
@@ -157,6 +167,7 @@ def nova_senha(ident: int, sessao: Session = Depends(db.sessao_db), _=Depends(ex
     usuario = sessao.get(Usuario, ident) or _erro("Usuário não encontrado.", 404)
     senha = gerar_senha()
     usuario.senha_hash = gerar_hash(senha)
+    usuario.trocar_senha = True
     nova_chave_de_sessao(usuario)  # quem estava logado com a senha antiga cai
     registrar_sucesso(usuario)  # também desbloqueia
     sessao.commit()
