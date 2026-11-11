@@ -20,9 +20,11 @@ export default function CardsResumo({ resumo, regras }) {
           <small>faturamento do ERP das lojas atendidas</small>
         </div>
         <div className="card">
-          <span>Custo ÷ compras</span>
-          <strong className={classePercentual(resumo.percentual_custo, regras)}>{formatarPercentual(resumo.percentual_custo)}</strong>
-          <small>quanto o atendimento custa sobre o que as lojas compram</small>
+          <span>% do faturamento</span>
+          <strong className={resumo.sem_erp ? '' : classePercentual(resumo.percentual_custo, regras) || 'pct-ok'}>
+            {resumo.sem_erp ? '—' : formatarPercentual(resumo.percentual_custo)}
+          </strong>
+          <small>custo ÷ compras das lojas · máximo {formatarPercentual(regras?.limite_percentual)}</small>
         </div>
         <div className="card">
           <span>Agências · promotores · lojas</span>

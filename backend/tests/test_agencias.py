@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 from conftest import EXEMPLOS, entrar, importar_atendimento, importar_faturamento
 
 PERIODO = {"inicio": "2026-01", "fim": "2026-09"}
-COLUNAS_MODELO = ["Mês de referência", "Agência ou MEI", "CNPJ da loja", "Loja", "Cidade", "UF", "Promotor",
+COLUNAS_MODELO = ["Mês de referência", "Agência ou MEI", "Tipo", "CNPJ da loja", "Loja", "Cidade", "UF", "Promotor",
                   "Código do promotor", "Dias de visita", "Visitas no mês", "Valor do mês (R$)", "Status", "Observação"]
 
 
@@ -14,7 +14,7 @@ def _arquivo(linhas: list[list]) -> bytes:
     """Arquivo no modelo das agências com as linhas dadas (sem a linha de exemplo)."""
     livro = load_workbook(EXEMPLOS / "modelo_atendimento_agencias.xlsx")
     aba = livro["Atendimentos"]
-    for coluna in range(1, 14):
+    for coluna in range(1, 15):
         aba.cell(2, coluna).value = None
     for numero, valores in enumerate(linhas, start=2):
         for coluna, valor in enumerate(valores, start=1):
@@ -25,8 +25,8 @@ def _arquivo(linhas: list[list]) -> bytes:
 
 
 def _linha(mes="10/2026", agencia="Agência Beta", cnpj="11.222.333/0001-81", loja="Loja Um", promotor="Paula",
-           codigo="", valor=100, visitas=4, cidade="Curitiba", uf="PR", status="Ativa", observacao=""):
-    return [mes, agencia, cnpj, loja, cidade, uf, promotor, codigo, "Ter", visitas, valor, status, observacao]
+           codigo="", valor=100, visitas=4, cidade="Curitiba", uf="PR", status="Ativa", observacao="", tipo=None):
+    return [mes, agencia, tipo, cnpj, loja, cidade, uf, promotor, codigo, "Ter", visitas, valor, status, observacao]
 
 
 def _previa(cliente, conteudo):
@@ -41,7 +41,7 @@ def test_modelo_para_download_tem_as_colunas_certas(cliente):
     assert resposta.status_code == 200
     livro = load_workbook(io.BytesIO(resposta.content))
     assert livro.sheetnames[:3] == ["Instruções", "Atendimentos", "Resumo"]
-    assert [c.value for c in livro["Atendimentos"][1]][:13] == COLUNAS_MODELO
+    assert [c.value for c in livro["Atendimentos"][1]][:14] == COLUNAS_MODELO
     # A linha de exemplo do modelo é ignorada: o modelo vazio não tem nada para importar.
     assert _previa(cliente, resposta.content).status_code == 400
 
@@ -80,7 +80,7 @@ def test_linhas_com_erro_exemplo_e_total_sao_tratadas(cliente):
         _linha(valor=None, loja="Sem valor"),
         _linha(promotor="", loja="Sem promotor"),
         _linha(observacao="EXEMPLO - apague esta linha antes de enviar", loja="Exemplo"),
-        [None, None, None, None, None, None, None, None, None, None, 1700, None, None],   # linha de total
+        [None, None, None, None, None, None, None, None, None, None, None, 1700, None, None],   # linha de total
         _linha(mes="2026-11", loja="Mês no outro formato"),
     ])).json()
     assert previa["linhas_validas"] == 4
@@ -213,30 +213,63 @@ def test_mes_sem_arquivo_de_agencia_e_avisado(cliente):
     assert vazio["resumo"]["custo"] == 0 and vazio["promotores"] == []
 
 
-def test_vale_a_pena_com_a_margem(cliente):
-    """Resultado = compras das lojas × margem da 101 − custo do atendimento."""
+def test_vale_a_pena_e_custo_ate_3_por_cento_do_faturamento_bruto(cliente):
+    """Decisão do Maurício: o promotor pode custar no máximo 3% do que as lojas dele compram (faturamento bruto)."""
     entrar(cliente)
     importar_faturamento(cliente)
     importar_atendimento(cliente)
     painel = cliente.get("/api/painel", params=PERIODO).json()
-    assert all(p["resultado"] is None for p in painel["promotores"])   # sem margem: só o %
-    regras = cliente.get("/api/regras").json()["regras"]
-    assert regras["valor_faturamento"] == "vlr_total"
-    assert cliente.put("/api/regras", json={**regras, "margem_percentual": "abc"}).status_code == 400
-    assert cliente.put("/api/regras", json={**regras, "margem_percentual": 150}).status_code == 400
-    assert cliente.put("/api/regras", json={**regras, "margem_percentual": "10,5"}).json()["regras"]["margem_percentual"] == 10.5
-    painel = cliente.get("/api/painel", params=PERIODO).json()   # a resposta guardada foi descartada
-    for visao in ("promotores", "lojas", "agencias", "mes_a_mes"):
+    assert painel["regras"]["limite_percentual"] == 3.0
+    for visao in ("promotores", "lojas", "agencias", "mes_a_mes", "por_uf"):
         for linha in painel[visao]:
-            lucro = linha["faturamento"] * 0.105
-            assert abs(linha["lucro_estimado"] - lucro) < 0.02
-            assert abs(linha["resultado"] - (lucro - linha["custo_periodo"])) < 0.02
-            if lucro > 0:
-                assert abs(linha["percentual_do_lucro"] - linha["custo_periodo"] / lucro * 100) < 0.1
-    resumo = painel["resumo"]
-    assert abs(sum(p["resultado"] for p in painel["promotores"]) - resumo["resultado"]) < 1
-    assert painel["regras"]["margem_percentual"] == 10.5
+            custo, compras = linha["custo_periodo"], linha["faturamento"]
+            esperado = ("sem_custo" if custo <= 0 else "sem_compras" if compras <= 0
+                        else "ok" if custo / compras * 100 <= 3 else "acima")
+            assert linha["situacao"] == esperado, (visao, linha)
+    situacoes = {p["nome"]: p["situacao"] for p in painel["promotores"]}
+    assert set(situacoes.values()) >= {"ok", "acima"}
+    # O limite é editável (aceita vírgula) e muda a classificação; a resposta guardada é descartada.
+    regras = cliente.get("/api/regras").json()["regras"]
+    assert "margem_percentual" not in regras
+    assert cliente.put("/api/regras", json={**regras, "limite_percentual": "abc"}).status_code == 400
+    assert cliente.put("/api/regras", json={**regras, "limite_percentual": 150}).status_code == 400
+    assert cliente.put("/api/regras", json={**regras, "limite_percentual": "100"}).status_code == 200
+    painel = cliente.get("/api/painel", params=PERIODO).json()
+    assert painel["regras"]["limite_percentual"] == 100
+    assert all(p["situacao"] in ("ok", "sem_compras") for p in painel["promotores"])
+    # Vazio volta para o padrão de 3%.
+    assert cliente.put("/api/regras", json={**regras, "limite_percentual": None}).json()["regras"]["limite_percentual"] == 3.0
 
+
+def test_tipo_do_promotor_pela_coluna_ou_pelo_nome_da_agencia(cliente):
+    entrar(cliente)
+    previa = _previa(cliente, _arquivo([
+        _linha(agencia="Agência Beta", tipo="MEI", loja="Loja Um"),
+        _linha(agencia="Red Horse PR CLT", loja="Loja Dois", cnpj="77.752.293/0107-46"),
+        _linha(agencia="101 do Brasil", loja="Loja Três", cnpj="09.477.652/0042-64", promotor="Carla"),
+        _linha(agencia="Agência Gama", tipo="Temporário", loja="Loja Quatro", cnpj="00.000.001/0001-36"),
+    ])).json()
+    assert any("Tipo fora da lista" in a and "Temporário" in a for a in previa["avisos"])
+    cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
+    mes = {"inicio": "2026-10", "fim": "2026-10"}
+    tipos = {l["loja"]: l["tipo"] for l in cliente.get("/api/painel", params=mes).json()["lojas"]}
+    assert tipos == {"Loja Um": "MEI", "Loja Dois": "CLT", "Loja Três": "CLT", "Loja Quatro": "Agência"}
+    assert cliente.get("/api/opcoes").json()["tipos"] == ["Agência", "CLT", "MEI"]
+    so_clt = cliente.get("/api/painel", params={**mes, "tipo": "CLT"}).json()
+    assert {l["loja"] for l in so_clt["lojas"]} == {"Loja Dois", "Loja Três"} and so_clt["resumo"]["custo"] == 200
+
+
+def test_filtros_de_uf_municipio_e_mercado_recalculam_o_topo(cliente):
+    entrar(cliente)
+    importar_faturamento(cliente)
+    importar_atendimento(cliente)
+    tudo = cliente.get("/api/painel", params=PERIODO).json()["resumo"]
+    sc = cliente.get("/api/painel", params={**PERIODO, "uf": "SC"}).json()
+    itajai = cliente.get("/api/painel", params={**PERIODO, "uf": "SC", "cidade": "ITAJAI"}).json()
+    gama = cliente.get("/api/painel", params={**PERIODO, "uf": "SC", "cidade": "ITAJAI", "loja": "SUPER GAMA"}).json()
+    assert tudo["custo"] > sc["resumo"]["custo"] > itajai["resumo"]["custo"] > gama["resumo"]["custo"] > 0
+    assert {p["nome"] for p in itajai["promotores"]} == {"Bruno Teste"}
+    assert gama["resumo"]["lojas"] == 1 and gama["resumo"]["situacao"] in ("ok", "acima")
 
 def test_apagar_dados_das_agencias(cliente):
     entrar(cliente)
@@ -393,8 +426,8 @@ def test_cabecalho_repetido_e_titulo_sao_descartados(cliente):
     entrar(cliente)
     previa = _previa(cliente, _arquivo([
         _linha(loja="Loja Um"),
-        [None, None, None, "AGENCIA IMPACTO", None, None, "AGENCIA IMPACTO", None, None, None, None, None, None],
-        ["Mês de referência", "Agência ou MEI", "CNPJ da loja", "Loja", "Cidade", "UF", "Promotor", "Código do promotor",
+        [None, None, None, None, "AGENCIA IMPACTO", None, None, "AGENCIA IMPACTO", None, None, None, None, None, None],
+        ["Mês de referência", "Agência ou MEI", "Tipo", "CNPJ da loja", "Loja", "Cidade", "UF", "Promotor", "Código do promotor",
          "Dias de visita", "Visitas no mês", "Valor do mês (R$)", "Status", "Observação"],
         _linha(loja="Loja Dois", cnpj="77.752.293/0107-46"),
         _linha(loja="Loja Três", cnpj="09.477.652/0042-64", promotor="Agência Beta"),

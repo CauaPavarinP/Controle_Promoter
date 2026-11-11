@@ -3,7 +3,8 @@
 Só o que o documento de requisitos deixa configurável:
 - o que conta como faturamento (seção 6.3): coluna de valor, tipos de nota e RECEITA;
 - como dividir o custo do promotor entre as lojas dele (seção 8, item 7);
-- o limite de % de custo sobre faturamento que destaca a loja (seção 7.1), sem valor fixo.
+- o limite de % de custo sobre o faturamento bruto: até ele o atendimento "vale a pena" (padrão 3%, decisão do
+  Maurício: o promotor de loja pode custar no máximo 3% do que as lojas dele compram).
 
 Ficam gravadas no banco (tabela configuracoes, chave "regras"). Quando ainda não
 foram salvas, valem os valores de REGRAS_PADRAO.
@@ -23,12 +24,10 @@ REGRAS_PADRAO = {
     "somente_receita": False,             # True: só linhas com RECEITA = SIM
     # Como dividir o custo do promotor entre as lojas dele: visitas (proporcional) | igual.
     "rateio_custo": "visitas",
-    # % de custo sobre faturamento a partir do qual a loja fica destacada. Vazio = sem destaque.
-    "limite_percentual": None,
-    # Margem da 101 sobre o que vende às lojas (%). Com ela, cada promotor mostra se "se paga": lucro estimado
-    # das lojas dele (faturamento × margem) menos o custo dele. Vazio = ainda não informada (aba Promotores).
-    "margem_percentual": None,
+    # Custo máximo, em % do faturamento bruto das lojas, para o atendimento valer a pena.
+    "limite_percentual": 3.0,
 }
+LIMITE_PADRAO = 3.0
 
 
 def ler_regras() -> dict:
@@ -36,8 +35,11 @@ def ler_regras() -> dict:
     if salvas and "tipos_nf_padrao" not in salvas:
         # Regras salvas antes desta opção existir: tipo fora da lista ficava de fora.
         salvas = {**salvas, "tipos_nf_padrao": "ignora"}
-    # Ignora opções de versões anteriores que não existem mais.
-    return {**REGRAS_PADRAO, **{k: v for k, v in salvas.items() if k in REGRAS_PADRAO}}
+    # Ignora opções de versões anteriores que não existem mais (ex.: margem_percentual).
+    regras = {**REGRAS_PADRAO, **{k: v for k, v in salvas.items() if k in REGRAS_PADRAO}}
+    if regras["limite_percentual"] is None:   # salvo vazio numa versão anterior
+        regras["limite_percentual"] = LIMITE_PADRAO
+    return regras
 
 
 def validar_regras(dados: dict) -> dict:
@@ -54,24 +56,14 @@ def validar_regras(dados: dict) -> dict:
         raise ValueError("Ação de tipo de nota inválida (use soma, subtrai ou ignora).")
     limite = regras["limite_percentual"]
     if limite in (None, ""):
-        regras["limite_percentual"] = None
+        regras["limite_percentual"] = LIMITE_PADRAO
     else:
         try:
-            regras["limite_percentual"] = float(limite)
+            regras["limite_percentual"] = float(str(limite).replace(",", "."))
         except (TypeError, ValueError):
-            raise ValueError("O limite de % precisa ser um número.")
-        if not 0 < regras["limite_percentual"] <= 1000:
-            raise ValueError("O limite de % precisa ficar entre 0 e 1000.")
-    margem = regras["margem_percentual"]
-    if margem in (None, ""):
-        regras["margem_percentual"] = None
-    else:
-        try:
-            regras["margem_percentual"] = float(str(margem).replace(",", "."))
-        except (TypeError, ValueError):
-            raise ValueError("A margem precisa ser um número (ex.: 12,5).")
-        if not 0 < regras["margem_percentual"] < 100:
-            raise ValueError("A margem precisa ficar entre 0 e 100%.")
+            raise ValueError("O limite precisa ser um número (ex.: 3 ou 2,5).")
+        if not 0 < regras["limite_percentual"] <= 100:
+            raise ValueError("O limite precisa ficar entre 0 e 100%.")
     return regras
 
 

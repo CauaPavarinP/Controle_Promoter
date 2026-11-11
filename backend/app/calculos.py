@@ -2,7 +2,6 @@
 
 - Período (AAAA-MM) e percentuais.
 - Tipos de nota e coluna de valor do faturamento (regras ajustáveis em app/regras.py).
-- "Vale a pena?" (_se_paga): lucro estimado (faturamento × margem) menos o custo.
 - Aba Faturamento (resumo_faturamento): o que o ERP faturou por UF e por cliente.
 
 O custo × faturamento por loja, promotor, agência e UF fica em app/calculo_atendimento.py.
@@ -23,24 +22,6 @@ def indice_mes(ano_mes: str) -> int:
     if not 1 <= mes <= 12 or not 2000 <= ano <= 2100:
         raise ValueError("Período inválido. Use AAAA-MM com mês de 01 a 12.")
     return ano * 12 + mes - 1
-
-
-def _se_paga(linha: dict, margem) -> None:
-    """Acrescenta à linha (promotor, loja ou resumo) o lucro estimado e o resultado.
-
-    lucro estimado = faturamento × margem da 101; resultado = lucro estimado − custo do promotor no período.
-    Resultado ≥ 0: o promotor se paga (o lucro das vendas às lojas dele cobre o que a 101 paga a ele).
-    Sem margem informada, os dois ficam vazios.
-    """
-    custo = linha.get("custo_periodo", linha.get("custo"))
-    if margem is None or custo is None:
-        linha["lucro_estimado"] = linha["resultado"] = linha["percentual_do_lucro"] = None
-        return
-    lucro = (linha.get("faturamento") or 0.0) * margem / 100
-    linha["lucro_estimado"] = round(lucro, 2)
-    linha["resultado"] = round(lucro - custo, 2)
-    # Quanto do lucro das lojas vai para pagar o promotor: abaixo de 100% ele se paga.
-    linha["percentual_do_lucro"] = round(custo / lucro * 100, 1) if lucro > 0 else None
 
 
 def _arredondar(valor):

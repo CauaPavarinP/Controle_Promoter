@@ -79,6 +79,7 @@ export default function Filtros({ opcoes, filtros, alterar, limpar }) {
   const nomeAgencia = opcoes.agencias.find((a) => a.chave === filtros.agencia)?.nome
   const ativos = [
     filtros.agencia && { campo: 'agencia', texto: `Agência: ${nomeAgencia || filtros.agencia}` },
+    filtros.tipo && { campo: 'tipo', texto: `Tipo: ${filtros.tipo}` },
     filtros.promotor && { campo: 'promotor', texto: `Promotor: ${nomePromotor || filtros.promotor}` },
     filtros.uf && { campo: 'uf', texto: `UF: ${filtros.uf}` },
     filtros.cidade && { campo: 'cidade', texto: `Cidade: ${filtros.cidade}` },
@@ -118,6 +119,10 @@ export default function Filtros({ opcoes, filtros, alterar, limpar }) {
           opcoes={opcoes.agencias.map((a) => ({ valor: a.chave, texto: a.nome }))}
           todos="Todas"
         />
+        {(opcoes.tipos || []).length > 0 && (
+          <Seletor rotulo="Tipo" valor={filtros.tipo} aoMudar={(v) => alterar('tipo', v)}
+            opcoes={opcoes.tipos.map((t) => ({ valor: t, texto: t }))} todos="Todos" />
+        )}
         <Seletor rotulo="UF" valor={filtros.uf} aoMudar={mudarUf} opcoes={opcoes.ufs.map((u) => ({ valor: u, texto: u }))} />
         <button className="secundario mais-filtros" onClick={() => setMaisFiltros((v) => !v)} aria-expanded={maisFiltros}>
           {maisFiltros ? 'Menos filtros ▴' : `Mais filtros${escondidosAtivos ? ` (${escondidosAtivos})` : ''} ▾`}
