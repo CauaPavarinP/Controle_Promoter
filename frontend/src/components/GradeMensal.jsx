@@ -1,4 +1,4 @@
-// Faturamento mês a mês por loja (documento, seção 7.2: substitui as abas SC, SP, PR, MG, RS).
+// Faturamento mês a mês por loja atendida (clicável para ver as notas do ERP).
 import { useEffect, useState } from 'react'
 import { http } from '../api.js'
 import { formatarCnpj, formatarData, formatarMes, formatarMoeda } from '../formato.js'
@@ -7,7 +7,7 @@ import { Modal, Tabela } from './ui.jsx'
 const NOMES_ACAO = { soma: 'soma', subtrai: 'desconta', ignora: 'fora' }
 
 // Detalhe das NFs/itens daquele PDV naquele mês.
-function DetalheNotas({ linha, mes, aoFechar }) {
+export function DetalheNotas({ linha, mes, aoFechar }) {
   const [dados, setDados] = useState(null)
   const [erro, setErro] = useState('')
   useEffect(() => {
@@ -38,7 +38,7 @@ function DetalheNotas({ linha, mes, aoFechar }) {
               { campo: 'tipo_nf', titulo: 'Tipo' },
               { campo: 'descricao_item', titulo: 'Item', quebra: true },
               { campo: 'qtde', titulo: 'Qtde', num: true },
-              { campo: 'total_venda', titulo: 'TOTAL VENDA', num: true, mostrar: (i) => formatarMoeda(i.total_venda) },
+              { campo: 'vlr_total', titulo: 'VLR TOTAL', num: true, mostrar: (i) => formatarMoeda(i.vlr_total) },
               { campo: 'acao', titulo: 'No faturamento', mostrar: (i) => NOMES_ACAO[i.acao] },
               { campo: 'valor_considerado', titulo: 'Considerado', num: true, mostrar: (i) => formatarMoeda(i.valor_considerado) },
             ]}
@@ -49,7 +49,7 @@ function DetalheNotas({ linha, mes, aoFechar }) {
   )
 }
 
-export default function GradeMensal({ grade }) {
+export default function GradeMensal({ grade, acoes }) {
   const [detalhe, setDetalhe] = useState(null)
 
   const colunasMeses = grade.meses.map((m) => ({
@@ -61,7 +61,8 @@ export default function GradeMensal({ grade }) {
       const valor = l.meses[m]
       if (!valor || !l.cnpj) return valor ? formatarMoeda(valor) : '—'
       return (
-        <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => setDetalhe({ linha: l, mes: m })}>
+        <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => setDetalhe({ linha: l, mes: m })}
+          aria-label={`Ver as notas de ${l.loja || ''} em ${formatarMes(m)}: ${formatarMoeda(valor)}`}>
           {formatarMoeda(valor)}
         </button>
       )
@@ -70,7 +71,7 @@ export default function GradeMensal({ grade }) {
 
   return (
     <section className="bloco">
-      <h2>Faturamento PDV ({grade.linhas.length})</h2>
+      <h2>Compras mês a mês ({grade.linhas.length})</h2>
       <p className="dica nao-imprimir">Clique num valor para ver as notas daquele mês.</p>
       <div className="grade-mensal">
         <Tabela
@@ -79,9 +80,9 @@ export default function GradeMensal({ grade }) {
           porPagina={100}
           arquivo="faturamento-pdv"
           vazio="Nenhuma loja com esses filtros."
-          rodape={[{ supervisor: 'Total', ...grade.totais }]}
+          rodape={[{ agencia: 'Total', ...grade.totais }]}
           colunas={[
-            { campo: 'supervisor', titulo: 'Supervisor', quebra: true },
+            { campo: 'agencia', titulo: 'Agência', quebra: true },
             { campo: 'promotor', titulo: 'Promotor', quebra: true },
             { campo: 'cnpj', titulo: 'CNPJ', mostrar: (l) => (l.meses ? formatarCnpj(l.cnpj) : ''), exportar: (l) => (l.cnpj ? formatarCnpj(l.cnpj) : '') },
             { campo: 'loja', titulo: 'PDV', quebra: true,
@@ -90,6 +91,7 @@ export default function GradeMensal({ grade }) {
             { campo: 'uf', titulo: 'UF' },
             ...colunasMeses,
             { campo: 'total', titulo: 'TOTAL', num: true, mostrar: (l) => <b>{formatarMoeda(l.total)}</b> },
+            ...(acoes ? [{ campo: 'acoes', titulo: '', semOrdem: true, semExportar: true, mostrar: (l) => (l.meses ? acoes(l) : null) }] : []),
           ]}
         />
       </div>

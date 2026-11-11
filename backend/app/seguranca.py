@@ -2,6 +2,8 @@
 import hashlib
 import hmac
 import secrets
+import threading
+import time
 from datetime import datetime, timedelta
 
 MAX_TENTATIVAS = 5
@@ -48,3 +50,46 @@ def registrar_falha(usuario) -> None:
 def registrar_sucesso(usuario) -> None:
     usuario.tentativas_falhas = 0
     usuario.bloqueado_ate = None
+
+
+def nova_chave_de_sessao(usuario) -> str:
+    """Troca a chave da sessão: quem estiver logado com a chave antiga cai (sair, troca de senha…)."""
+    usuario.sessao_chave = secrets.token_hex(16)
+    return usuario.sessao_chave
+
+
+# Hash de uma senha qualquer, para o login de usuário inexistente levar o mesmo tempo que o de um que existe
+# (sem isso dá para descobrir quais usuários existem medindo o tempo de resposta).
+HASH_FALSO = gerar_hash(secrets.token_hex(8))
+
+
+# --- Tentativas por nome digitado (exista o usuário ou não) -----------------------------------------------------
+# O bloqueio gravado no banco só vale para usuários que existem, e a mensagem "bloqueado" entregava quais logins são
+# válidos. Este contador, na memória, vale para qualquer nome digitado e devolve a mesma mensagem nos dois casos.
+_falhas_por_nome: dict[str, list[float]] = {}
+_trava_falhas = threading.Lock()
+MAXIMO_NOMES_GUARDADOS = 10_000
+
+
+def _recentes(nome: str, agora: float) -> list[float]:
+    janela = MINUTOS_BLOQUEIO * 60
+    return [t for t in _falhas_por_nome.get(nome, []) if agora - t < janela]
+
+
+def nome_bloqueado(nome: str) -> bool:
+    with _trava_falhas:
+        return len(_recentes(nome, time.time())) >= MAX_TENTATIVAS
+
+
+def registrar_falha_nome(nome: str) -> None:
+    agora = time.time()
+    with _trava_falhas:
+        if len(_falhas_por_nome) > MAXIMO_NOMES_GUARDADOS:   # muitos nomes inventados: descarta os antigos
+            for chave in [c for c in _falhas_por_nome if not _recentes(c, agora)]:
+                del _falhas_por_nome[chave]
+        _falhas_por_nome[nome] = [*_recentes(nome, agora), agora]
+
+
+def limpar_falhas_nome(nome: str) -> None:
+    with _trava_falhas:
+        _falhas_por_nome.pop(nome, None)

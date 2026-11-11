@@ -14,7 +14,10 @@ load_dotenv(ARQUIVO_ENV, encoding="utf-8-sig", override=True)
 PRODUCAO = os.getenv("AMBIENTE", "").lower() == "producao"
 
 # Banco: SQLite local em desenvolvimento, Postgres (DATABASE_URL do Render) em produção.
-_url = os.getenv("DATABASE_URL", "")
+_url = os.getenv("DATABASE_URL", "").strip()
+if not _url and PRODUCAO:
+    # No Render o disco é apagado a cada deploy: sem Postgres, tudo o que fosse importado se perderia.
+    raise RuntimeError("Defina a variável de ambiente DATABASE_URL (Internal Database URL do Postgres do Render).")
 if not _url:
     (BASE_DIR / "dados").mkdir(exist_ok=True)
     _url = f"sqlite:///{BASE_DIR / 'dados' / 'app.db'}"

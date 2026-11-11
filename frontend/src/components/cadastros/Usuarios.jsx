@@ -11,7 +11,7 @@ const PERFIS = {
 function SenhaGerada({ titulo, senha, aoFechar }) {
   return (
     <Modal titulo={titulo} aoFechar={aoFechar} rodape={<button onClick={aoFechar}>Já anotei</button>}>
-      <p>Senha provisória (aparece só agora; peça para a pessoa trocar em "Meu perfil"):</p>
+      <p>Senha provisória (aparece só agora). No primeiro acesso, o sistema pede para a pessoa criar a própria senha:</p>
       <p className="senha-gerada">{senha}</p>
       <button className="secundario" onClick={() => navigator.clipboard?.writeText(senha)}>Copiar</button>
     </Modal>

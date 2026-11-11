@@ -7,31 +7,29 @@ Pedido do Maurício (Comercial • 101 do Brasil), a validar com o Rayan.
 
 ## O que o sistema faz
 
-- **Filtros únicos** para custo e faturamento: período (acumulado ou um mês, com atalhos "ano até hoje" e
-  "últimos 3/6/12 meses"), supervisor, promotor, UF, cidade e PDV.
-- **Resumo:** custo dos promotores no período, faturamento das lojas, % do custo sobre o faturamento e lojas sem compra.
-- **Tabela de promotores:** lojas, visitas/semana, custo, faturamento e % de custo. Clicar num promotor filtra as lojas dele.
-- **Detalhe por loja:** loja, cidade, promotor, visitas/semana, faturamento, custo do promotor atribuído à
-  loja, % e faturamento por visita; destaque das lojas sem faturamento e com visitas, e das que passam do limite.
-- **Faturamento por UF** (substitui as abas SC, SP, PR…): supervisor, promotor, CNPJ, PDV, cidade, UF,
-  JAN…DEZ e TOTAL, com linha de total por mês. Clicar num valor abre as notas daquele mês.
-- **Custo dos promotores** como a aba PROMOTORES BRASIL (salário, ajuda de custo, VT, total), com linha de total.
-- Todas as tabelas **ordenam por coluna** e **exportam para Excel**; botão **Imprimir** (A4 paisagem, com os
-  filtros no cabeçalho e todas as linhas).
-- **Avisos dos dados:** problemas encontrados nas planilhas (nomes que não batem, CNPJ faltando…).
-- **Atualização dos dados** por upload das planilhas, sem mexer no código.
-- **Regras do cálculo** ajustadas pelo próprio usuário na tela, sem mexer no código.
-- **Cadastros** de supervisores, promotores (com custo por competência), PDVs e roteiros (com datas e visitas).
-- **Usuários** com perfis (administrador, consulta, supervisor), senha criptografada e bloqueio após 5 tentativas erradas.
+Versão simplificada (branch `versao-simplificada`), com 4 abas:
 
-## Fases (documento de requisitos)
+| Aba | O que mostra | Como atualiza |
+|---|---|---|
+| **Resumo** | 4 cartões (custo, faturamento, custo ÷ faturamento, promotores e lojas) e uma tabela que abre em níveis **UF da loja → supervisor → promotor** (promotores, lojas, visitas, custo, faturamento, %), no lugar da aba RESUMO da planilha. Promotor que atende mais de uma UF aparece em cada uma com a sua parte do custo. Clicar no promotor abre as lojas dele | Calculado a partir das outras abas |
+| **Faturamento** | Tudo o que o ERP faturou no período, por UF e por cliente, mês a mês (inclusive clientes fora do roteiro). Clicar num valor abre as notas | **Importar faturamento do ERP** (arquivo no layout da aba FATURAMENTO ou a própria planilha), com pré-visualização, confirmação e desfazer |
+| **Promotores** | Promotores e repositores com custo por competência e as lojas de cada um; supervisores | Importar a aba PROMOTORES BRASIL ou cadastrar/editar na tela |
+| **Lojas por UF** | Substitui as abas SC, SP, PR, MG e RS: supervisor, promotor, CNPJ, PDV, cidade, UF, JAN…DEZ e TOTAL. Botões por UF | Importar as abas da planilha ou **cadastrar loja na tela** (promotor, CNPJ, nome, cidade, UF, visitas/semana). Cada loja tem o menu **Alterar…** (editar dados, visitas, trocar promotor, encerrar). O quadro **Colaboradores não encontrados** lista os nomes da coluna Colaborador que não bateram com nenhum promotor, sugere o nome parecido e liga todas as lojas daquele nome ao promotor escolhido (ou descarta). A ligação fica **lembrada** (tabela `apelidos_colaborador`): nas próximas importações esse nome já vai direto para o promotor; dá para esquecer uma ligação feita por engano |
 
-| Fase | Situação |
-|---|---|
-| 1 — Base: banco com migrations, login com usuários, cadastros | ✅ Entregue |
-| 2 — Dados: faturamento item a item, desfazer importação, importação inicial com conferência, pendências | ✅ Entregue |
-| 3 — Consulta: grade mês a mês, tela por UF, detalhe da NF, imprimir, exportar | ✅ Entregue |
-| 4 — Extras: gráficos, auditoria, visão restrita do supervisor | Próxima |
+- Com filtro de **UF, cidade ou PDV**, o custo é só a parte do promotor atribuída às lojas filtradas (o resto é de
+  lojas de outros lugares).
+- **Filtros** no Resumo e em Lojas por UF, numa barra que fica fixa ao rolar: período, supervisor e UF; promotor,
+  cidade, PDV e atalhos de período em "Mais filtros". Os filtros escolhidos aparecem como etiquetas com ✕.
+- O **faturamento das lojas vem do ERP**: o sistema soma as notas do CNPJ de cada loja, mês a mês (como o
+  SOMASE da planilha). **CNPJ que aparece em mais de uma loja é dividido** entre elas (e, dentro da loja, entre os
+  promotores dela): a soma por promotor, supervisor ou UF sempre dá o total.
+- Todas as tabelas ordenam por coluna e exportam para **Excel (.xlsx) formatado** (`app/exportar.py`): título, filtros
+  em uso, cabeçalho colorido e fixo, filtro nas colunas, R$ e % já formatados (zero aparece como "-"), linhas
+  alternadas e total em negrito. Botão **Imprimir** no Resumo e em Lojas por UF.
+- **Visitas por semana:** a planilha não tem essa informação. Enquanto não for preenchida (Lojas por UF → Alterar…
+  → Visitas por semana), o custo do promotor é dividido em partes iguais entre as lojas dele.
+- **Usuários** com perfis (administrador, consulta, supervisor), senha criptografada e bloqueio após 5 tentativas.
+- Só o administrador importa e cadastra; os outros perfis consultam.
 
 ## Estrutura
 
@@ -55,19 +53,20 @@ backend/            API em Python (FastAPI + pandas)
   exemplos/           planilhas fictícias geradas
   tests/              testes automatizados (pytest)
 frontend/           tela em React (Vite)
-  src/components/     Login, Painel (menu), análise, Importar, Regras
-  src/components/cadastros/  Promotores, Supervisores, PDVs, Roteiros, Usuários, Meu perfil
+  src/components/     Login, Painel (menu), Resumo, Faturamento, Promotores, Lojas por UF
+  src/components/cadastros/  formulários de promotores, supervisores, PDVs, roteiros, usuários e perfil
 ```
 
-## Importações (tela "Atualizar dados", só administrador)
+## Importações (só administrador)
 
-| Cartão | Arquivo | O que faz |
+| Onde | Arquivo | O que faz |
 |---|---|---|
-| **Importação inicial** | "ROTEIROS X FATURAMENTOS" inteiro | Cadastra promotores, supervisores, PDVs e roteiros; guarda os totais das abas por UF para a **Conferência**; mostra o faturamento para confirmar. Pode rodar de novo sem duplicar. |
-| **Faturamento do ERP** | Exportação no layout da aba FATURAMENTO | Mostra a **pré-visualização** (período, linhas, TOTAL VENDA, notas, clientes, linhas com erro, CNPJs sem roteiro, tipos de nota) e só grava ao confirmar. |
-| **Promotores** | Aba PROMOTORES BRASIL | Cria ou atualiza pelo código; custo diferente vira reajuste a partir do mês corrente. |
-| **Roteiro** | Abas SC, SP, PR… | Cria PDVs (CNPJ + nome) e vínculos novos; colaborador sem promotor vira pendência. |
+| **Faturamento** | Exportação do ERP no layout da aba FATURAMENTO (ou a planilha inteira) | Mostra a **pré-visualização** (período, linhas, TOTAL VENDA, notas, clientes, linhas com erro, CNPJs sem roteiro) e só grava ao confirmar. |
+| **Promotores** | Planilha com a aba PROMOTORES BRASIL | Cria ou atualiza pelo código; custo diferente vira reajuste a partir do mês corrente. |
+| **Lojas por UF** | Planilha com as abas SC, SP, PR, MG, RS | Cria PDVs (CNPJ + nome) e vínculos novos; colaborador sem promotor fica pendente. Importe os promotores antes. |
 
+- Aba sem coluna UF/Estado preenchida (caso da aba PR): a UF é o nome da aba. Na aba PR a cidade está na
+  coluna "Coluna1", que também é reconhecida.
 - Colunas reconhecidas **pelo nome do cabeçalho** (sem diferenciar acento ou maiúscula), em qualquer uma das
   30 primeiras linhas e em qualquer aba. Nomes aceitos: listas `APELIDOS_*` de `app/importacao.py`.
 - **Faturamento item a item:** todas as colunas da aba FATURAMENTO são guardadas (tabela `faturamento_itens`).
@@ -77,43 +76,42 @@ frontend/           tela em React (Vite)
   pré-visualização e no histórico, com o número da linha no Excel (exportável).
 - **Histórico** com **desfazer** (apaga os itens daquela importação). Meses que ela substituiu não voltam.
 - Promotores e roteiro **não apagam nada** (rodar de novo não duplica). O primeiro custo de um promotor vale
-  desde a admissão; o vínculo do roteiro começa em 01/01 do ano corrente.
-- **Conferência:** compara, por aba e mês, a soma das linhas da planilha com a mesma conta feita pelo sistema
-  (faturamento do CNPJ de cada linha) e mostra quanto a planilha soma em dobro por causa de CNPJ repetido.
+  desde a admissão; o vínculo do roteiro começa em 01/01 do ano corrente **ou na admissão, o que for depois**.
+- **Números em texto:** só vale um número (`1.234,56`, `1234.56`, `R$ 600,00`). Texto como `600 + 120m` fica 0 com
+  aviso (antes virava 600120). Item de custo acima de R$ 50.000/mês também fica 0 com aviso; reimportar a planilha
+  corrige custo gravado errado antes.
+- **Ligação loja → promotor:** se a linha tem código e nome, os dois precisam ser da mesma pessoa (código de outra
+  pessoa não liga a loja). Nome repetido em dois promotores usa o da UF da loja; sem como decidir, fica pendente.
+  Lojas numa UF diferente da do promotor aparecem nos avisos da importação.
+- **Supervisor na lista de promotores** ("Sup."/"Supervisor" no nome ou município, ou nome que está na coluna
+  SUPERVISOR) entra com função Supervisor e fica fora do custo e da contagem de promotores.
+- **Visitas por semana** na planilha: só inteiro de 1 a 7; o resto fica vazio, com aviso.
 
-## Regras do cálculo (ajustáveis na aba "Regras do cálculo")
+## Regras do cálculo
 
-O usuário escolhe cada regra na tela; elas ficam gravadas no banco (tabela `configuracoes`).
-Os valores padrão estão em `REGRAS_PADRAO` (`app/regras.py`).
-
-| Regra | Opções | Padrão |
-|---|---|---|
-| **Coluna de valor** (6.3) | TOTAL VENDA (AL) · VLR TOTAL (AD) | TOTAL VENDA, como a planilha |
-| **Tipos de nota** (6.3) | cada tipo soma, desconta ou fica de fora; e o que fazer com tipos fora da lista | todos somam, como a planilha |
-| **Só RECEITA = SIM** (6.3) | sim · não | não, como a planilha |
-| **Custo atribuído a cada loja** (8.7) | proporcional às visitas por semana · partes iguais | por visitas (sugestão do documento) |
-| **Limite de % de custo** (7.1) | número ou vazio | vazio (o documento pede sem valor fixo) |
+Valores padrão em `REGRAS_PADRAO` (`app/regras.py`): valor = TOTAL VENDA, todos os tipos de nota somam (como a
+planilha), custo de cada loja proporcional às visitas por semana. Nesta versão não há tela para mudar as regras.
 
 Regras fixas:
+- **Período:** `AAAA-MM`, mês 01 a 12, até 5 anos. **Meses depois do mês atual ficam fora** (não há custo projetado).
 - **Custo por competência:** em cada mês vale o último reajuste até aquele mês. Conta a partir do mês de
   admissão e até o mês de desligamento (meses inteiros). Reajuste não muda os meses anteriores.
+- **Promotor só conta nos meses em que estava contratado:** antes da admissão (ou depois do desligamento) ele não
+  entra na contagem, as lojas dele não contam e o faturamento delas não vai para ele.
 - **Roteiro com datas:** o faturamento de cada mês vai para o promotor cujo vínculo estava vigente no
   **último dia do mês**. Trocar o promotor não muda o que foi atribuído ao anterior.
 - **PDVs com o mesmo CNPJ** (CNPJ + nome diferentes):
   1. se cada loja tem o seu **COD CLI** no cadastro e eles são diferentes, o faturamento é separado pelo COD CLI;
-  2. se não, o faturamento do CNPJ conta **uma vez só** nos totais e as lojas aparecem com o aviso
-     "faturamento compartilhado com outra loja";
-  3. essas lojas são listadas em **Pendências**, para confirmar se são lojas diferentes ou erro de digitação.
+  2. se não, o faturamento do CNPJ é **dividido em partes iguais** entre as lojas (no mês) e as lojas aparecem
+     com o aviso "faturamento compartilhado com outra loja";
 - Loja com faturamento compartilhado: o % de custo da loja não é calculado.
-- PDV com mais de um promotor ao mesmo tempo: o faturamento aparece cheio para cada um (opção "a" do
-  documento, seção 5.5), sinalizado na tela de Roteiros.
+- PDV com mais de um promotor ao mesmo tempo: o faturamento da loja é dividido em partes iguais entre eles
+  (antes aparecia cheio para cada um — opção "a" do documento, seção 5.5 —, e a soma por promotor passava do
+  total; **confirmar com o Maurício**).
 
 ## Pendências com o Maurício / Rayan
 
-- Cada loja de rede tem código de cliente próprio no ERP, ou tudo é faturado na matriz?
-- Existe planilha de roteiro com a frequência de visitas por loja?
-- Quais valores usar nas Regras do cálculo (o próprio Maurício pode ajustar na tela).
-- Quem vai usar o sistema? Cada supervisor vê só a própria equipe?
+As perguntas em aberto estão em [`docs/perguntas-mauricio.md`](docs/perguntas-mauricio.md).
 
 ## Rodar no computador (desenvolvimento)
 
@@ -135,8 +133,9 @@ npm install
 npm run dev
 ```
 
-Abra http://localhost:5173, entre com o usuário/senha do `.env` e, em **Atualizar dados**, importe as três
-planilhas de `backend/exemplos/`.
+Abra http://localhost:5173, entre com o usuário/senha do `.env` e importe, nesta ordem, os arquivos de
+`backend/exemplos/`: `promotores_exemplo.xlsx` na aba **Promotores**, `roteiro_exemplo.xlsx` em **Lojas por UF** e
+`faturamento_exemplo.xlsx` em **Faturamento**.
 
 **Banco e usuários**
 - As migrations rodam sozinhas quando o back-end inicia. Para rodar à mão: `cd backend && alembic upgrade head`.
@@ -149,23 +148,29 @@ planilhas de `backend/exemplos/`.
 
 Testes: `cd backend && pytest`
 
-## Publicar no Render (quando for a hora)
+## Publicar no Render
 
-- **Build:** `pip install -r backend/requirements.txt && cd frontend && npm ci && npm run build`
-- **Start:** `cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- **Variáveis de ambiente:** `APP_USUARIO` e `APP_SENHA` (só para criar o primeiro administrador), `SECRET_KEY`,
-  `DATABASE_URL` (Postgres do Render), `AMBIENTE=producao`
-- O FastAPI entrega o React já compilado (`frontend/dist`): é **um serviço só**.
-- Confirme se o ambiente Python do Render tem Node disponível para o `npm run build`. Se não tiver, a
-  alternativa é fazer o build com Docker.
+- O serviço é criado com **Docker** (`Dockerfile` na raiz): uma etapa com Node gera o `frontend/dist` e a imagem
+  final só com Python roda o FastAPI, que entrega o React. É **um serviço só**.
+- **Banco:** Postgres do Render, na variável `DATABASE_URL`. As migrations rodam sozinhas ao iniciar.
+- **Variáveis de ambiente:** `DATABASE_URL`, `SECRET_KEY`, `AMBIENTE=producao` (já vem no Dockerfile) e
+  `APP_USUARIO` / `APP_SENHA` (só para criar o primeiro administrador; depois pode apagar).
+- Para rodar os testes num Postgres, como no Render: `TEST_DATABASE_URL=postgresql://... pytest`.
 
 ## Segurança
 
-- O repositório deve ser **privado**.
-- **Planilhas reais nunca vão para o GitHub.** O `.gitignore` bloqueia `.xlsx`/`.csv`, exceto os exemplos fictícios.
-- Senhas e chaves só em variáveis de ambiente (`.env` local, Environment no Render).
-- Todas as rotas `/api` exigem login, exceto `/api/login`. `/health` é público.
-- Perfis: **administrador** altera tudo; **consulta** e **supervisor** só consultam. (A visão restrita do
-  supervisor à própria equipe fica para a Fase 4.)
-- Senhas guardadas com hash scrypt; 5 tentativas erradas bloqueiam o login por 15 minutos.
-- Exportação para Excel (CSV) protegida contra fórmulas (`=`, `+`, `-`, `@`).
+- **Login:** senha com hash scrypt; bloqueio de 15 min após 5 erros; o login leva o mesmo tempo para usuário que
+  existe ou não (não dá para descobrir usuários medindo o tempo).
+- **Sessão:** cookie assinado, `HttpOnly`, `Secure` em produção e `SameSite=Lax`, válido por 12 h. Cada usuário tem
+  uma chave de sessão: **Sair**, **trocar a senha** ou receber **senha nova** troca a chave e derruba os cookies
+  antigos (inclusive um cookie roubado).
+- **Permissões:** toda rota de consulta exige login; toda rota que altera dados exige administrador.
+- **Pedidos de outro site (CSRF):** além do `SameSite=Lax`, pedidos que alteram dados com `Origin` de outro site são
+  recusados.
+- **Cabeçalhos:** `Content-Security-Policy` (só scripts do próprio site), `X-Frame-Options: DENY`, `nosniff`,
+  `Referrer-Policy` e `Strict-Transport-Security` em produção.
+- **Uploads:** só `.xlsx`, `.xlsm` e `.csv`, até 150 MB. **Excel exportado:** texto que começa com `=`, `+`, `@` não
+  vira fórmula.
+- **Produção:** `/docs` desligado; exige `SECRET_KEY` e `DATABASE_URL`; o contêiner roda sem root.
+- Testes: `backend/tests/test_seguranca.py`.
+- **Em aberto (decisão do Maurício):** os perfis consulta e supervisor veem o custo (salário) dos promotores.

@@ -7,7 +7,11 @@ import io
 import re
 import unicodedata
 
+import numpy as np
 import pandas as pd
+
+from .leitor_texto import ArquivoTextoInvalido, eh_texto, linhas_do_texto
+from .leitor_xlsx import ArquivoNaoSuportado, ArquivoSuspeito, LivroXlsx, conferir_zip
 
 SEM_TIPO = "Sem tipo"
 
@@ -47,26 +51,90 @@ def normalizar_codigo(valor) -> str:
     return str(valor).strip()
 
 
-def converter_numero(valor) -> float:
-    """Aceita número do Excel ou texto no formato brasileiro (R$ 1.234,56)."""
+# Número escrito como texto. Formato brasileiro (1.234,56 / 1234,56 / 1.200) ou com ponto decimal (1234.56).
+# Qualquer outra coisa ("600 + 120m", "R$ 600 a 700", "1,2,3") NÃO é número: antes os dígitos eram colados
+# ("600 + 120m" virava 600120).
+_NUMERO_BR = re.compile(r"-?(\d{1,3}(\.\d{3})+|\d+)(,\d+)?")
+_NUMERO_PONTO = re.compile(r"-?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?")
+
+
+def ler_numero(valor):
+    """Número do Excel ou texto com UM número (aceita R$, espaços nas pontas e "-" = zero).
+
+    Vazio = 0. Texto que não é exatamente um número = None (quem chama decide se é erro).
+    """
     if valor is None or (isinstance(valor, float) and pd.isna(valor)):
         return 0.0
+    if isinstance(valor, bool):
+        return None
     if isinstance(valor, (int, float)):
         return float(valor)
-    texto = re.sub(r"[^\d,.\-]", "", str(valor))
-    if not texto or texto in "-.,":
+    texto = str(valor).replace("\xa0", " ").strip()
+    texto = re.sub(r"^R\$\s*", "", texto, flags=re.IGNORECASE).strip()
+    if texto in ("", "-"):
         return 0.0
-    if "," in texto:
-        texto = texto.replace(".", "").replace(",", ".")
-    try:
-        return float(texto)
-    except ValueError:
-        return 0.0
+    if _NUMERO_BR.fullmatch(texto):
+        return float(texto.replace(".", "").replace(",", "."))
+    if _NUMERO_PONTO.fullmatch(texto):
+        return float(texto.replace(",", ""))
+    return None
+
+
+# "600 + 120m": R$ 600 mais R$ 120 mensais (resposta do Maurício) = R$ 720 por mês. Aceita "600 +120m",
+# "R$ 600 + R$ 120 mensais" etc. Só soma de dois ou mais valores; qualquer outro texto continua não sendo número.
+_PARCELA = r"(?:R\$\s*)?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?"
+_SOMA_MENSAL = re.compile(rf"\s*{_PARCELA}(?:\s*\+\s*{_PARCELA}\s*(?:m|mes|mensal|mensais)?\.?)+\s*", re.IGNORECASE)
+
+
+def _reais(valor: float) -> str:
+    return "R$ " + f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def ler_soma_mensal(valor):
+    """Texto como "600 + 120m" vira a soma (720.0); qualquer outra coisa devolve None."""
+    if not isinstance(valor, str) or not _SOMA_MENSAL.fullmatch(valor.replace("\xa0", " ")):
+        return None
+    parcelas = re.findall(r"(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?", valor)
+    return round(sum(float(p.replace(".", "").replace(",", ".")) for p in parcelas), 2)
+
+
+def converter_numero(valor) -> float:
+    """Como ler_numero, mas texto que não é número vale 0."""
+    numero = ler_numero(valor)
+    return 0.0 if numero is None else numero
 
 
 # ---------------------------------------------------------------------------
 # Localizar cabeçalho e colunas
 # ---------------------------------------------------------------------------
+
+MENSAGEM_SUSPEITO = ("Este arquivo ocupa muito mais espaço aberto do que parece (pode estar corrompido ou ter sido "
+                     "feito para travar o sistema) e não foi aberto. Abra no Excel, salve como uma nova pasta de "
+                     "trabalho (.xlsx) e envie de novo.")
+
+
+def _recusar_suspeito(fonte) -> None:
+    try:
+        conferir_zip(fonte)
+    except ArquivoSuspeito as erro:
+        raise ErroImportacao(MENSAGEM_SUSPEITO) from erro
+
+
+def _linhas_protegidas(linhas):
+    """Linha gigante no meio da aba (arquivo malicioso) vira a mesma mensagem, não "erro inesperado"."""
+    try:
+        yield from linhas
+    except ArquivoSuspeito as erro:
+        raise ErroImportacao(MENSAGEM_SUSPEITO) from erro
+
+
+def _linhas_de_texto_protegidas(linhas):
+    """Erro de leitura do arquivo de texto vira mensagem para o usuário."""
+    try:
+        yield from linhas
+    except ArquivoTextoInvalido as erro:
+        raise ErroImportacao(str(erro)) from erro
+
 
 def _ler_abas(conteudo: bytes, nome_arquivo: str):
     """Devolve (nome_da_aba, função que lê a aba com header=None)."""
@@ -75,9 +143,13 @@ def _ler_abas(conteudo: bytes, nome_arquivo: str):
         separador = ";" if texto.split("\n", 1)[0].count(";") > texto.split("\n", 1)[0].count(",") else ","
 
         def ler_csv(**kwargs):
-            return pd.read_csv(io.StringIO(texto), sep=separador, header=None, dtype=object, **kwargs)
+            try:
+                return pd.read_csv(io.StringIO(texto), sep=separador, header=None, dtype=object, **kwargs)
+            except (pd.errors.EmptyDataError, pd.errors.ParserError) as erro:
+                raise ErroImportacao(f"Não consegui ler o CSV (vazio ou mal formado): {erro}") from erro
         return [("CSV", ler_csv)]
 
+    _recusar_suspeito(conteudo)
     try:
         excel = pd.ExcelFile(io.BytesIO(conteudo))
     except Exception as erro:
@@ -104,33 +176,6 @@ def _mapear_colunas(linha, apelidos: dict) -> dict:
     return mapa
 
 
-def ler_tabelas(conteudo: bytes, nome_arquivo: str, apelidos: dict, valida) -> list:
-    """Procura, em todas as abas, a linha de cabeçalho que satisfaz `valida(mapa)`.
-
-    Retorna uma lista de (aba, DataFrame com as colunas renomeadas para os campos).
-    """
-    encontradas = []
-    for aba, ler in _ler_abas(conteudo, nome_arquivo):
-        previa = ler(nrows=30)
-        melhor = None
-        for indice, linha in previa.iterrows():
-            mapa = _mapear_colunas(linha.tolist(), apelidos)
-            if valida(mapa) and (melhor is None or len(mapa) > len(melhor[1])):
-                melhor = (indice, mapa)
-        if melhor is None:
-            continue
-        linha_cabecalho, mapa = melhor
-        dados = ler(skiprows=linha_cabecalho + 1)
-        tabela = pd.DataFrame({campo: dados.iloc[:, posicao] for campo, posicao in mapa.items()
-                               if posicao < dados.shape[1]})
-        encontradas.append((aba, tabela))
-    return encontradas
-
-
-def _descrever(apelidos: dict, campos) -> str:
-    return "; ".join(f"{c} ({' / '.join(apelidos[c][:3])})" for c in campos)
-
-
 # ---------------------------------------------------------------------------
 # Faturamento (exportação do ERP, uma linha por item de nota)
 # ---------------------------------------------------------------------------
@@ -142,7 +187,7 @@ APELIDOS_FATURAMENTO = {
     "mes": ["MES"],
     "cod_emp": ["COD EMP", "COD EMPRESA"],
     "num_nf": ["NUM NF", "NUM", "NUMERO NF", "NUMERO", "NF", "NOTA"],
-    "cod_segmento": ["COD SEGMENTO", "COD SEGM"],
+    "cod_segmento": ["COD SEGMENTO", "COD SEGMER", "COD SEGM"],   # o Focco corta em "COD SEGMER"
     "descricao_segmento": ["DESCRICAO SEGMENTO"],
     "cod_cli": ["COD CLI", "COD CLIENTE", "CODIGO CLIENTE"],
     "cod_est": ["COD EST", "COD ESTABELECIMENTO"],
@@ -194,22 +239,7 @@ def _valida_faturamento(mapa):
 
 def numero_ou_nada(valor):
     """Número do Excel ou texto brasileiro; vazio/"-" = 0; texto que não é número = None (erro)."""
-    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
-        return 0.0
-    if isinstance(valor, (int, float)):
-        return float(valor)
-    texto = str(valor).strip()
-    if texto in ("", "-", "R$ -", "R$-"):
-        return 0.0
-    limpo = re.sub(r"[^\d,.\-]", "", texto)
-    if not limpo or not re.search(r"\d", limpo):
-        return None
-    if "," in limpo:
-        limpo = limpo.replace(".", "").replace(",", ".")
-    try:
-        return float(limpo)
-    except ValueError:
-        return None
+    return ler_numero(valor)
 
 
 def _texto_celula(valor):
@@ -218,56 +248,218 @@ def _texto_celula(valor):
     return normalizar_codigo(valor) or None
 
 
-def ler_faturamento(conteudo: bytes, nome_arquivo: str):
-    """Lê a exportação do ERP. Devolve (itens válidos, erros [{linha, motivo}], avisos, aba)."""
-    tabelas = ler_tabelas(conteudo, nome_arquivo, APELIDOS_FATURAMENTO, _valida_faturamento)
-    if not tabelas:
-        raise ErroImportacao(
-            "Não encontrei a base de faturamento. Colunas obrigatórias: CNPJ CPF, NUM NF, TOTAL VENDA (ou VLR TOTAL) "
-            "e a data de emissão (ou ANO e MÊS).")
-    aba, df = tabelas[0]
-    avisos = []
-    if len(tabelas) > 1:
-        avisos.append(f"Mais de uma aba parece base de faturamento; usei só a aba '{aba}'.")
+# Lido aos poucos: a aba FATURAMENTO real tem ~317 mil linhas e 40 colunas. Lida de uma vez passava de 1 GB de
+# memória (o Render grátis tem 512 MB). Em partes, com os textos repetidos guardados como "category", fica em
+# ~1/5 disso.
+LINHAS_POR_PARTE = 5_000
+CAMPOS_REPETIDOS = CAMPOS_TEXTO + ["cnpj_cpf", "tipo_nf", "tipo_nf_chave"]
+
+
+def _cabecalho(linhas: list, apelidos: dict, valida):
+    """(índice da linha de cabeçalho, mapa campo -> coluna) entre as primeiras linhas, ou None."""
+    melhor = None
+    for indice, linha in enumerate(linhas):
+        mapa = _mapear_colunas(list(linha), apelidos)
+        if valida(mapa) and (melhor is None or len(mapa) > len(melhor[1])):
+            melhor = (indice, mapa)
+    return melhor
+
+
+def _partes_do_arquivo(fonte, nome_arquivo: str, apelidos: dict, valida):
+    """Acha a aba e o cabeçalho e devolve (aba, mapa, nº da 1ª linha de dados no Excel, avisos, gerador de partes).
+
+    `fonte` é o conteúdo (bytes) ou o caminho do arquivo no disco; do disco ele é lido aos poucos, sem carregar
+    o arquivo inteiro na memória. Cada parte é um DataFrame só com as colunas reconhecidas, com no máximo
+    LINHAS_POR_PARTE linhas.
+    """
+    from itertools import chain, islice
+
+    def em_partes(linhas, mapa):
+        posicoes = list(mapa.items())
+        while True:
+            bloco = list(islice(linhas, LINHAS_POR_PARTE))
+            if not bloco:
+                return
+            yield pd.DataFrame({campo: [linha[pos] if pos < len(linha) else None for linha in bloco]
+                                for campo, pos in posicoes})
+
+    if eh_texto(nome_arquivo):
+        # CSV, TXT ou o ".xls" do Focco (página HTML): app/leitor_texto.py, lido aos poucos.
+        linhas = _linhas_de_texto_protegidas(linhas_do_texto(fonte, nome_arquivo))
+        primeiras = list(islice(linhas, 30))
+        achado = _cabecalho(primeiras, apelidos, valida)
+        if achado is None:
+            return None
+        indice, mapa = achado
+        aba = "HTML" if nome_arquivo.lower().endswith(".xls") else "Texto"
+        return aba, mapa, indice + 2, [], em_partes(chain(primeiras[indice + 1:], linhas), mapa)
+
+    candidatas = []
+    _recusar_suspeito(fonte)
+    try:
+        # Leitor rápido (app/leitor_xlsx.py): ~3x mais rápido e ~8x menos memória que o openpyxl.
+        livro = LivroXlsx(fonte)
+        abas = [(nome, _linhas_protegidas(livro.linhas(caminho))) for nome, caminho in livro.abas]
+    except ArquivoNaoSuportado:
+        from openpyxl import load_workbook
+        try:
+            livro = load_workbook(io.BytesIO(fonte) if isinstance(fonte, (bytes, bytearray)) else fonte,
+                                  read_only=True, data_only=True)
+        except Exception as erro:  # noqa: BLE001 - arquivo que não é Excel vira mensagem para o usuário
+            raise ErroImportacao(f"Não consegui abrir o arquivo como Excel: {erro}") from erro
+        abas = [(aba.title, aba.iter_rows(values_only=True)) for aba in livro.worksheets]
+    for nome_aba, linhas in abas:
+        primeiras = list(islice(linhas, 30))
+        achado = _cabecalho(primeiras, apelidos, valida)
+        if achado is not None:
+            candidatas.append((nome_aba, achado, primeiras, linhas))
+    if not candidatas:
+        return None
+    nome_aba, (indice, mapa), primeiras, linhas = candidatas[0]
+    avisos = [f"Mais de uma aba parece base de faturamento; usei só a aba '{nome_aba}'."] if len(candidatas) > 1 else []
+    return nome_aba, mapa, indice + 2, avisos, em_partes(chain(primeiras[indice + 1:], linhas), mapa)
+
+
+def _datas(valores: pd.Series) -> pd.Series:
+    """Datas de texto (05/01/2026), de data do Excel ou de número de série do Excel (46027 = 05/01/2026)."""
+    numeros = pd.to_numeric(valores, errors="coerce")
+    serial = numeros.between(20_000, 80_000)  # de 1954 a 2119: número de série, não um ano ou código
+    datas = pd.to_datetime(valores.where(~serial), errors="coerce", dayfirst=True)
+    if serial.any():
+        datas[serial] = pd.to_datetime(numeros[serial], unit="D", origin="1899-12-30")
+    return datas
+
+
+def _por_valor_distinto(serie: pd.Series, funcao) -> pd.Series:
+    """Aplica `funcao` uma vez por valor diferente (não por célula): a coluna repete muito ("JOINVILLE" em
+    milhares de linhas), então isso corta a maior parte do trabalho da conferência."""
+    codigos, distintos = pd.factorize(serie, use_na_sentinel=True)
+    convertidos = np.empty(len(distintos) + 1, dtype=object)
+    convertidos[:-1] = [funcao(valor) for valor in distintos]
+    convertidos[-1] = funcao(None)  # código -1 = célula vazia
+    return pd.Series(convertidos[codigos], index=serie.index)
+
+
+def _tratar_parte(df: pd.DataFrame, primeira_linha: int, usar_vlr_total: bool):
+    """Valida e converte uma parte do faturamento. Devolve (itens válidos, erros [{linha, motivo}])."""
     for campo in APELIDOS_FATURAMENTO:
         if campo not in df:
             df[campo] = None
-    if df["total_venda"].isna().all():
-        avisos.append("O arquivo não tem a coluna TOTAL VENDA; usei VLR TOTAL no lugar.")
+    if usar_vlr_total:
         df["total_venda"] = df["vlr_total"]
-
-    # Número da linha no Excel, para o relatório de erros (cabeçalho + 1).
-    df["linha"] = range(2, len(df) + 2)
+    # Número da linha no Excel, para o relatório de erros.
+    df["linha"] = range(primeira_linha, primeira_linha + len(df))
     df = df[~df[["cnpj_cpf", "num_nf", "total_venda", "vlr_total"]].isna().all(axis=1)]  # linhas vazias
 
-    df["cnpj_cpf"] = df["cnpj_cpf"].map(normalizar_cnpj)
-    datas = pd.to_datetime(df["data_emissao"], errors="coerce", dayfirst=True)
+    df["cnpj_cpf"] = _por_valor_distinto(df["cnpj_cpf"], normalizar_cnpj)
+    datas = _datas(df["data_emissao"])
     ano = pd.to_numeric(df["ano"], errors="coerce").fillna(datas.dt.year)
     mes = pd.to_numeric(df["mes"], errors="coerce").fillna(datas.dt.month)
     df["ano"], df["mes"] = ano, mes
-    df["data_emissao"] = datas.dt.date
+    # Fica como data compacta (datetime64) até a gravação: 317 mil objetos "date" do Python pesavam na memória.
+    df["data_emissao"] = datas.dt.normalize()
     for campo in CAMPOS_NUMERICOS:
-        df[campo] = df[campo].map(numero_ou_nada)
+        df[campo] = _por_valor_distinto(df[campo], numero_ou_nada)
 
     erros = []
     motivos = pd.Series("", index=df.index)
     motivos[df["cnpj_cpf"] == ""] = "CNPJ/CPF vazio"
-    motivos[(motivos == "") & (df["ano"].isna() | df["mes"].isna() | ~df["mes"].between(1, 12))] = "data inválida"
+    motivos[df["cnpj_cpf"].str.len() > 14] = "CNPJ/CPF com mais de 14 dígitos"
+    motivos[(motivos == "") & (df["ano"].isna() | df["mes"].isna() | ~df["mes"].between(1, 12)
+                               | ~df["ano"].between(2000, 2100))] = "data inválida"
     motivos[(motivos == "") & df["total_venda"].isna()] = "TOTAL VENDA não é número"
     for linha, motivo in zip(df.loc[motivos != "", "linha"], motivos[motivos != ""]):
         erros.append({"linha": int(linha), "motivo": motivo})
     df = df[motivos == ""].copy()
 
-    df["ano"] = df["ano"].astype(int)
-    df["mes"] = df["mes"].astype(int)
+    df["ano"] = df["ano"].astype("int16")
+    df["mes"] = df["mes"].astype("int8")
     for campo in CAMPOS_TEXTO:
-        df[campo] = df[campo].map(_texto_celula).map(
-            lambda v, t=TAMANHOS[campo]: v[:t] if isinstance(v, str) else v)
+        df[campo] = _por_valor_distinto(
+            df[campo], lambda v, t=TAMANHOS[campo]: (lambda x: x[:t] if isinstance(x, str) else x)(_texto_celula(v)))
     df["cod_cli"] = df["cod_cli"].fillna("")
     df["tipo_nf"] = df["tipo_nf"].fillna("").astype(str).str.strip().replace("", SEM_TIPO).str[:60]
-    df["tipo_nf_chave"] = df["tipo_nf"].map(normalizar_texto)
-    df["data_emissao"] = df["data_emissao"].where(df["data_emissao"].notna(), None)
-    return df.drop(columns=["linha"]), erros, avisos, aba
+    df["tipo_nf_chave"] = _por_valor_distinto(df["tipo_nf"], normalizar_texto)
+    for campo in CAMPOS_NUMERICOS:
+        df[campo] = df[campo].astype("float64")
+    return df.drop(columns=["linha"]), erros
+
+
+def devolver_memoria() -> None:
+    """Devolve ao sistema a memória que o Python já liberou mas ainda segura (no Linux, malloc_trim).
+
+    Sem isso a memória "usada" do servidor só sobe durante a importação, mesmo com os dados já descartados.
+    """
+    import ctypes
+    import gc
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):  # fora do Linux (ex.: Windows no PC) não existe; não faz falta
+        pass
+
+
+def _codificar(serie: pd.Series, dicionario: dict) -> np.ndarray:
+    """Troca cada texto por um número de um dicionário único para o arquivo todo (-1 = vazio).
+
+    Assim cada texto diferente (cliente, item, nota…) fica guardado uma vez só, e cada linha guarda só o número.
+    """
+    locais, distintos = pd.factorize(serie, use_na_sentinel=True)
+    globais = np.array([dicionario.setdefault(v, len(dicionario)) for v in distintos], dtype=np.int32)
+    return np.where(locais < 0, -1, globais[locais] if len(globais) else -1).astype(np.int32)
+
+
+def _juntar_partes(partes: list, dicionarios: dict) -> pd.DataFrame:
+    """Junta as partes; as colunas de texto viram "category" com o dicionário do arquivo todo."""
+    if not partes:
+        return pd.DataFrame(columns=list(APELIDOS_FATURAMENTO) + ["tipo_nf_chave"])
+    colunas = {}
+    for campo in list(partes[0].columns):
+        # pop: cada coluna sai das partes assim que é juntada, para não ficar tudo duplicado na memória.
+        pedacos = [p.pop(campo) for p in partes]
+        if campo in dicionarios:
+            categorias = pd.Index(list(dicionarios[campo]), dtype=object)
+            colunas[campo] = pd.Categorical.from_codes(np.concatenate([x.to_numpy() for x in pedacos]),
+                                                       categories=categorias)
+        else:
+            colunas[campo] = pd.concat(pedacos, ignore_index=True)
+        del pedacos
+    partes.clear()
+    devolver_memoria()
+    return pd.DataFrame(colunas)
+
+
+def ler_faturamento(fonte, nome_arquivo: str, ao_progredir=None):
+    """Lê a exportação do ERP (bytes ou caminho do arquivo). Devolve (itens válidos, erros, avisos, aba).
+
+    `ao_progredir(linhas_lidas)` é chamado a cada parte, para a tela mostrar o andamento.
+    """
+    achado = _partes_do_arquivo(fonte, nome_arquivo, APELIDOS_FATURAMENTO, _valida_faturamento)
+    if achado is None:
+        raise ErroImportacao(
+            "Não encontrei a base de faturamento. Colunas obrigatórias: CNPJ CPF, NUM NF, TOTAL VENDA (ou VLR TOTAL) "
+            "e a data de emissão (ou ANO e MÊS).")
+    aba, mapa, primeira_linha, avisos, partes_brutas = achado
+    usar_vlr_total = "total_venda" not in mapa
+    # O relatório do Focco não tem TOTAL VENDA (era uma coluna da planilha antiga): o valor é o VLR TOTAL, que é o
+    # padrão do sistema. Não é motivo de aviso.
+    partes, erros = [], []
+    dicionarios = {campo: {} for campo in CAMPOS_REPETIDOS}
+    linhas_lidas = 0
+    for bruta in partes_brutas:
+        parte, erros_parte = _tratar_parte(bruta, primeira_linha, usar_vlr_total)
+        primeira_linha += len(bruta)
+        linhas_lidas += len(bruta)
+        erros += erros_parte
+        if not parte.empty:
+            for campo in CAMPOS_REPETIDOS:
+                parte[campo] = _codificar(parte[campo], dicionarios[campo])
+            partes.append(parte)
+        if ao_progredir:
+            ao_progredir(linhas_lidas)
+        if len(partes) % 10 == 0:
+            devolver_memoria()
+    return _juntar_partes(partes, dicionarios), erros, avisos, aba
 
 
 # ---------------------------------------------------------------------------
@@ -275,155 +467,15 @@ def ler_faturamento(conteudo: bytes, nome_arquivo: str):
 # ---------------------------------------------------------------------------
 
 MESES_ABREVIADOS = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
-APELIDOS_TOTAIS_UF = {
-    "cnpj": ["CPF CNPJ", "CNPJ CPF", "CPFCNPJ", "CNPJ"],
-    "loja": ["RAZAO SOCIAL", "LOJA"],
-    "uf": ["UF", "ESTADO"],
-    **{f"m{i + 1}": [m] for i, m in enumerate(MESES_ABREVIADOS)},
-}
-
-
-def ler_totais_abas_uf(conteudo: bytes, nome_arquivo: str) -> pd.DataFrame:
-    """Faturamento mês a mês de cada linha das abas SC, SP, PR… (como a planilha calculou)."""
-    def valida(mapa):
-        return "loja" in mapa and "cnpj" in mapa and sum(1 for c in mapa if c.startswith("m")) >= 6
-
-    linhas = []
-    for aba, df in ler_tabelas(conteudo, nome_arquivo, APELIDOS_TOTAIS_UF, valida):
-        df = df[df["loja"].notna()]
-        for mes in range(1, 13):
-            coluna = f"m{mes}"
-            if coluna not in df:
-                continue
-            valores = df[coluna].map(numero_ou_nada).fillna(0)
-            linhas += [{"aba": aba, "cnpj": normalizar_cnpj(c), "loja": str(l).strip(), "mes": mes, "valor": float(v)}
-                       for c, l, v in zip(df["cnpj"], df["loja"], valores)]
-    return pd.DataFrame(linhas, columns=["aba", "cnpj", "loja", "mes", "valor"])
 
 
 # ---------------------------------------------------------------------------
 # Promotores (custo)
 # ---------------------------------------------------------------------------
 
-APELIDOS_PROMOTORES = {
-    "codigo": ["CODIGO", "COD", "MATRICULA"],
-    "nome": ["COLABORADOR", "NOME", "PROMOTOR"],
-    "admissao": ["ADMISSAO", "DATA ADMISSAO"],
-    "municipio": ["MUNICIPIO", "CIDADE"],
-    "supervisor": ["SUPERVISOR"],
-    "salario": ["SALARIO"],
-    "ajuda_custo": ["AJUD CUSTO", "AJUDA CUSTO", "AJUDA DE CUSTO"],
-    "transporte": ["V TRANSP", "VALE TRANSPORTE", "TRANSPORTE"],
-    "total": ["TOTAL", "CUSTO TOTAL"],
-}
-
-
-def _valida_promotores(mapa):
-    return "codigo" in mapa and "nome" in mapa and ("total" in mapa or "salario" in mapa)
-
-
-def importar_promotores(conteudo: bytes, nome_arquivo: str):
-    tabelas = ler_tabelas(conteudo, nome_arquivo, APELIDOS_PROMOTORES, _valida_promotores)
-    if not tabelas:
-        raise ErroImportacao(
-            "Não encontrei a lista de promotores. Colunas obrigatórias: "
-            + _descrever(APELIDOS_PROMOTORES, ["codigo", "nome"]) + " e TOTAL (ou Salário).")
-    aba, df = tabelas[0]
-
-    df["codigo"] = df["codigo"].map(normalizar_codigo)
-    df["nome"] = df["nome"].fillna("").astype(str).str.strip()
-    df = df[(df["codigo"] != "") & (df["nome"] != "")]
-
-    for campo in ("salario", "ajuda_custo", "transporte", "total"):
-        df[campo] = df[campo].map(converter_numero) if campo in df else 0.0
-    soma = df["salario"] + df["ajuda_custo"] + df["transporte"]
-    df["custo_mensal"] = df["total"].where(df["total"] > 0, soma)
-
-    if "admissao" in df:
-        df["admissao"] = pd.to_datetime(df["admissao"], errors="coerce", dayfirst=True).dt.strftime("%Y-%m-%d")
-    for campo in ("admissao", "municipio", "supervisor"):
-        if campo not in df:
-            df[campo] = ""
-        df[campo] = df[campo].fillna("").astype(str).str.strip()
-
-    avisos = []
-    repetidos = df[df["codigo"].duplicated(keep=False)]
-    if not repetidos.empty:
-        avisos.append("Códigos repetidos (mantive a última linha): "
-                      + ", ".join(sorted(repetidos["codigo"].unique())))
-        df = df.drop_duplicates("codigo", keep="last")
-    sem_supervisor = df[df["supervisor"] == ""]
-    if not sem_supervisor.empty:
-        avisos.append(f"{len(sem_supervisor)} promotor(es) sem supervisor.")
-
-    resumo = {"aba": aba, "promotores": len(df), "avisos": avisos}
-    return df, resumo
-
 
 # ---------------------------------------------------------------------------
 # Roteiro (qual promotor atende qual loja)
 # ---------------------------------------------------------------------------
 
-APELIDOS_ROTEIRO = {
-    "codigo_promotor": ["COD PROMOTOR", "CODIGO PROMOTOR", "COD COLABORADOR", "CODIGO COLABORADOR"],
-    "colaborador": ["COLABORADOR", "PROMOTOR"],
-    "cnpj": ["CPF CNPJ", "CNPJ CPF", "CPFCNPJ", "CNPJ"],
-    "loja": ["RAZAO SOCIAL", "LOJA"],
-    "cidade": ["CIDADE", "MUNICIPIO"],
-    "uf": ["UF", "ESTADO"],
-    "visitas_semana": ["VISITAS SEMANA", "VISITAS POR SEMANA", "FREQUENCIA", "FREQUENCIA SEMANAL"],
-}
 
-
-def _valida_roteiro(mapa):
-    return ("codigo_promotor" in mapa or "colaborador" in mapa) and "loja" in mapa
-
-
-def importar_roteiro(conteudo: bytes, nome_arquivo: str):
-    """Lê todas as abas que tenham promotor + loja (ex.: abas SC, SP… da planilha atual)."""
-    tabelas = ler_tabelas(conteudo, nome_arquivo, APELIDOS_ROTEIRO, _valida_roteiro)
-    if not tabelas:
-        raise ErroImportacao(
-            "Não encontrei o roteiro. Colunas obrigatórias: Colaborador (ou código do promotor) "
-            "e Razão Social/Loja. CNPJ, Cidade, UF e Visitas por semana são opcionais.")
-    partes = []
-    for aba, df in tabelas:
-        for campo in APELIDOS_ROTEIRO:
-            if campo not in df:
-                df[campo] = None
-        df["aba"] = aba
-        partes.append(df)
-    df = pd.concat(partes, ignore_index=True)
-
-    df["codigo_promotor"] = df["codigo_promotor"].map(normalizar_codigo)
-    df["cnpj"] = df["cnpj"].map(normalizar_cnpj)
-    for campo in ("colaborador", "loja", "cidade", "uf"):
-        df[campo] = df[campo].fillna("").astype(str).str.strip()
-    df["uf"] = df["uf"].str.upper()
-    df["visitas_semana"] = pd.to_numeric(df["visitas_semana"], errors="coerce")
-    df = df[(df["loja"] != "") & ((df["codigo_promotor"] != "") | (df["colaborador"] != ""))]
-    df = df.drop_duplicates(["codigo_promotor", "colaborador", "cnpj", "loja"])
-
-    avisos = []
-    sem_cnpj = int((df["cnpj"] == "").sum())
-    if sem_cnpj:
-        avisos.append(f"{sem_cnpj} loja(s) sem CNPJ: aparecem no roteiro, mas sem faturamento.")
-    resumo = {"abas": [aba for aba, _ in tabelas], "lojas": len(df), "avisos": avisos}
-    return df, resumo
-
-
-def vincular_roteiro(roteiro: pd.DataFrame, promotores: pd.DataFrame):
-    """Preenche o código do promotor pelo nome quando o roteiro só tem o nome.
-
-    Devolve o roteiro vinculado e a lista de nomes que não bateram com nenhum promotor.
-    """
-    roteiro = roteiro.copy()
-    por_nome = {normalizar_texto(n): c for c, n in zip(promotores["codigo"], promotores["nome"])}
-    faltando = roteiro["codigo_promotor"].fillna("") == ""
-    roteiro.loc[faltando, "codigo_promotor"] = (
-        roteiro.loc[faltando, "colaborador"].map(lambda n: por_nome.get(normalizar_texto(n), "")))
-    codigos = set(promotores["codigo"])
-    sem_vinculo = roteiro[~roteiro["codigo_promotor"].isin(codigos)]
-    nomes = sorted(set(sem_vinculo["colaborador"].replace("", pd.NA).dropna())
-                   | set(sem_vinculo["codigo_promotor"].replace("", pd.NA).dropna()))
-    return roteiro[roteiro["codigo_promotor"].isin(codigos)], nomes

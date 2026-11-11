@@ -1,4 +1,5 @@
 import importlib
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,23 +17,33 @@ def recarregar_app():
     import app.autenticacao
     import app.cadastros
     import app.carga
+    import app.atendimento
     import app.config
-    import app.dados
+    import app.exportar
     import app.db
     import app.faturamento
     import app.main
-    import app.pendencias
     import app.regras
+    import app.respostas_guardadas
+    import app.seguranca
     import app.usuarios
-    for modulo in (app.config, app.db, app.regras, app.faturamento, app.carga, app.dados, app.autenticacao,
-                   app.usuarios, app.cadastros, app.pendencias, app.main):
+    for modulo in (app.config, app.respostas_guardadas, app.seguranca, app.db, app.regras, app.faturamento, app.carga, app.atendimento, app.autenticacao,
+                   app.usuarios, app.cadastros, app.exportar, app.main):
         importlib.reload(modulo)
     return app
 
 
 @pytest.fixture()
 def banco(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'teste.db'}")
+    # TEST_DATABASE_URL=postgresql://... roda os testes num Postgres (como no Render); o banco é zerado a cada teste.
+    url_postgres = os.getenv("TEST_DATABASE_URL", "")
+    if url_postgres:
+        from sqlalchemy import create_engine, text
+        motor = create_engine(url_postgres.replace("postgresql://", "postgresql+psycopg://", 1))
+        with motor.begin() as conexao:
+            conexao.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public"))
+        motor.dispose()
+    monkeypatch.setenv("DATABASE_URL", url_postgres or f"sqlite:///{tmp_path / 'teste.db'}")
     monkeypatch.setenv("APP_USUARIO", "mauricio")
     monkeypatch.setenv("APP_SENHA", "senha-teste")
     monkeypatch.setenv("SECRET_KEY", "chave-teste")
@@ -53,11 +64,16 @@ def entrar(cliente, usuario="mauricio", senha="senha-teste"):
     return resposta.json()
 
 
-def importar_cadastros(cliente, *tipos):
-    for tipo in tipos or ("promotores", "roteiro"):
-        with open(EXEMPLOS / f"{tipo}_exemplo.xlsx", "rb") as arquivo:
-            resposta = cliente.post(f"/api/importacoes/{tipo}", files={"arquivo": (f"{tipo}.xlsx", arquivo)})
-        assert resposta.status_code == 200, resposta.text
+def importar_atendimento(cliente, conteudo: bytes | None = None, substituir=False):
+    """Importa o arquivo das agências (padrão: exemplos/atendimento_exemplo.xlsx) e devolve o resultado."""
+    if conteudo is None:
+        conteudo = (EXEMPLOS / "atendimento_exemplo.xlsx").read_bytes()
+    previa = cliente.post("/api/importacoes/atendimento/previa", files={"arquivo": ("atendimento.xlsx", conteudo)})
+    assert previa.status_code == 200, previa.text
+    resposta = cliente.post(f"/api/importacoes/atendimento/{previa.json()['token']}/confirmar",
+                            json={"substituir": substituir})
+    assert resposta.status_code == 200, resposta.text
+    return resposta.json()
 
 
 def importar_faturamento(cliente, arquivo="faturamento_exemplo.xlsx", substituir=False):
@@ -85,3 +101,4 @@ def gravar_itens(banco, linhas):
                                        num_nf=str(numero), tipo_nf=tipo, tipo_nf_chave=normalizar_texto(tipo),
                                        receita=receita, total_venda=valor, vlr_total=valor))
         sessao.commit()
+    banco.faturamento.limpar_cache()

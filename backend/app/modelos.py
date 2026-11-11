@@ -2,7 +2,7 @@
 em backend/migrations; este arquivo só descreve as tabelas para o Python."""
 from datetime import date, datetime
 
-from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text,
+from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text,
                         UniqueConstraint, func)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -119,6 +119,18 @@ class RoteiroPendente(Carimbo, Base):
     origem: Mapped[str] = mapped_column(String(60), default="")
 
 
+class ApelidoColaborador(Carimbo, Base):
+    """Nome da coluna "Colaborador" das abas por UF que é outro jeito de escrever um promotor cadastrado
+    (ex.: "ANDRE TEIXEIRA" = "Andre Luiz Teixeira"). As próximas importações já ligam sozinhas."""
+    __tablename__ = "apelidos_colaborador"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome_chave: Mapped[str] = mapped_column(String(150), unique=True)  # sem acento/maiúsculo
+    nome: Mapped[str] = mapped_column(String(150), default="")
+    promotor_id: Mapped[int] = mapped_column(ForeignKey("promotores.id", ondelete="CASCADE"))
+
+    promotor: Mapped[Promotor] = relationship()
+
+
 class Usuario(Carimbo, Base):
     __tablename__ = "usuarios"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -130,6 +142,10 @@ class Usuario(Carimbo, Base):
     ativo: Mapped[bool] = mapped_column(Boolean, default=True)
     tentativas_falhas: Mapped[int] = mapped_column(Integer, default=0)
     bloqueado_ate: Mapped[datetime | None] = mapped_column(DateTime)
+    # Vai junto no cookie de sessão; trocar a chave derruba as sessões abertas desse usuário.
+    sessao_chave: Mapped[str] = mapped_column(String(64), default="")
+    # Senha provisória (criada ou trocada pelo administrador): o usuário precisa trocar no primeiro acesso.
+    trocar_senha: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Importacao(Base):
@@ -202,3 +218,44 @@ class FaturamentoItem(Base):
     bonificacao: Mapped[float | None] = _valor()
     total_venda: Mapped[float | None] = _valor()
     grupo: Mapped[str | None] = _texto(60)
+
+
+class Atendimento(Base):
+    """Uma loja atendida por uma agência (ou MEI, ou a própria 101) num mês, com o valor cobrado.
+
+    Vem do arquivo que a agência manda (modelo "Atendimento das agências"). Lojas, promotores e agências do
+    sistema são montados a partir destas linhas.
+    """
+    __tablename__ = "atendimentos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    importacao_id: Mapped[int] = mapped_column(ForeignKey("importacoes.id", ondelete="CASCADE"))
+    ano: Mapped[int] = mapped_column(Integer)
+    mes: Mapped[int] = mapped_column(Integer)
+    agencia: Mapped[str] = mapped_column(String(150))
+    agencia_chave: Mapped[str] = mapped_column(String(150))
+    cnpj: Mapped[str] = mapped_column(String(14), default="")
+    loja: Mapped[str] = mapped_column(String(200))
+    loja_chave: Mapped[str] = mapped_column(String(200))
+    cidade: Mapped[str] = mapped_column(String(120), default="")
+    uf: Mapped[str] = mapped_column(String(2), default="")
+    promotor: Mapped[str] = mapped_column(String(150), default="")
+    promotor_codigo: Mapped[str] = mapped_column(String(40), default="")
+    promotor_chave: Mapped[str] = mapped_column(String(200), default="")
+    dias: Mapped[str] = mapped_column(String(80), default="")
+    visitas: Mapped[int | None] = mapped_column(Integer)
+    valor: Mapped[float] = mapped_column(Numeric(12, 2, asdecimal=False), default=0)
+    status: Mapped[str] = mapped_column(String(20), default="Ativa")
+    observacao: Mapped[str] = mapped_column(Text, default="")
+    linha: Mapped[int | None] = mapped_column(Integer)
+
+
+class Backup(Base):
+    """Cópia (Excel no modelo das agências) guardada antes de apagar os atendimentos."""
+    __tablename__ = "backups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    usuario: Mapped[str] = mapped_column(String(80), default="")
+    motivo: Mapped[str] = mapped_column(String(120), default="")
+    arquivo_nome: Mapped[str] = mapped_column(String(255))
+    linhas: Mapped[int] = mapped_column(Integer, default=0)
+    conteudo: Mapped[bytes] = mapped_column(LargeBinary)
