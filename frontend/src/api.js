@@ -5,8 +5,20 @@ export function definirAoExpirarSessao(funcao) {
   aoExpirarSessao = funcao
 }
 
+// Igual ao limite do servidor (backend/app/limites.py). Acima disso o servidor corta a conexão no meio do envio e o
+// navegador só diz "Failed to fetch"; por isso o tamanho é conferido aqui antes de enviar.
+export const LIMITE_ARQUIVO_MB = 150
+
 async function requisitar(caminho, opcoes = {}) {
-  const resposta = await fetch(caminho, { credentials: 'same-origin', ...opcoes })
+  let resposta
+  try {
+    resposta = await fetch(caminho, { credentials: 'same-origin', ...opcoes })
+  } catch {
+    throw new Error(opcoes.body instanceof FormData
+      ? 'A conexão com o servidor caiu durante o envio do arquivo. Confira a internet e tente de novo; se o arquivo ' +
+        'for muito grande, exporte um período menor.'
+      : 'Não consegui falar com o servidor. Confira a internet e tente de novo.')
+  }
   if (resposta.status === 401 && caminho !== '/api/login') {
     aoExpirarSessao()
     throw new Error('Sessão expirada. Entre novamente.')
@@ -31,6 +43,12 @@ export const http = {
   put: (caminho, corpo) => requisitar(caminho, json('PUT', corpo)),
   delete: (caminho) => requisitar(caminho, { method: 'DELETE' }),
   enviarArquivo: (caminho, arquivo) => {
+    const mb = arquivo.size / 1024 / 1024
+    if (mb > LIMITE_ARQUIVO_MB) {
+      return Promise.reject(new Error(
+        `O arquivo tem ${Math.round(mb)} MB e o limite é ${LIMITE_ARQUIVO_MB} MB. Exporte do ERP um período menor ` +
+        '(por exemplo, um ou dois meses por vez) e importe um arquivo de cada vez: o sistema junta os meses.'))
+    }
     const corpo = new FormData()
     corpo.append('arquivo', arquivo)
     return requisitar(caminho, { method: 'POST', body: corpo })
