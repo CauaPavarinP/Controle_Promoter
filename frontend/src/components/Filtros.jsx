@@ -142,7 +142,7 @@ export default function Filtros({ opcoes, filtros, alterar, limpar }) {
         <div className="filtros-ativos">
           {ativos.map((a) => (
             <button key={a.campo} className="chip" onClick={() => (a.campo === 'uf' ? mudarUf('') : alterar(a.campo, ''))}
-              title="Tirar este filtro">
+              title="Tirar este filtro" aria-label={`Tirar o filtro ${a.texto}`}>
               {a.texto} <span aria-hidden="true">✕</span>
             </button>
           ))}

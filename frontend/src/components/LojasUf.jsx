@@ -2,22 +2,28 @@
 // faturamento mês a mês (clicável para ver as notas).
 import { formatarCnpj } from '../formato.js'
 import GradeMensal from './GradeMensal.jsx'
-import { COLUNAS_SE_PAGA } from './SePaga.jsx'
+import { COLUNAS_SE_PAGA, OpcaoOcultarSemCusto, useOcultarSemCusto } from './SePaga.jsx'
 import { Tabela } from './ui.jsx'
 
-export default function LojasUf({ uf, aoMudarUf, ufs, lojas, grade, avisos = [] }) {
+export default function LojasUf({ uf, aoMudarUf, ufs, lojas: todas, grade, avisos = [], agencias }) {
+  const ocultacao = useOcultarSemCusto(agencias)
+  const lojas = todas && todas.filter((l) => ocultacao.visivel(l.agencia_chaves || []))
   return (
     <>
       <nav className="abas-uf nao-imprimir">
-        <button className={!uf ? 'ativo' : ''} onClick={() => aoMudarUf('')}>Todas</button>
+        <button className={!uf ? 'ativo' : ''} onClick={() => aoMudarUf('')} aria-pressed={!uf}>Todas</button>
         {ufs.map((u) => (
-          <button key={u} className={uf === u ? 'ativo' : ''} onClick={() => aoMudarUf(u)}>{u}</button>
+          <button key={u} className={uf === u ? 'ativo' : ''} onClick={() => aoMudarUf(u)} aria-pressed={uf === u}
+            aria-label={`Lojas de ${u}`}>{u}</button>
         ))}
       </nav>
       {avisos.map((aviso) => <p key={aviso} className="nota">⚠ {aviso}</p>)}
       {lojas && (
         <section className="bloco">
-          <h2>Lojas atendidas ({lojas.length})</h2>
+          <div className="bloco-cabecalho">
+            <h2>Lojas atendidas ({lojas.length})</h2>
+            <div className="bloco-ferramentas"><OpcaoOcultarSemCusto {...ocultacao} /></div>
+          </div>
           <p className="dica">Das lojas que as agências informaram no período, com o custo do atendimento e quanto compraram da 101.</p>
           <Tabela
             chave="chave"

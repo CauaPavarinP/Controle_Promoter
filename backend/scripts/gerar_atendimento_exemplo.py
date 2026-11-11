@@ -13,17 +13,17 @@ PASTA = Path(__file__).resolve().parent.parent / "exemplos"
 
 # loja, CNPJ, cidade, UF, agência, promotor, código, dias, visitas no mês, valor do mês, primeiro mês
 LOJAS = [
-    ("REDE ALFA - CENTRO", "00.000.001/0001-01", "TIJUCAS", "SC", "Agência Alfa", "Ana Teste", "", "Seg, Qua, Sex", 12, 300, 1),
-    ("REDE ALFA - PRAIA", "00.000.001/0001-01", "TIJUCAS", "SC", "Agência Alfa", "Ana Teste", "", "Ter, Qui", 8, 200, 1),
-    ("MERCADO BETA", "00.000.002/0001-02", "PORTO BELO", "SC", "Agência Alfa", "Ana Teste", "", "Seg, Qua, Sex", 12, 300, 1),
-    ("SUPER GAMA", "00.000.003/0001-03", "ITAJAI", "SC", "Agência Alfa", "Bruno Teste", "", "Seg a Sex", 20, 500, 2),
-    ("MERCADO DELTA", "00.000.004/0001-04", "ITAJAI", "SC", "Agência Alfa", "Bruno Teste", "", "Seg, Qua, Sex", 12, 300, 2),
-    ("REDE OMEGA - BATEL", "00.000.005/0001-05", "CURITIBA", "PR", "101 do Brasil", "Carla Teste", "90003", "Seg a Qui", 16, 800, 1),
-    ("REDE OMEGA - PORTAO", "00.000.005/0001-05", "CURITIBA", "PR", "101 do Brasil", "Carla Teste", "90003", "Seg a Qui", 16, 800, 1),
-    ("ATACADO SIGMA", "00.000.006/0001-06", "CURITIBA", "PR", "101 do Brasil", "Carla Teste", "90003", "Ter, Qui", 8, 400, 1),
-    ("MERCADO KAPPA", "00.000.007/0001-07", "LONDRINA", "PR", "101 do Brasil", "Diego Teste", "90004", "Seg, Qua, Sex", 12, 600, 1),
-    ("LAMBDA - CENTRO", "00.000.008/0001-08", "LONDRINA", "PR", "101 do Brasil", "Diego Teste", "90004", "Ter, Qui", 8, 400, 1),
-    ("LAMBDA - ZONA SUL", "00.000.008/0001-08", "LONDRINA", "PR", "101 do Brasil", "Diego Teste", "90004", "Ter, Qui", 8, 400, 1),
+    ("REDE ALFA - CENTRO", "00.000.001/0001-36", "TIJUCAS", "SC", "Agência Alfa", "Ana Teste", "", "Seg, Qua, Sex", 12, 300, 1),
+    ("REDE ALFA - PRAIA", "00.000.001/0001-36", "TIJUCAS", "SC", "Agência Alfa", "Ana Teste", "", "Ter, Qui", 8, 200, 1),
+    ("MERCADO BETA", "00.000.002/0001-80", "PORTO BELO", "SC", "Agência Alfa", "Ana Teste", "", "Seg, Qua, Sex", 12, 300, 1),
+    ("SUPER GAMA", "00.000.003/0001-25", "ITAJAI", "SC", "Agência Alfa", "Bruno Teste", "", "Seg a Sex", 20, 500, 2),
+    ("MERCADO DELTA", "00.000.004/0001-70", "ITAJAI", "SC", "Agência Alfa", "Bruno Teste", "", "Seg, Qua, Sex", 12, 300, 2),
+    ("REDE OMEGA - BATEL", "00.000.005/0001-14", "CURITIBA", "PR", "101 do Brasil", "Carla Teste", "90003", "Seg a Qui", 16, 800, 1),
+    ("REDE OMEGA - PORTAO", "00.000.005/0001-14", "CURITIBA", "PR", "101 do Brasil", "Carla Teste", "90003", "Seg a Qui", 16, 800, 1),
+    ("ATACADO SIGMA", "00.000.006/0001-69", "CURITIBA", "PR", "101 do Brasil", "Carla Teste", "90003", "Ter, Qui", 8, 400, 1),
+    ("MERCADO KAPPA", "00.000.007/0001-03", "LONDRINA", "PR", "101 do Brasil", "Diego Teste", "90004", "Seg, Qua, Sex", 12, 600, 1),
+    ("LAMBDA - CENTRO", "00.000.008/0001-58", "LONDRINA", "PR", "101 do Brasil", "Diego Teste", "90004", "Ter, Qui", 8, 400, 1),
+    ("LAMBDA - ZONA SUL", "00.000.008/0001-58", "LONDRINA", "PR", "101 do Brasil", "Diego Teste", "90004", "Ter, Qui", 8, 400, 1),
 ]
 
 

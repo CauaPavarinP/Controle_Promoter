@@ -1,7 +1,7 @@
 // Peças da importação de arquivos, usadas nas abas Faturamento e Agências.
 import { useEffect, useState } from 'react'
 import { http } from '../api.js'
-import { formatarCnpj, formatarMoeda, formatarMes } from '../formato.js'
+import { formatarCnpj, formatarDataHora, formatarMes, formatarMoeda } from '../formato.js'
 import { exportarExcel, Tabela, useLista } from './ui.jsx'
 
 const NOMES_TIPO = { faturamento: 'Faturamento', atendimento: 'Agências', promotores: 'Promotores (planilha antiga)', roteiro: 'Roteiro (planilha antiga)', planilha: 'Planilha completa (antiga)', limpeza: 'Apagar dados' }
@@ -134,30 +134,32 @@ export function Historico({ versao, aoDesfazer, tipos }) {
 
   if (!lista) return <p>Carregando…</p>
   return (
-    <section className="bloco">
+    <section className="bloco historico">
       <h2>Histórico de importações</h2>
       <Tabela
         linhas={tipos ? lista.filter((i) => tipos.includes(i.tipo)) : lista}
         porPagina={15}
         vazio="Nenhuma importação ainda."
         colunas={[
-          { campo: 'data_hora', titulo: 'Data', mostrar: (i) => new Date(i.data_hora).toLocaleString('pt-BR') },
+          { campo: 'data_hora', titulo: 'Data', quebra: true, mostrar: (i) => formatarDataHora(i.data_hora) },
           { campo: 'tipo', titulo: 'Tipo', mostrar: (i) => NOMES_TIPO[i.tipo] || i.tipo },
           { campo: 'arquivo', titulo: 'Arquivo', quebra: true },
           { campo: 'usuario', titulo: 'Usuário' },
-          { campo: 'periodos', titulo: 'Período', semOrdem: true,
+          { campo: 'periodos', titulo: 'Período', semOrdem: true, quebra: true,
             mostrar: (i) => (i.periodos.length ? `${formatarMes(i.periodos[0])} a ${formatarMes(i.periodos[i.periodos.length - 1])}` : '—') },
-          { campo: 'linhas_importadas', titulo: 'Linhas', num: true,
+          { campo: 'linhas_importadas', titulo: 'Linhas', num: true, quebra: true,
             mostrar: (i) => <>{i.linhas_importadas}{i.linhas_com_erro > 0 && <span className="texto-critico"> (+{i.linhas_com_erro} com erro)</span>}</> },
           { campo: 'total_venda', titulo: 'Total', num: true, mostrar: (i) => (['faturamento', 'atendimento'].includes(i.tipo) ? formatarMoeda(i.total_venda) : '—') },
           { campo: 'situacao', titulo: 'Situação', mostrar: (i) => <span className={`situacao ${i.situacao === 'ativa' ? 'ativa' : 'inativa'}`}>{i.situacao}</span> },
           {
-            campo: 'acoes', titulo: '', semOrdem: true,
+            campo: 'acoes', titulo: 'Ações', semOrdem: true, quebra: true,
             mostrar: (i) => (
               <div className="acoes">
-                {i.linhas_com_erro > 0 && <button className="secundario" onClick={() => baixarErros(i)}>Erros (Excel)</button>}
+                {i.linhas_com_erro > 0 && (
+                  <button className="secundario" onClick={() => baixarErros(i)} aria-label={`Baixar em Excel as linhas com erro de ${i.arquivo}`}>Erros (Excel)</button>
+                )}
                 {['faturamento', 'atendimento'].includes(i.tipo) && i.situacao === 'ativa' && (
-                  <button className="secundario perigo" onClick={() => desfazer(i)}>Desfazer</button>
+                  <button className="secundario perigo" onClick={() => desfazer(i)} aria-label={`Desfazer a importação de ${i.arquivo}`}>Desfazer</button>
                 )}
               </div>
             ),

@@ -8,7 +8,11 @@ export default function CardsResumo({ resumo, regras }) {
         <div className="card">
           <span>Pago às agências</span>
           <strong>{formatarMoeda(resumo.custo)}</strong>
-          <small>atendimento das lojas em {resumo.meses} mês(es)</small>
+          <small>
+            {resumo.meses_com_arquivo === resumo.meses
+              ? `atendimento das lojas em ${resumo.meses} mês(es)`
+              : `arquivo de agência em ${resumo.meses_com_arquivo} de ${resumo.meses} meses do período`}
+          </small>
         </div>
         <div className="card">
           <span>Lojas compraram</span>
@@ -23,7 +27,14 @@ export default function CardsResumo({ resumo, regras }) {
         <div className="card">
           <span>Agências · promotores · lojas</span>
           <strong>{resumo.agencias} · {resumo.promotores} · {resumo.lojas}</strong>
-          <small>{resumo.visitas} visita(s) no período</small>
+          <small>
+            {resumo.visitas} visita(s) no período
+            {resumo.agencias_sem_custo > 0 && (
+              <span title="Agências que informaram todas as lojas com R$ 0 no período (ex.: CLT, MEI, freelancer pagos por fora). Não entram nos números acima.">
+                <br />+ {resumo.agencias_sem_custo} agência(s) sem custo: {resumo.promotores_sem_custo} promotor(es), {resumo.lojas_sem_custo} loja(s)
+              </span>
+            )}
+          </small>
         </div>
       </section>
       {resumo.cnpjs_compartilhados > 0 && (

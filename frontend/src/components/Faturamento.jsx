@@ -86,7 +86,8 @@ function colunasDosMeses(meses, aoClicar) {
       if (!valor) return '—'
       if (!aoClicar) return formatarMoeda(valor)
       return (
-        <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => aoClicar(l, m)}>
+        <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => aoClicar(l, m)}
+          aria-label={`Ver as notas de ${l.razao_social || l.cnpj || ''} em ${formatarMes(m)}: ${formatarMoeda(valor)}`}>
           {formatarMoeda(valor)}
         </button>
       )

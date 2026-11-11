@@ -5,12 +5,15 @@ mês, agência, CNPJ e nome da loja, cidade, UF, promotor, dias de visita, visit
 Lojas, promotores e agências do sistema são montados a partir destas linhas (tabela atendimentos).
 
 Regras da leitura (cada uma vira aviso na prévia, para a agência corrigir no próximo arquivo):
-- CNPJ com 14 dígitos fica como está (mesmo com dígito verificador errado: se bater com o ERP, liga); com um zero a
-  mais na frente (15 dígitos, ex.: "009.477.652/0042-64") é corrigido quando, sem o zero, fica válido; com 12 ou 13
-  dígitos (o Excel comeu o zero) ganha os zeros; o resto fica sem CNPJ (a loja entra, mas sem faturamento).
+- CNPJ: vale só com os 2 dígitos verificadores certos (app/cnpj.py). Com um zero a mais na frente (15 dígitos,
+  ex.: "009.477.652/0042-64") é corrigido quando, sem o zero, fica válido; com 12 ou 13 dígitos (o Excel comeu o
+  zero) ganha os zeros. O resto (inclusive 14 dígitos com verificador errado) fica sem CNPJ: a loja entra, mas sem
+  faturamento, e a prévia mostra a linha do arquivo para a agência corrigir.
 - Mês de referência: MM/AAAA, AAAA-MM, data do Excel ou "out/2026".
 - Valor vazio = 0 (com aviso); valor que não é número = linha com erro (não entra).
 - Linha de exemplo do modelo ("EXEMPLO - apague…") e linhas de total (sem loja) são ignoradas.
+- Cabeçalho repetido no meio do arquivo (ex.: cada bloco de agência com o seu título e cabeçalho) e linha que parece
+  título (sem CNPJ, sem valor e sem visitas) são descartados e listados na prévia.
 - Promotor: identificado pelo "Código do promotor" quando vier; sem código, pelo nome dentro da agência.
 """
 import difflib
@@ -25,6 +28,8 @@ import pandas as pd
 from sqlalchemy import delete, select, text
 
 from . import db, respostas_guardadas
+from .cnpj import cnpj_valido as _cnpj_valido
+from .cnpj import formatar as formatar_cnpj
 from .importacao import (ErroImportacao, _ler_abas, _mapear_colunas, devolver_memoria, ler_numero,
                          normalizar_texto)
 from .modelos import Atendimento, Importacao
@@ -57,14 +62,7 @@ VALIDADE_PREVIA = 30 * 60
 # ---------------------------------------------------------------------------------------------------------------
 
 def cnpj_valido(digitos: str) -> bool:
-    if len(digitos) != 14 or len(set(digitos)) == 1:
-        return False
-
-    def dv(base, pesos):
-        resto = sum(int(a) * b for a, b in zip(base, pesos)) % 11
-        return "0" if resto < 2 else str(11 - resto)
-    pesos = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-    return digitos[12] == dv(digitos[:12], pesos) and digitos[13] == dv(digitos[:13], [6] + pesos)
+    return _cnpj_valido(digitos)
 
 
 def ler_cnpj(valor) -> tuple[str, str]:
@@ -77,12 +75,16 @@ def ler_cnpj(valor) -> tuple[str, str]:
     achado = re.search(r"\d[\d.\-/\s]{10,22}\d", texto)
     digitos = re.sub(r"\D", "", achado.group(0) if achado else texto)
     if len(digitos) == 14:
-        return digitos, "" if cnpj_valido(digitos) else f"CNPJ {texto[:30]} não confere (dígito verificador)"
+        if cnpj_valido(digitos):
+            return digitos, ""
+        return "", "dígito verificador não confere"
     if len(digitos) == 15 and digitos[0] == "0" and cnpj_valido(digitos[1:]):
         return digitos[1:], "corrigido"
     if len(digitos) in (12, 13) and cnpj_valido(digitos.zfill(14)):
         return digitos.zfill(14), "corrigido"
-    return "", f"CNPJ {texto[:30] or '(vazio)'} inválido"
+    if not texto:
+        return "", "sem CNPJ"
+    return "", f"{len(digitos)} dígitos" if digitos else "não é um CNPJ"
 
 
 def ler_mes(valor) -> tuple[int, int] | None:
@@ -152,6 +154,26 @@ def _tabelas(conteudo: bytes, nome_arquivo: str):
         yield aba, cabecalho + 2, tabela
 
 
+_NOMES_CABECALHO = {campo: {normalizar_texto(n) for n in nomes} for campo, nomes in APELIDOS.items()}
+
+
+def _cabecalho_repetido(registro: dict) -> bool:
+    """A linha repete o cabeçalho: 2 ou mais células com o nome da própria coluna ("LOJA", "CNPJ"…)."""
+    iguais = sum(1 for campo, valor in registro.items()
+                 if campo in _NOMES_CABECALHO and normalizar_texto(valor) in _NOMES_CABECALHO[campo])
+    return iguais >= 2
+
+
+def _vazio(valor) -> bool:
+    return valor is None or (isinstance(valor, float) and pd.isna(valor)) or _texto(valor) == ""
+
+
+def _parece_titulo(registro: dict) -> bool:
+    """Sem nenhum número de CNPJ, sem valor e sem visitas: é título ou separador de bloco, não uma loja."""
+    tem_digitos = bool(re.search(r"\d{6}", re.sub(r"\D", "", _texto(registro.get("cnpj")))))
+    return not tem_digitos and _vazio(registro.get("valor")) and _vazio(registro.get("visitas"))
+
+
 def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
     """Lê o arquivo da agência. Devolve {linhas: DataFrame, erros: [...], avisos: [...], abas: [...]}."""
     tabelas = list(_tabelas(conteudo, nome_arquivo))
@@ -159,8 +181,8 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
         raise ErroImportacao(
             "Não encontrei a tabela de atendimento. O arquivo precisa ter as colunas Agência ou MEI, CNPJ da loja, "
             "Loja e Valor do mês (use o modelo \"Atendimento das agências\").")
-    linhas, erros = [], []
-    corrigidos, sem_cnpj, cnpj_nao_confere, sem_valor, sem_promotor, sem_mes_coluna = [], [], [], [], [], False
+    linhas, erros, descartadas, cnpjs_invalidos = [], [], [], []
+    corrigidos, sem_valor, sem_promotor, promotor_agencia, sem_mes_coluna = [], [], [], [], False
     for aba, primeira, tabela in tabelas:
         if "mes" not in tabela:
             sem_mes_coluna = True
@@ -172,6 +194,15 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
                 continue  # linha de exemplo do modelo
             if not loja:
                 continue  # linha vazia ou de total/título
+            conteudo_linha = " | ".join(_texto(v) for v in registro.values() if not _vazio(v))[:160]
+            if _cabecalho_repetido(registro):
+                descartadas.append({"linha": numero, "aba": aba, "motivo": "Cabeçalho repetido",
+                                    "conteudo": conteudo_linha})
+                continue
+            if _parece_titulo(registro):
+                descartadas.append({"linha": numero, "aba": aba, "motivo": "Parece título (sem CNPJ, valor e visitas)",
+                                    "conteudo": conteudo_linha})
+                continue
             agencia = _texto(registro.get("agencia"))
             if not agencia:
                 erros.append({"linha": numero, "aba": aba, "motivo": "Agência ou MEI vazio"})
@@ -194,13 +225,15 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
             if aviso_cnpj == "corrigido":
                 corrigidos.append(loja)
             elif not cnpj:
-                sem_cnpj.append(f"{loja} ({aviso_cnpj})")
-            elif aviso_cnpj:
-                cnpj_nao_confere.append(loja)
+                cnpjs_invalidos.append({"linha": numero, "aba": aba, "loja": loja[:200],
+                                        "cnpj": _texto(registro.get("cnpj"))[:40], "motivo": aviso_cnpj})
             promotor = _texto(registro.get("promotor"))
             if not promotor:
                 promotor = SEM_PROMOTOR
                 sem_promotor.append(loja)
+            elif normalizar_texto(promotor) == normalizar_texto(agencia) or \
+                    normalizar_texto(promotor).startswith("AGENCIA "):
+                promotor_agencia.append(f"{promotor} (linha {numero})")
             codigo = _texto(registro.get("codigo"))
             uf = normalizar_texto(registro.get("uf"))[:2]
             agencia_chave = normalizar_texto(agencia)
@@ -221,20 +254,24 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
     df = pd.DataFrame(linhas)
 
     # Cada loja aparece uma vez em cada aviso (o arquivo pode ter vários meses da mesma loja).
-    corrigidos, sem_cnpj, cnpj_nao_confere, sem_valor, sem_promotor = (
-        list(dict.fromkeys(lista)) for lista in (corrigidos, sem_cnpj, cnpj_nao_confere, sem_valor, sem_promotor))
+    corrigidos, sem_valor, sem_promotor, promotor_agencia = (
+        list(dict.fromkeys(lista)) for lista in (corrigidos, sem_valor, sem_promotor, promotor_agencia))
+    lojas_sem_cnpj = list(dict.fromkeys(c["loja"] for c in cnpjs_invalidos))
     avisos = []
     if sem_mes_coluna:
         avisos.append("Uma aba não tem a coluna \"Mês de referência\": as linhas dela entraram como erro.")
     if corrigidos:
         avisos.append(f"{len(corrigidos)} CNPJ(s) com zero a mais na frente ou zero faltando foram corrigidos: "
                       + ", ".join(corrigidos[:8]) + (" …" if len(corrigidos) > 8 else ""))
-    if sem_cnpj:
-        avisos.append(f"{len(sem_cnpj)} loja(s) sem CNPJ válido entraram sem faturamento (corrija no próximo "
-                      "arquivo): " + "; ".join(sem_cnpj[:8]) + (" …" if len(sem_cnpj) > 8 else ""))
-    if cnpj_nao_confere:
-        avisos.append(f"{len(cnpj_nao_confere)} CNPJ(s) com dígito verificador que não confere (confira com a "
-                      "agência): " + "; ".join(cnpj_nao_confere[:8]) + (" …" if len(cnpj_nao_confere) > 8 else ""))
+    if lojas_sem_cnpj:
+        avisos.append(f"{len(lojas_sem_cnpj)} loja(s) sem CNPJ válido entram sem faturamento: veja a lista \"CNPJ "
+                      "inválido\" abaixo, com a linha do arquivo, e peça a correção à agência.")
+    if descartadas:
+        avisos.append(f"{len(descartadas)} linha(s) descartadas por parecerem cabeçalho ou título: veja a lista "
+                      "\"Linhas descartadas\" abaixo.")
+    if promotor_agencia:
+        avisos.append(f"{len(promotor_agencia)} promotor(es) com nome de agência (confira se a coluna Promotor está "
+                      "certa): " + "; ".join(promotor_agencia[:6]) + (" …" if len(promotor_agencia) > 6 else ""))
     if sem_valor:
         avisos.append(f"{len(sem_valor)} loja(s) sem valor entraram com R$ 0,00: " + "; ".join(sem_valor[:8])
                       + (" …" if len(sem_valor) > 8 else ""))
@@ -246,7 +283,8 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
         avisos.append(f"{len(repetidas)} linha(s) repetidas (mesma agência, mês, loja e promotor): os valores foram "
                       "somados. Confira se não é a mesma loja duas vezes: " + ", ".join(repetidas["loja"].head(6)))
     avisos += _nomes_parecidos(df)
-    return {"linhas": df, "erros": erros, "avisos": avisos, "abas": sorted({a for a, _, _ in tabelas})}
+    return {"linhas": df, "erros": erros, "avisos": avisos, "abas": sorted({a for a, _, _ in tabelas}),
+            "descartadas": descartadas, "cnpjs_invalidos": cnpjs_invalidos}
 
 
 def _nomes_parecidos(df: pd.DataFrame) -> list[str]:
@@ -283,12 +321,63 @@ def _grupos_existentes(conexao, grupos: set[tuple[str, int, int]]) -> set[tuple[
     return {(a, int(y), int(m)) for a, y, m in linhas} & grupos
 
 
+def _chave_loja(cnpj: str, loja_chave: str) -> str:
+    """A mesma loja em arquivos diferentes: pelo CNPJ; sem CNPJ válido, pelo nome."""
+    return f"cnpj:{cnpj}" if cnpj else f"nome:{loja_chave}"
+
+
+def _repetidas_em_outra_agencia(conexao, df: pd.DataFrame) -> list[dict]:
+    """Lojas do arquivo que, no MESMO mês, já estão no sistema por OUTRA agência (ex.: o mesmo arquivo da GRUBAL
+    mandado de novo com outro nome de agência: o custo seria contado duas vezes)."""
+    meses = {(int(a), int(m)) for a, m in df[["ano", "mes"]].drop_duplicates().itertuples(index=False)}
+    if not meses:
+        return []
+    filtro = " OR ".join(f"(ano = {a} AND mes = {m})" for a, m in sorted(meses))
+    existentes = conexao.execute(text(
+        "SELECT ano, mes, agencia, agencia_chave, cnpj, loja, loja_chave, importacao_id FROM atendimentos "
+        f"WHERE {filtro}")).all()
+    no_sistema: dict = {}
+    for ano, mes, agencia, agencia_chave, cnpj, loja, loja_chave, importacao_id in existentes:
+        no_sistema.setdefault((int(ano), int(mes), _chave_loja(cnpj, loja_chave)), {})[agencia_chave] = (
+            agencia, loja, importacao_id)
+    repetidas, vistas = [], set()
+    for linha in df.itertuples(index=False):
+        chave = (int(linha.ano), int(linha.mes), _chave_loja(linha.cnpj, linha.loja_chave))
+        for agencia_chave, (agencia, loja, importacao_id) in no_sistema.get(chave, {}).items():
+            if agencia_chave == linha.agencia_chave or (chave, linha.agencia_chave, agencia_chave) in vistas:
+                continue
+            vistas.add((chave, linha.agencia_chave, agencia_chave))
+            repetidas.append({"mes": _rotulo(chave[0], chave[1]), "loja": linha.loja, "cnpj": formatar_cnpj(linha.cnpj),
+                              "agencia_nova": linha.agencia, "agencia_existente": agencia, "loja_existente": loja,
+                              "importacao_existente": importacao_id,
+                              # uso interno (gravação), não vão para a tela
+                              "_ano": chave[0], "_mes": chave[1], "_chave": chave[2], "_agencia_chave": agencia_chave})
+    return repetidas
+
+
+def _repetidas_no_arquivo(df: pd.DataFrame) -> list[str]:
+    """No próprio arquivo, a mesma loja no mesmo mês por duas agências diferentes."""
+    chaves = df.assign(chave=[_chave_loja(c, l) for c, l in zip(df["cnpj"], df["loja_chave"])])
+    por_loja = chaves.groupby(["ano", "mes", "chave"])["agencia"].agg(lambda v: sorted(set(v)))
+    return [f"{linha_loja} em {_rotulo(int(a), int(m))}: {' e '.join(agencias)}"
+            for (a, m, _), agencias, linha_loja in zip(
+                por_loja.index, por_loja.values,
+                chaves.groupby(["ano", "mes", "chave"])["loja"].first().values) if len(agencias) > 1]
+
+
 def preparar_previa(conteudo: bytes, nome_arquivo: str, usuario: str) -> dict:
     lido = ler_atendimento(conteudo, nome_arquivo)
     df = lido["linhas"]
     grupos = df.groupby(["agencia_chave", "ano", "mes"])
     with db.engine.connect() as conexao:
         existentes = _grupos_existentes(conexao, {(a, int(y), int(m)) for a, y, m in grupos.groups})
+        # A substituição da mesma agência e mês já trata o que for da própria agência; aqui só OUTRAS agências.
+        repetidas = _repetidas_em_outra_agencia(conexao, df)
+    no_arquivo = _repetidas_no_arquivo(df)
+    if no_arquivo:
+        lido["avisos"].append(f"{len(no_arquivo)} loja(s) aparecem no arquivo por duas agências no mesmo mês "
+                              "(o custo conta duas vezes; confira): " + "; ".join(no_arquivo[:6])
+                              + (" …" if len(no_arquivo) > 6 else ""))
     resumo = []
     for (chave, ano, mes), grupo in grupos:
         resumo.append({"agencia": grupo["agencia"].iloc[0], "mes": _rotulo(int(ano), int(mes)),
@@ -301,21 +390,32 @@ def preparar_previa(conteudo: bytes, nome_arquivo: str, usuario: str) -> dict:
         for velho in [t for t, p in _previas.items() if agora - p["criado"] > VALIDADE_PREVIA]:
             _previas.pop(velho, None)
         _previas[token] = {"criado": agora, "linhas": df, "erros": lido["erros"], "avisos": lido["avisos"],
-                           "arquivo": nome_arquivo, "usuario": usuario}
+                           "arquivo": nome_arquivo, "usuario": usuario, "repetidas": repetidas}
     return {"token": token, "arquivo": nome_arquivo, "abas": lido["abas"], "grupos": resumo,
             "linhas_validas": len(df), "linhas_com_erro": len(lido["erros"]), "erros": lido["erros"][:100],
             "avisos": lido["avisos"], "valor_total": round(float(df["valor"].sum()), 2),
             "lojas": int(df[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "promotores": int(df["promotor_chave"].nunique()),
-            "substituir": [f"{g['agencia']} {g['mes']}" for g in resumo if g["ja_existe"]]}
+            "substituir": [f"{g['agencia']} {g['mes']}" for g in resumo if g["ja_existe"]],
+            "repetidas_outra_agencia": [{k: v for k, v in r.items() if not k.startswith("_")} for r in repetidas],
+            "descartadas": lido["descartadas"][:200],
+            "cnpjs_invalidos": lido["cnpjs_invalidos"][:500]}
 
 
-def confirmar(token: str, substituir: bool) -> dict:
+ACOES_REPETIDAS = ("substituir", "ignorar")
+
+
+def confirmar(token: str, substituir: bool, repetidas: str | None = None) -> dict:
+    """substituir: troca o que a MESMA agência já tem nos mesmos meses.
+    repetidas: o que fazer com as lojas que OUTRA agência já tem no mesmo mês — "substituir" (apaga as da outra
+    agência e grava as do arquivo) ou "ignorar" (não grava as do arquivo). Obrigatório quando houver."""
     with _trava:
         previa = _previas.get(token)
     if previa is None:
         raise ErroImportacao("A pré-visualização expirou ou já foi usada. Envie o arquivo de novo.")
     df: pd.DataFrame = previa["linhas"]
+    if repetidas is not None and repetidas not in ACOES_REPETIDAS:
+        raise ErroImportacao("Escolha o que fazer com as lojas repetidas: substituir ou ignorar.")
     # Linhas repetidas (mesma agência, mês, loja e promotor) viram uma, com os valores somados.
     chaves = ["agencia_chave", "ano", "mes", "cnpj", "loja_chave", "promotor_chave"]
     df = (df.groupby(chaves, as_index=False, sort=False)
@@ -323,12 +423,39 @@ def confirmar(token: str, substituir: bool) -> dict:
                   "valor": "sum", "visitas": lambda v: int(v.sum()) if v.notna().any() else None}))
     grupos = {(a, int(y), int(m)) for a, y, m in df[["agencia_chave", "ano", "mes"]].itertuples(index=False)}
     meses = sorted({_rotulo(int(y), int(m)) for _, y, m in grupos})
+    ignoradas = substituidas_outras = 0
     with db.engine.begin() as conexao:
         existentes = _grupos_existentes(conexao, grupos)
         if existentes and not substituir:
             raise ErroImportacao("Já existe atendimento importado para " + ", ".join(
                 f"{df[df['agencia_chave'] == a]['agencia'].iloc[0]} {_rotulo(y, m)}" for a, y, m in sorted(existentes))
                 + ". Confirme a substituição para continuar.")
+        # Conferido de novo na hora de gravar: outra importação pode ter entrado depois da prévia.
+        outras = _repetidas_em_outra_agencia(conexao, df)
+        if outras and repetidas is None:
+            raise ErroImportacao(f"{len(outras)} loja(s) do arquivo já estão no sistema por outra agência no mesmo "
+                                 "mês. Escolha substituir as repetidas ou ignorá-las.")
+        if outras:
+            chaves_outras = {(r["_ano"], r["_mes"], r["_chave"]) for r in outras}
+            marcada = pd.Series([(int(a), int(m), _chave_loja(c, lc)) in chaves_outras for a, m, c, lc in
+                                 df[["ano", "mes", "cnpj", "loja_chave"]].itertuples(index=False)], index=df.index)
+            if repetidas == "ignorar":
+                ignoradas = int(marcada.sum())
+                df = df[~marcada]
+                if df.empty:
+                    raise ErroImportacao("Todas as lojas do arquivo já estão no sistema por outra agência: nada a "
+                                         "gravar.")
+                grupos = {(a, int(y), int(m)) for a, y, m in df[["agencia_chave", "ano", "mes"]].itertuples(index=False)}
+                meses = sorted({_rotulo(int(y), int(m)) for _, y, m in grupos})
+                existentes = {g for g in existentes if g in grupos}
+            else:
+                for r in outras:
+                    tipo, valor = r["_chave"].split(":", 1)
+                    condicao = (Atendimento.cnpj == valor) if tipo == "cnpj" else \
+                        ((Atendimento.cnpj == "") & (Atendimento.loja_chave == valor))
+                    substituidas_outras += conexao.execute(delete(Atendimento).where(
+                        Atendimento.ano == r["_ano"], Atendimento.mes == r["_mes"],
+                        Atendimento.agencia_chave == r["_agencia_chave"], condicao)).rowcount
         for agencia_chave, ano, mes in existentes:
             conexao.execute(delete(Atendimento).where(Atendimento.agencia_chave == agencia_chave,
                                                       Atendimento.ano == ano, Atendimento.mes == mes))
@@ -357,7 +484,40 @@ def confirmar(token: str, substituir: bool) -> dict:
     dados_mudaram()
     return {"importacao_id": importacao_id, "linhas_importadas": len(df), "meses": meses,
             "substituidos": [f"{df[df['agencia_chave'] == a]['agencia'].iloc[0]} {_rotulo(y, m)}"
-                             for a, y, m in sorted(existentes)]}
+                             for a, y, m in sorted(existentes) if (df["agencia_chave"] == a).any()],
+            "repetidas_ignoradas": ignoradas, "repetidas_substituidas": substituidas_outras}
+
+
+def exportar_xlsx(sessao) -> tuple[bytes, int]:
+    """Todos os atendimentos num Excel no MESMO modelo que as agências preenchem (dá para importar de novo).
+
+    Devolve (conteúdo do arquivo, número de linhas)."""
+    import io
+
+    from openpyxl import load_workbook
+
+    from .main import MODELO_ATENDIMENTO   # import aqui: main importa este módulo
+    livro = load_workbook(MODELO_ATENDIMENTO)
+    aba = livro["Atendimentos"]
+    for coluna in range(1, 14):            # tira a linha de exemplo (a coluna N, conferência do CNPJ, fica)
+        aba.cell(2, coluna).value = None
+    campos = ("ano", "mes", "agencia", "cnpj", "loja", "cidade", "uf", "promotor", "promotor_codigo", "dias",
+              "visitas", "valor", "status", "observacao")
+    consulta = select(*[getattr(Atendimento, c) for c in campos]).order_by(
+        Atendimento.ano, Atendimento.mes, Atendimento.agencia, Atendimento.loja)
+    total = 0
+    for numero, linha in enumerate(sessao.execute(consulta), start=2):
+        r = dict(zip(campos, linha))
+        promotor = "" if r["promotor"] == SEM_PROMOTOR else r["promotor"]
+        valores = [f"{r['mes']:02d}/{r['ano']}", r["agencia"], formatar_cnpj(r["cnpj"]), r["loja"], r["cidade"],
+                   r["uf"], promotor, r["promotor_codigo"], r["dias"], r["visitas"], r["valor"], r["status"],
+                   r["observacao"]]
+        for coluna, valor in enumerate(valores, start=1):
+            aba.cell(numero, coluna, valor if valor != "" else None)
+        total += 1
+    saida = io.BytesIO()
+    livro.save(saida)
+    return saida.getvalue(), total
 
 
 def desfazer(sessao, importacao: Importacao) -> dict:

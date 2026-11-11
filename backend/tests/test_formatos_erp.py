@@ -58,7 +58,7 @@ def test_xls_do_focco_em_html(cliente):
     assert dados["linhas_validas"] == len(linhas) - 1 and not dados["linhas_com_erro"]
     erp = cliente.get("/api/faturamento", params=PERIODO).json()
     clientes = {c["cnpj"]: c for c in erp["clientes"]}
-    assert clientes["00000001000101"]["razao_social"] == "REDE ALFA LTDA"
+    assert clientes["00000001000136"]["razao_social"] == "REDE ALFA LTDA"
     assert erp["totais"]["total"] > 0
 
 

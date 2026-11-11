@@ -2,7 +2,7 @@
 em backend/migrations; este arquivo só descreve as tabelas para o Python."""
 from datetime import date, datetime
 
-from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text,
+from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text,
                         UniqueConstraint, func)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -247,3 +247,15 @@ class Atendimento(Base):
     status: Mapped[str] = mapped_column(String(20), default="Ativa")
     observacao: Mapped[str] = mapped_column(Text, default="")
     linha: Mapped[int | None] = mapped_column(Integer)
+
+
+class Backup(Base):
+    """Cópia (Excel no modelo das agências) guardada antes de apagar os atendimentos."""
+    __tablename__ = "backups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    usuario: Mapped[str] = mapped_column(String(80), default="")
+    motivo: Mapped[str] = mapped_column(String(120), default="")
+    arquivo_nome: Mapped[str] = mapped_column(String(255))
+    linhas: Mapped[int] = mapped_column(Integer, default=0)
+    conteudo: Mapped[bytes] = mapped_column(LargeBinary)

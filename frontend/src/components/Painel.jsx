@@ -233,6 +233,7 @@ export default function Painel({ usuario, aoSair }) {
               lojas={dados ? dados.lojas : null}
               grade={dados ? dados.grade : null}
               avisos={dados ? dados.resumo.avisos : []}
+              agencias={dados ? dados.agencias : []}
             />
           </div>
         )}

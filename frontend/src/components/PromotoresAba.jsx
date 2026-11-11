@@ -1,8 +1,11 @@
 // Aba Promotores: montada a partir dos arquivos das agências. Para cada promotor, quem é, onde atende, quanto custa,
 // quanto as lojas dele compraram e se vale a pena mantê-lo.
 import { useState } from 'react'
-import { formatarMes, formatarMoeda, formatarPercentual } from '../formato.js'
-import { COLUNAS_SE_PAGA, EtiquetaSituacao, FichaSePaga, QuadroSePaga, situacao, textoSituacao, useSePaga } from './SePaga.jsx'
+import { formatarMes, formatarMoeda } from '../formato.js'
+import {
+  COLUNA_PERCENTUAL_COMPRAS, COLUNA_PERCENTUAL_LUCRO, COLUNAS_SE_PAGA, DICA_VALE_A_PENA, EtiquetaSituacao, FichaSePaga,
+  OpcaoOcultarSemCusto, QuadroSePaga, situacao, textoSituacao, useOcultarSemCusto, useSePaga,
+} from './SePaga.jsx'
 import { Modal, Tabela } from './ui.jsx'
 
 function MesAMes({ linhas }) {
@@ -58,6 +61,7 @@ export default function PromotoresAba({ admin, meses }) {
   const sePaga = useSePaga(meses)
   const [filtros, setFiltros] = useState({ busca: '', agencia: '', resultado: '' })
   const [aberto, setAberto] = useState(null)
+  const ocultacao = useOcultarSemCusto(sePaga.dados?.agencias)
 
   if (!meses.length) {
     return <div className="aviso">Ainda não há dados. Importe o faturamento do ERP e os arquivos das agências.</div>
@@ -65,7 +69,7 @@ export default function PromotoresAba({ admin, meses }) {
   const promotores = sePaga.dados?.promotores || []
   const agencias = [...new Map(promotores.map((p) => [p.agencia_chave, p.agencia])).entries()].sort((a, b) => a[1].localeCompare(b[1]))
   const termo = filtros.busca.trim().toLowerCase()
-  const visiveis = promotores.filter((p) =>
+  const visiveis = promotores.filter((p) => ocultacao.visivel([p.agencia_chave]) &&
     (!filtros.agencia || p.agencia_chave === filtros.agencia) &&
     (!filtros.resultado || filtros.resultado.split(',').includes(situacao(p))) &&
     (!termo || `${p.nome} ${p.codigo} ${p.cidades} ${p.agencia}`.toLowerCase().includes(termo)))
@@ -73,6 +77,7 @@ export default function PromotoresAba({ admin, meses }) {
   return (
     <>
       <QuadroSePaga titulo="Os promotores valem o que custam?" meses={meses} periodo={sePaga.periodo}
+        linhas={sePaga.dados ? promotores.filter((p) => ocultacao.visivel([p.agencia_chave])) : undefined}
         setPeriodo={sePaga.setPeriodo} dados={sePaga.dados} podeEditar={admin} aoMudarMargem={sePaga.recarregar} />
       {sePaga.erro && <div className="erro-caixa">{sePaga.erro}</div>}
       <section className="bloco">
@@ -90,6 +95,7 @@ export default function PromotoresAba({ admin, meses }) {
               <option value="limite">🟡 Só no limite</option>
               <option value="ok">🟢 Só quem vale a pena</option>
             </select>
+            <OpcaoOcultarSemCusto {...ocultacao} />
           </div>
         </div>
         <p className="dica">
@@ -109,9 +115,10 @@ export default function PromotoresAba({ admin, meses }) {
               { campo: 'lojas_ultimo_mes', titulo: 'Lojas', num: true, formato: 'inteiro' },
               { campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro' },
               { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (p) => formatarMoeda(p.custo_periodo) },
-              { campo: 'percentual_custo', titulo: '% das compras', num: true, mostrar: (p) => formatarPercentual(p.percentual_custo) },
+              COLUNA_PERCENTUAL_COMPRAS,
+              COLUNA_PERCENTUAL_LUCRO,
               { campo: 'se_paga', titulo: 'Vale a pena?', ordenar: (p) => p.percentual_do_lucro ?? 9999,
-                exportar: textoSituacao, mostrar: (p) => <EtiquetaSituacao linha={p} /> },
+                dica: DICA_VALE_A_PENA, exportar: textoSituacao, mostrar: (p) => <EtiquetaSituacao linha={p} /> },
             ]}
           />
         )}

@@ -61,7 +61,8 @@ export default function GradeMensal({ grade, acoes }) {
       const valor = l.meses[m]
       if (!valor || !l.cnpj) return valor ? formatarMoeda(valor) : '—'
       return (
-        <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => setDetalhe({ linha: l, mes: m })}>
+        <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => setDetalhe({ linha: l, mes: m })}
+          aria-label={`Ver as notas de ${l.loja || ''} em ${formatarMes(m)}: ${formatarMoeda(valor)}`}>
           {formatarMoeda(valor)}
         </button>
       )

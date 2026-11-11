@@ -1,5 +1,6 @@
 """API do Controle de Promotores (FastAPI)."""
 import asyncio
+from typing import Literal
 from dataclasses import astuple
 import logging
 import os
@@ -239,10 +240,16 @@ class Confirmacao(BaseModel):
     substituir: bool = False
 
 
+class ConfirmacaoAtendimento(BaseModel):
+    substituir: bool = False
+    # Lojas que OUTRA agência já tem no mesmo mês: "substituir" ou "ignorar" (obrigatório quando houver).
+    repetidas: Literal["substituir", "ignorar"] | None = None
+
+
 @app.post("/api/importacoes/atendimento/{token}/confirmar")
-def confirmar_atendimento(token: str, dados: Confirmacao, _=Depends(exigir_admin)):
+def confirmar_atendimento(token: str, dados: ConfirmacaoAtendimento, _=Depends(exigir_admin)):
     try:
-        return atendimento.confirmar(token, dados.substituir)
+        return atendimento.confirmar(token, dados.substituir, dados.repetidas)
     except ErroImportacao as erro:
         _erro(str(erro))
 

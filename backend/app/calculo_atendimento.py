@@ -105,11 +105,29 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
 
     meses_com_atendimento = sorted(a["indice"].unique().tolist()) if not a.empty else []
     custo_total, fat_total = float(a["valor"].sum()) if not a.empty else 0.0, float(a["faturamento"].sum()) if not a.empty else 0.0
+    # Agências sem custo no período (ex.: promotores CLT/MEI informados com R$ 0): contadas à parte, para não inflar
+    # os números de agências, promotores e lojas.
+    if not a.empty:
+        custo_agencia = a.groupby("agencia_chave")["valor"].sum()
+        sem_custo = set(custo_agencia[custo_agencia <= 0].index)
+    else:
+        sem_custo = set()
+    com_custo = a[~a["agencia_chave"].isin(sem_custo)] if not a.empty else a
+    zerada = a[a["agencia_chave"].isin(sem_custo)] if not a.empty else a
+
+    def _contar(df):
+        if df.empty:
+            return 0, 0, 0
+        return (int(df["agencia_chave"].nunique()), int(df["promotor_chave"].nunique()),
+                int(df[["cnpj", "loja_chave"]].drop_duplicates().shape[0]))
+    agencias, promotores, lojas = _contar(com_custo)
+    agencias_zero, promotores_zero, lojas_zero = _contar(zerada)
     resumo = {**_indicadores(custo_total, fat_total, margem),
               "custo": _dinheiro(custo_total), "meses": len(meses),
-              "promotores": int(a["promotor_chave"].nunique()) if not a.empty else 0,
-              "lojas": int(a[["cnpj", "loja_chave"]].drop_duplicates().shape[0]) if not a.empty else 0,
-              "agencias": int(a["agencia_chave"].nunique()) if not a.empty else 0,
+              "meses_com_arquivo": len(meses_com_atendimento),
+              "promotores": promotores, "lojas": lojas, "agencias": agencias,
+              "agencias_sem_custo": agencias_zero, "promotores_sem_custo": promotores_zero,
+              "lojas_sem_custo": lojas_zero,
               "visitas": int(a["visitas"].fillna(0).sum()) if not a.empty else 0,
               "cnpjs_compartilhados": int(a.loc[a["compartilhado"], "cnpj"].nunique()) if not a.empty else 0,
               "sem_erp": not meses_erp,
@@ -177,7 +195,8 @@ def _por_loja(a: pd.DataFrame, margem) -> list[dict]:
         linhas.append({
             "chave": f"{cnpj}|{loja_chave}", "loja": ultimo["loja"].iloc[-1], "cnpj": cnpj,
             "cidade": ultimo["cidade"].iloc[-1], "uf": ultimo["uf"].iloc[-1],
-            "agencia": _juntar(g["agencia"]), "promotor": _juntar(ultimo["promotor"]),
+            "agencia": _juntar(g["agencia"]), "agencia_chaves": sorted(set(g["agencia_chave"])),
+            "promotor": _juntar(ultimo["promotor"]),
             "promotor_chaves": sorted(set(g["promotor_chave"])), "dias": _juntar(ultimo["dias"]),
             "visitas": int(g["visitas"].fillna(0).sum()), "compartilhado": bool(g["compartilhado"].any()),
             "status": ultimo["status"].iloc[-1], "meses_com_atendimento": int(g["indice"].nunique()),

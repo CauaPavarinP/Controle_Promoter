@@ -31,6 +31,23 @@ export function EtiquetaSituacao({ linha }) {
 
 export const textoSituacao = (linha) => TEXTOS[situacao(linha)] || ''
 
+export const DICA_VALE_A_PENA = `A cor vem do "% do lucro": quanto do lucro estimado da 101 com essas lojas ` +
+  `(compras × margem) vai para pagar o atendimento. Até ${FAIXAS.bom}% = vale a pena; até ${FAIXAS.limite}% = no ` +
+  `limite; acima = a 101 paga mais do que lucra.`
+
+// Custo ÷ compras: comparação simples, não define a cor.
+export const COLUNA_PERCENTUAL_COMPRAS = {
+  campo: 'percentual_custo', titulo: '% das compras', num: true, mostrar: (l) => formatarPercentual(l.percentual_custo),
+  dica: 'Custo do atendimento ÷ o que as lojas compraram da 101. Só para comparar: não é a conta do "Vale a pena?".',
+}
+
+// Custo ÷ lucro estimado: é a conta que dá a cor do "Vale a pena?".
+export const COLUNA_PERCENTUAL_LUCRO = {
+  campo: 'percentual_do_lucro', titulo: '% do lucro', num: true, ordenar: (l) => (l.sem_erp ? null : l.percentual_do_lucro) ?? 9999,
+  mostrar: (l) => (l.sem_erp || l.percentual_do_lucro == null ? '—' : formatarPercentual(l.percentual_do_lucro)),
+  dica: 'Custo do atendimento ÷ lucro estimado da 101 (compras × margem). É esta conta que define a cor do "Vale a pena?". Sem margem informada, fica "—".',
+}
+
 // Colunas de dinheiro e do veredito, iguais nas tabelas de promotores, agências e lojas.
 export const COLUNAS_SE_PAGA = [
   { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (l) => formatarMoeda(l.custo_periodo) },
@@ -39,14 +56,49 @@ export const COLUNAS_SE_PAGA = [
   { campo: 'resultado', titulo: 'Sobra p/ 101', num: true, formato: 'moeda', ordenar: (l) => (l.sem_erp ? null : l.resultado) ?? -1e12,
     mostrar: (l) => (l.resultado == null || l.sem_erp ? '—'
       : <b className={l.resultado >= 0 ? 'texto-ok' : 'texto-critico'}>{formatarMoeda(l.resultado)}</b>) },
+  COLUNA_PERCENTUAL_LUCRO,
   { campo: 'se_paga', titulo: 'Vale a pena?', ordenar: (l) => l.percentual_do_lucro ?? 9999,
-    exportar: textoSituacao, mostrar: (l) => <EtiquetaSituacao linha={l} /> },
+    dica: DICA_VALE_A_PENA, exportar: textoSituacao, mostrar: (l) => <EtiquetaSituacao linha={l} /> },
 ]
 
 function periodoPadrao(meses) {
   if (!meses.length) return { inicio: '', fim: '' }
   const ultimo = meses[meses.length - 1]
   return { inicio: meses.find((m) => m.startsWith(ultimo.slice(0, 4))), fim: ultimo }
+}
+
+// "Ocultar agências sem custo": agências que informam as lojas com R$ 0 (ex.: promotores CLT, MEI ou freelancer
+// pagos por fora) inflam as listas. A escolha fica guardada neste navegador.
+const CHAVE_OCULTAR = 'ocultar-agencias-sem-custo'
+
+function lerOcultar() {
+  try {
+    return window.localStorage.getItem(CHAVE_OCULTAR) !== 'nao'
+  } catch {
+    return true
+  }
+}
+
+export function useOcultarSemCusto(agencias) {
+  const [ocultar, setOcultarEstado] = useState(lerOcultar)
+  const setOcultar = (valor) => {
+    setOcultarEstado(valor)
+    try {
+      window.localStorage.setItem(CHAVE_OCULTAR, valor ? 'sim' : 'nao')
+    } catch { /* navegador sem armazenamento: vale só nesta tela */ }
+  }
+  const semCusto = new Set((agencias || []).filter((a) => !(a.custo_periodo > 0)).map((a) => a.chave))
+  return { ocultar, setOcultar, semCusto, visivel: (chaves) => !ocultar || chaves.some((c) => !semCusto.has(c)) }
+}
+
+export function OpcaoOcultarSemCusto({ ocultar, setOcultar, semCusto }) {
+  if (!semCusto.size) return null
+  return (
+    <label className="marcar" title="Agências que informaram todas as lojas com custo R$ 0 no período">
+      <input type="checkbox" checked={ocultar} onChange={(e) => setOcultar(e.target.checked)} />
+      Ocultar agências sem custo ({semCusto.size})
+    </label>
+  )
 }
 
 /** Busca o painel do período (e filtros extras, ex.: { promotor }) e devolve { dados, periodo, setPeriodo, recarregar }. */
@@ -72,13 +124,13 @@ export function useSePaga(meses, extras = {}, periodoInicial = null) {
 }
 
 /** Quadro do topo: período, margem da 101 e o resultado geral. */
-export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEditar, aoMudarMargem, contar = 'promotores' }) {
+export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEditar, aoMudarMargem, contar = 'promotores', linhas }) {
   const margem = dados?.regras?.margem_percentual
   const [editando, setEditando] = useState(null)
   const [erro, setErro] = useState('')
   const resumo = dados?.resumo
   const contagem = { ok: 0, limite: 0, prejuizo: 0, 'sem-faturamento': 0, 'sem-erp': 0 }
-  for (const p of dados?.[contar] || []) {
+  for (const p of linhas || dados?.[contar] || []) {
     const s = situacao(p)
     if (s) contagem[s] += 1
   }

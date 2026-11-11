@@ -107,7 +107,8 @@ export async function exportarExcel(nomeArquivo, colunas, linhas, totais = [], d
 }
 
 /**
- * colunas: [{ campo, titulo, num, mostrar(linha), ordenar(linha), exportar(linha) }]
+ * colunas: [{ campo, titulo, num, mostrar(linha), ordenar(linha), exportar(linha), dica }]
+ *   dica: explicação da coluna (aparece ao passar o mouse no título, marcado com ⓘ)
  * Clicar no título ordena; a lista é paginada e pode ser exportada para Excel.
  */
 export function Tabela({
@@ -155,8 +156,11 @@ export function Tabela({
                   key={c.campo}
                   className={`${c.num ? 'num' : ''} ${c.semOrdem ? '' : 'ordenavel'}`}
                   onClick={c.semOrdem ? undefined : () => ordenarPor(c.campo)}
+                  title={c.dica}
+                  aria-sort={ordem?.campo === c.campo ? (ordem.crescente ? 'ascending' : 'descending') : undefined}
                 >
                   {c.titulo}
+                  {c.dica && <span className="th-dica" aria-hidden="true"> ⓘ</span>}
                   {ordem?.campo === c.campo && (ordem.crescente ? ' ▲' : ' ▼')}
                 </th>
               ))}

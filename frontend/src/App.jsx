@@ -1,10 +1,31 @@
 import { useEffect, useState } from 'react'
-import { api, definirAoExpirarSessao } from './api.js'
+import { aoMudarDemora, api, definirAoExpirarSessao } from './api.js'
 import Login from './components/Login.jsx'
 import Painel from './components/Painel.jsx'
 import MeuPerfil from './components/cadastros/MeuPerfil.jsx'
 
+// Aparece quando alguma resposta do servidor passa de 3 s (o servidor gratuito "acorda" em até ~50 s).
+function AvisoConectando() {
+  const [demorando, setDemorando] = useState(false)
+  useEffect(() => aoMudarDemora(setDemorando), [])
+  if (!demorando) return null
+  return (
+    <div className="aviso-conectando nao-imprimir" role="status" aria-live="polite">
+      Conectando ao servidor… Se ele estava parado, pode levar até 1 minuto para acordar.
+    </div>
+  )
+}
+
 export default function App() {
+  return (
+    <>
+      <AvisoConectando />
+      <Conteudo />
+    </>
+  )
+}
+
+function Conteudo() {
   // undefined = verificando sessão; null = não logado; objeto = usuário logado (nome, perfil…)
   const [usuario, setUsuario] = useState(undefined)
 

@@ -53,15 +53,21 @@ def test_cnpj_com_zero_a_mais_e_corrigido_e_invalido_entra_sem_cnpj(cliente):
         _linha(cnpj="9477652004183", loja="Fort Guanandi"),              # 13 dígitos (o Excel comeu o zero)
         _linha(cnpj="009.477.652/01096-06", loja="Fort Cafezais"),       # 16 dígitos: inválido
         _linha(cnpj="77.752.293/0107-46 - LAR SANTA HELENA", loja="Lar Santa Helena"),  # CNPJ junto com o nome
+        _linha(cnpj="09.447.652/0020-59", loja="COMPER CD"),             # 14 dígitos, verificador errado
     ])).json()
-    assert previa["linhas_validas"] == 4
+    assert previa["linhas_validas"] == 5
     assert any("corrigidos" in a and "Fort Coronel" in a and "Fort Guanandi" in a for a in previa["avisos"])
-    assert any("sem CNPJ válido" in a and "Fort Cafezais" in a for a in previa["avisos"])
+    assert any("2 loja(s) sem CNPJ válido" in a for a in previa["avisos"])
+    invalidos = {c["loja"]: c for c in previa["cnpjs_invalidos"]}
+    assert set(invalidos) == {"Fort Cafezais", "COMPER CD"}
+    assert invalidos["COMPER CD"] == {"linha": 6, "aba": "Atendimentos", "loja": "COMPER CD",
+                                      "cnpj": "09.447.652/0020-59", "motivo": "dígito verificador não confere"}
+    assert invalidos["Fort Cafezais"]["motivo"] == "16 dígitos"
     importar = cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
     assert importar.status_code == 200
     lojas = {l["loja"]: l["cnpj"] for l in cliente.get("/api/painel", params={"inicio": "2026-10", "fim": "2026-10"}).json()["lojas"]}
     assert lojas == {"Fort Coronel": "09477652004264", "Fort Guanandi": "09477652004183", "Fort Cafezais": "",
-                     "Lar Santa Helena": "77752293010746"}
+                     "Lar Santa Helena": "77752293010746", "COMPER CD": ""}
 
 
 def test_linhas_com_erro_exemplo_e_total_sao_tratadas(cliente):
@@ -178,7 +184,7 @@ def test_cnpj_de_varias_lojas_divide_o_faturamento(cliente):
     centro, praia = lojas["REDE ALFA - CENTRO"], lojas["REDE ALFA - PRAIA"]
     assert centro["compartilhado"] and praia["compartilhado"] and centro["faturamento"] == praia["faturamento"]
     erp = {c["cnpj"]: c["total"] for c in cliente.get("/api/faturamento", params=PERIODO).json()["clientes"]}
-    assert round(centro["faturamento"] + praia["faturamento"], 2) == erp["00000001000101"]
+    assert round(centro["faturamento"] + praia["faturamento"], 2) == erp["00000001000136"]
 
 
 def test_filtros_por_agencia_promotor_uf_e_loja(cliente):
@@ -200,7 +206,7 @@ def test_filtros_por_agencia_promotor_uf_e_loja(cliente):
 def test_mes_sem_arquivo_de_agencia_e_avisado(cliente):
     entrar(cliente)
     importar_faturamento(cliente)
-    importar_atendimento(cliente, _arquivo([_linha(mes="03/2026", cnpj="00.000.006/0001-06", loja="ATACADO SIGMA")]))
+    importar_atendimento(cliente, _arquivo([_linha(mes="03/2026", cnpj="00.000.006/0001-69", loja="ATACADO SIGMA")]))
     painel = cliente.get("/api/painel", params={"inicio": "2026-02", "fim": "2026-03"}).json()
     assert any("sem nenhum arquivo de agência" in a and "2026-02" in a for a in painel["resumo"]["avisos"])
     vazio = cliente.get("/api/painel", params={"inicio": "2026-05", "fim": "2026-05"}).json()
@@ -304,3 +310,145 @@ def test_exportar_excel_formatado(cliente):
     assert not aba.sheet_view.showGridLines
     cliente.post("/api/logout")
     assert cliente.post("/api/exportar", json=dados).status_code == 401
+
+
+# --- Lojas repetidas por outra agência, linhas descartadas, contadores ---------------------------------------------
+
+GRUBAL = "GRUBAL COMERCIO DE BEBIDAS AMERICAN LATIN LTDA"
+
+
+def _grubal(agencia, valor=200, cnpjs=("11.222.333/0001-81", "77.752.293/0107-46"), sem_cnpj=True):
+    linhas = [_linha(agencia=agencia, cnpj=c, loja=f"Loja {i}", valor=valor) for i, c in enumerate(cnpjs)]
+    if sem_cnpj:
+        linhas.append(_linha(agencia=agencia, cnpj="", loja="Atacadão Araçagy", valor=valor))
+    return _arquivo(linhas)
+
+
+def test_mesma_loja_no_mesmo_mes_por_outra_agencia_e_avisada(cliente):
+    """O caso real: o arquivo da GRUBAL e depois um consolidado com as mesmas lojas e outro nome de agência."""
+    entrar(cliente)
+    importar_atendimento(cliente, _grubal(GRUBAL))
+    previa = _previa(cliente, _grubal("GRUBAL (Demonstrativo outubro)")).json()
+    repetidas = previa["repetidas_outra_agencia"]
+    assert len(repetidas) == 3
+    assert {r["agencia_existente"] for r in repetidas} == {GRUBAL}
+    assert {r["loja"] for r in repetidas} == {"Loja 0", "Loja 1", "Atacadão Araçagy"}   # sem CNPJ: pelo nome
+    assert all(r["mes"] == "2026-10" and "_chave" not in r for r in repetidas)
+    # Sem escolher, não grava (o custo seria contado duas vezes).
+    sem_escolha = cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
+    assert sem_escolha.status_code == 400 and "outra agência" in sem_escolha.json()["detail"]
+    assert cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar",
+                        json={"repetidas": "qualquer"}).status_code == 422
+    custo = lambda: cliente.get("/api/painel", params={"inicio": "2026-10", "fim": "2026-10"}).json()["resumo"]["custo"]
+    assert custo() == 600
+
+
+def test_repetidas_ignorar_grava_so_as_novas(cliente):
+    entrar(cliente)
+    importar_atendimento(cliente, _grubal(GRUBAL))
+    arquivo = _grubal("GRUBAL (Demonstrativo outubro)", cnpjs=("11.222.333/0001-81", "09.477.652/0042-64"),
+                      sem_cnpj=False)
+    previa = _previa(cliente, arquivo).json()
+    assert [r["loja"] for r in previa["repetidas_outra_agencia"]] == ["Loja 0"]
+    resultado = cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar",
+                             json={"repetidas": "ignorar"}).json()
+    assert resultado["repetidas_ignoradas"] == 1 and resultado["linhas_importadas"] == 1
+    painel = cliente.get("/api/painel", params={"inicio": "2026-10", "fim": "2026-10"}).json()
+    assert painel["resumo"]["custo"] == 800
+    agencias = {a["nome"]: a["lojas"] for a in painel["agencias"]}
+    assert agencias == {GRUBAL: 3, "GRUBAL (Demonstrativo outubro)": 1}
+
+
+def test_repetidas_substituir_tira_da_outra_agencia(cliente):
+    entrar(cliente)
+    importar_atendimento(cliente, _grubal(GRUBAL))
+    previa = _previa(cliente, _grubal("GRUBAL (Demonstrativo outubro)", valor=150)).json()
+    resultado = cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar",
+                             json={"repetidas": "substituir"}).json()
+    assert resultado["repetidas_substituidas"] == 3
+    painel = cliente.get("/api/painel", params={"inicio": "2026-10", "fim": "2026-10"}).json()
+    assert painel["resumo"]["custo"] == 450 and {a["nome"] for a in painel["agencias"]} == {"GRUBAL (Demonstrativo outubro)"}
+    # A importação antiga ficou vazia: aparece como substituída no histórico.
+    historico = [i for i in cliente.get("/api/importacoes").json() if i["tipo"] == "atendimento"]
+    assert [i["situacao"] for i in historico] == ["ativa", "substituida"]
+
+
+def test_mesmo_cnpj_em_outro_mes_ou_mesma_agencia_nao_e_repetida(cliente):
+    entrar(cliente)
+    importar_atendimento(cliente, _grubal(GRUBAL))
+    outro_mes = _previa(cliente, _arquivo([_linha(mes="11/2026", agencia="Outra", cnpj="11.222.333/0001-81")])).json()
+    assert outro_mes["repetidas_outra_agencia"] == []
+    mesma_agencia = _previa(cliente, _grubal(GRUBAL)).json()
+    assert mesma_agencia["repetidas_outra_agencia"] == [] and mesma_agencia["substituir"]
+
+
+def test_mesma_loja_por_duas_agencias_no_proprio_arquivo(cliente):
+    entrar(cliente)
+    previa = _previa(cliente, _arquivo([_linha(agencia="A"), _linha(agencia="B")])).json()
+    assert any("duas agências no mesmo mês" in a and "A e B" in a for a in previa["avisos"])
+
+
+def test_cabecalho_repetido_e_titulo_sao_descartados(cliente):
+    """Arquivo com blocos por agência: título ("AGENCIA IMPACTO") e cabeçalho de novo no meio."""
+    entrar(cliente)
+    previa = _previa(cliente, _arquivo([
+        _linha(loja="Loja Um"),
+        [None, None, None, "AGENCIA IMPACTO", None, None, "AGENCIA IMPACTO", None, None, None, None, None, None],
+        ["Mês de referência", "Agência ou MEI", "CNPJ da loja", "Loja", "Cidade", "UF", "Promotor", "Código do promotor",
+         "Dias de visita", "Visitas no mês", "Valor do mês (R$)", "Status", "Observação"],
+        _linha(loja="Loja Dois", cnpj="77.752.293/0107-46"),
+        _linha(loja="Loja Três", cnpj="09.477.652/0042-64", promotor="Agência Beta"),
+    ])).json()
+    assert previa["linhas_validas"] == 3
+    assert [(d["linha"], d["motivo"]) for d in previa["descartadas"]] == [
+        (3, "Parece título (sem CNPJ, valor e visitas)"), (4, "Cabeçalho repetido")]
+    assert "AGENCIA IMPACTO" in previa["descartadas"][0]["conteudo"]
+    assert any("descartadas" in a for a in previa["avisos"])
+    assert any("nome de agência" in a and "Agência Beta" in a for a in previa["avisos"])
+    cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
+    nomes = {p["nome"] for p in cliente.get("/api/painel", params={"inicio": "2026-10", "fim": "2026-10"}).json()["promotores"]}
+    assert "AGENCIA IMPACTO" not in nomes
+
+
+def test_card_conta_so_os_meses_com_arquivo(cliente):
+    entrar(cliente)
+    importar_atendimento(cliente, _arquivo([_linha(mes="10/2026")]))
+    resumo = cliente.get("/api/painel", params={"inicio": "2026-08", "fim": "2026-10"}).json()["resumo"]
+    assert resumo["meses"] == 3 and resumo["meses_com_arquivo"] == 1
+
+
+def test_agencias_sem_custo_contam_a_parte(cliente):
+    entrar(cliente)
+    importar_atendimento(cliente, _arquivo([
+        _linha(agencia="Agência Paga", loja="Loja Um", valor=300),
+        _linha(agencia="Red Horse PR CLT", loja="Loja Dois", cnpj="77.752.293/0107-46", valor=0, visitas=None),
+        _linha(agencia="Red Horse PR CLT", loja="Loja Três", cnpj="09.477.652/0042-64", promotor="Outro", valor=0),
+    ]))
+    resumo = cliente.get("/api/painel", params={"inicio": "2026-10", "fim": "2026-10"}).json()["resumo"]
+    assert (resumo["agencias"], resumo["promotores"], resumo["lojas"]) == (1, 1, 1)
+    assert (resumo["agencias_sem_custo"], resumo["promotores_sem_custo"], resumo["lojas_sem_custo"]) == (1, 2, 2)
+    lojas = cliente.get("/api/painel", params={"inicio": "2026-10", "fim": "2026-10"}).json()["lojas"]
+    assert all(l["agencia_chaves"] for l in lojas)
+
+
+def test_apagar_guarda_backup_que_da_para_importar_de_novo(cliente):
+    entrar(cliente)
+    importar_atendimento(cliente)
+    resposta = cliente.post("/api/cadastros/apagar", json={"confirmacao": "APAGAR"}).json()
+    assert resposta["atendimentos"] == 97 and resposta["backup"]
+    backups = cliente.get("/api/backups").json()
+    assert len(backups) == 1 and backups[0]["linhas"] == 97 and backups[0]["arquivo"].endswith(".xlsx")
+    arquivo = cliente.get(f"/api/backups/{resposta['backup']}")
+    assert arquivo.status_code == 200 and "attachment" in arquivo.headers["content-disposition"]
+    assert cliente.get("/api/painel", params=PERIODO).json()["resumo"]["custo"] == 0
+    # O backup é o modelo das agências: importar devolve tudo.
+    previa = _previa(cliente, arquivo.content).json()
+    assert previa["linhas_validas"] == 97 and not previa["cnpjs_invalidos"]
+    cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
+    assert cliente.get("/api/painel", params=PERIODO).json()["resumo"]["custo"] == 44200
+    # Sem nada para apagar, não cria backup vazio.
+    cliente.post("/api/cadastros/apagar", json={"confirmacao": "APAGAR"})
+    vazio = cliente.post("/api/cadastros/apagar", json={"confirmacao": "APAGAR"}).json()
+    assert vazio == {"atendimentos": 0, "backup": None, "backup_arquivo": None}
+    assert len(cliente.get("/api/backups").json()) == 2
+    assert cliente.get("/api/backups/999").status_code == 404
