@@ -209,3 +209,31 @@ def test_respostas_grandes_vao_comprimidas(cliente):
     resposta = cliente.get("/api/painel", params=PERIODO, headers={"Accept-Encoding": "gzip"})
     assert resposta.status_code == 200 and resposta.headers.get("content-encoding") == "gzip"
     assert resposta.json()["resumo"]["faturamento"] > 0
+
+
+def test_promotor_se_paga_com_a_margem(cliente):
+    """Resultado = faturamento das lojas × margem da 101 − custo do promotor no período."""
+    entrar(cliente)
+    importar_cadastros(cliente)
+    importar_faturamento(cliente)
+    painel = cliente.get("/api/painel", params=PERIODO).json()
+    assert all(p["resultado"] is None for p in painel["promotores"])   # sem margem: só o %
+
+    regras = cliente.get("/api/regras").json()["regras"]
+    assert cliente.put("/api/regras", json={**regras, "margem_percentual": "abc"}).status_code == 400
+    assert cliente.put("/api/regras", json={**regras, "margem_percentual": 150}).status_code == 400
+    assert cliente.put("/api/regras", json={**regras, "margem_percentual": "10,5"}).json()["regras"]["margem_percentual"] == 10.5
+
+    painel = cliente.get("/api/painel", params=PERIODO).json()   # a resposta guardada foi descartada
+    for linha in painel["promotores"]:
+        lucro = linha["faturamento"] * 0.105
+        assert abs(linha["lucro_estimado"] - lucro) < 0.02
+        assert abs(linha["resultado"] - (lucro - linha["custo_periodo"])) < 0.02
+        if lucro > 0:
+            assert abs(linha["percentual_do_lucro"] - linha["custo_periodo"] / lucro * 100) < 0.1
+    for loja in painel["lojas"]:
+        assert abs(loja["resultado"] - (loja["faturamento"] * 0.105 - loja["custo_periodo"])) < 0.02
+    resumo = painel["resumo"]
+    assert abs(resumo["resultado"] - (resumo["faturamento"] * 0.105 - resumo["custo"])) < 0.02
+    assert abs(sum(p["resultado"] for p in painel["promotores"]) - resumo["resultado"]) < 1
+    assert painel["regras"]["margem_percentual"] == 10.5
