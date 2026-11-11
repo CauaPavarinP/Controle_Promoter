@@ -1,4 +1,4 @@
-from conftest import EXEMPLOS, entrar, importar_cadastros, importar_faturamento
+from conftest import EXEMPLOS, entrar, importar_atendimento, importar_faturamento
 
 PERIODO = {"inicio": "2026-01", "fim": "2026-09"}
 
@@ -9,13 +9,13 @@ def _faturamento_total(cliente):
 
 def test_previa_mostra_resumo_antes_de_gravar(cliente):
     entrar(cliente)
-    importar_cadastros(cliente, "promotores")         # sem roteiro: todos os CNPJs ficam "sem roteiro"
+    # Sem arquivo de agência: todos os CNPJs ficam "sem agência".
     with open(EXEMPLOS / "faturamento_exemplo.xlsx", "rb") as arquivo:
         previa = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("f.xlsx", arquivo)}).json()
     assert previa["meses"][0] == "2026-01" and previa["meses_existentes"] == []
     assert previa["linhas_com_erro"] == 0 and previa["clientes"] == 7
     assert previa["cnpjs_sem_roteiro"]["quantidade"] == 7
-    assert cliente.get("/api/opcoes").json()["meses"] == []   # nada gravado ainda
+    assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == 0   # nada gravado ainda
 
 
 def test_linhas_com_erro_sao_listadas(cliente, tmp_path):
@@ -35,7 +35,7 @@ def test_linhas_com_erro_sao_listadas(cliente, tmp_path):
 
 def test_reimportar_pede_confirmacao_e_nao_duplica(cliente):
     entrar(cliente)
-    importar_cadastros(cliente)
+    importar_atendimento(cliente)
     _, primeira = importar_faturamento(cliente)
     assert primeira.status_code == 200
     total = _faturamento_total(cliente)
@@ -52,83 +52,17 @@ def test_reimportar_pede_confirmacao_e_nao_duplica(cliente):
 
 def test_desfazer_importacao(cliente):
     entrar(cliente)
-    importar_cadastros(cliente)
+    importar_atendimento(cliente)
     _, resposta = importar_faturamento(cliente)
     ident = resposta.json()["importacao_id"]
     assert cliente.post(f"/api/importacoes/{ident}/desfazer").json()["itens_apagados"] > 0
-    assert cliente.get("/api/opcoes").json()["meses"] == []
+    assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == 0
     assert cliente.post(f"/api/importacoes/{ident}/desfazer").status_code == 400
-
-
-def test_importacao_inicial_da_planilha_e_conferencia(cliente):
-    entrar(cliente)
-    with open(EXEMPLOS / "planilha_completa_exemplo.xlsx", "rb") as arquivo:
-        resultado = cliente.post("/api/importacoes/planilha", files={"arquivo": ("ROTEIROS.xlsx", arquivo)}).json()
-    assert resultado["promotores"]["cadastros"]["criados"] == 4
-    assert resultado["roteiro"]["cadastros"]["criados"] == 11
-    assert resultado["conferencia"] == {"abas": ["PR", "SC"], "ano": 2026}
-    token = resultado["faturamento"]["token"]
-    assert cliente.post(f"/api/importacoes/faturamento/{token}/confirmar", json={}).status_code == 200
-
-    conferencia = cliente.get("/api/conferencia").json()
-    assert conferencia["disponivel"] and conferencia["ano"] == 2026
-    for aba in conferencia["abas"]:
-        # Com as regras padrão (TOTAL VENDA, todos os tipos), o sistema bate com a planilha.
-        assert aba["total"]["diferenca"] == 0, aba
-
-    # Rodar a importação inicial de novo não duplica os cadastros.
-    with open(EXEMPLOS / "planilha_completa_exemplo.xlsx", "rb") as arquivo:
-        de_novo = cliente.post("/api/importacoes/planilha", files={"arquivo": ("ROTEIROS.xlsx", arquivo)}).json()
-    assert de_novo["roteiro"]["cadastros"]["criados"] == 0
-    assert len(cliente.get("/api/pdvs").json()) == 11
-
-
-def test_pendencias_e_lojas_com_mesmo_cnpj(cliente):
-    entrar(cliente)
-    importar_cadastros(cliente)
-    importar_faturamento(cliente)
-    pendencias = cliente.get("/api/pendencias").json()
-    mesmo = {g["cnpj"]: g for g in pendencias["lojas_mesmo_cnpj"]}
-    assert set(mesmo) == {"00000001000101", "00000005000105", "00000008000108"}
-    lambda_ = mesmo["00000008000108"]
-    assert lambda_["cod_cli_no_faturamento"] == ["2001", "2002"] and not lambda_["separado_por_cod_cli"]
-    assert "MERCADO DELTA" in {p["pdv"] for p in pendencias["pdvs_sem_faturamento"]}
-    assert pendencias["roteiros_sem_visitas"] == 0 and pendencias["total"] > 0
-
-    # Preenchendo o COD CLI de cada loja da LAMBDA, o faturamento passa a ser separado.
-    for loja in lambda_["lojas"]:
-        codigo = "2001" if "CENTRO" in loja["nome"] else "2002"
-        pdv = next(p for p in cliente.get("/api/pdvs").json() if p["id"] == loja["id"])
-        assert cliente.put(f"/api/pdvs/{loja['id']}", json={**pdv, "cod_cli_erp": codigo}).status_code == 200
-    pendencias = cliente.get("/api/pendencias").json()
-    assert next(g for g in pendencias["lojas_mesmo_cnpj"] if g["cnpj"] == "00000008000108")["separado_por_cod_cli"]
-    lojas = cliente.get("/api/painel", params=PERIODO).json()["lojas"]
-    lambda_lojas = [l for l in lojas if l["loja"].startswith("LAMBDA")]
-    assert all(l["separado_por_cod_cli"] and not l["compartilhado"] for l in lambda_lojas)
-    assert lambda_lojas[0]["faturamento"] != lambda_lojas[1]["faturamento"]
-
-
-def test_resolver_colaborador_pendente(cliente, tmp_path):
-    entrar(cliente)
-    importar_cadastros(cliente, "promotores")
-    arquivo = tmp_path / "roteiro.csv"
-    arquivo.write_text("Colaborador;CPF/CNPJ;Razão Social;Cidade;UF\n"
-                       "FULANO DE TAL;11.222.333/0001-81;LOJA X;TIJUCAS;SC\n"
-                       "FULANO DE TAL;11.444.777/0001-61;LOJA Y;TIJUCAS;SC\n", encoding="utf-8")
-    with open(arquivo, "rb") as conteudo:
-        cliente.post("/api/importacoes/roteiro", files={"arquivo": ("roteiro.csv", conteudo)})
-    pendencias = cliente.get("/api/pendencias").json()
-    assert pendencias["colaboradores_sem_promotor"][0]["quantidade"] == 2
-    ana = next(p for p in cliente.get("/api/promotores").json() if p["nome"] == "Ana Teste")
-    resposta = cliente.post("/api/pendencias/colaborador", json={
-        "colaborador": "FULANO DE TAL", "promotor_id": ana["id"], "data_inicio": "2026-01-01"})
-    assert resposta.json() == {"vinculos_criados": 2}
-    assert cliente.get("/api/pendencias").json()["colaboradores_sem_promotor"] == []
 
 
 def test_grade_mes_a_mes_e_detalhe_das_notas(cliente):
     entrar(cliente)
-    importar_cadastros(cliente)
+    importar_atendimento(cliente)
     importar_faturamento(cliente)
     painel = cliente.get("/api/painel", params={**PERIODO, "uf": "PR"}).json()
     grade = painel["grade"]
@@ -142,14 +76,11 @@ def test_grade_mes_a_mes_e_detalhe_das_notas(cliente):
     detalhe = cliente.get("/api/faturamento/itens", params={**linha["detalhe"], "mes": mes}).json()
     assert detalhe["itens"] and detalhe["total_considerado"] == linha["meses"][mes]
 
-    # Filtro por PDV e bloco de custos (como a aba PROMOTORES BRASIL).
-    so_pdv = cliente.get("/api/painel", params={**PERIODO, "pdv": "ATACADO SIGMA"}).json()
-    assert [l["loja"] for l in so_pdv["lojas"]] == ["ATACADO SIGMA"]
-    assert [c["nome"] for c in so_pdv["custos"]] == ["Carla Teste"]
-    assert so_pdv["custos"][0]["total"] == 3250.0
-    loja = so_pdv["lojas"][0]
-    assert loja["faturamento_por_visita"] == round(loja["faturamento"] / (2 * 52 / 12 * 9), 2)
-    assert "pdvs" in cliente.get("/api/opcoes").json()
+    # Filtro por loja.
+    so_loja = cliente.get("/api/painel", params={**PERIODO, "loja": "ATACADO SIGMA"}).json()
+    assert [l["loja"] for l in so_loja["lojas"]] == ["ATACADO SIGMA"]
+    assert so_loja["lojas"][0]["promotor"] == "Carla Teste" and so_loja["lojas"][0]["custo_periodo"] == 400 * 9
+    assert "lojas" in cliente.get("/api/opcoes").json()
 
 
 def test_arquivo_lento_e_lido_em_segundo_plano(cliente, banco, monkeypatch):
@@ -179,7 +110,7 @@ def test_arquivo_lento_e_lido_em_segundo_plano(cliente, banco, monkeypatch):
 def test_somas_guardadas_sao_refeitas_quando_o_faturamento_muda(cliente):
     """O Resumo e a aba Faturamento usam a soma guardada na memória, mas nunca uma soma velha."""
     entrar(cliente)
-    importar_cadastros(cliente)
+    importar_atendimento(cliente)
     assert _faturamento_total(cliente) == 0
     assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == 0
     _, resposta = importar_faturamento(cliente)
@@ -190,7 +121,7 @@ def test_somas_guardadas_sao_refeitas_quando_o_faturamento_muda(cliente):
     assert cliente.post(f"/api/importacoes/{ident}/desfazer").status_code == 200
     assert _faturamento_total(cliente) == 0
     assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == 0
-    assert cliente.get("/api/opcoes").json()["meses"] == []
+    assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == 0
 
 
 def test_varios_pedidos_ao_mesmo_tempo_fazem_uma_soma_so(banco, monkeypatch):
@@ -221,27 +152,6 @@ def test_varios_pedidos_ao_mesmo_tempo_fazem_uma_soma_so(banco, monkeypatch):
     banco.faturamento.limpar_cache()            # faturamento mudou: a próxima tela soma de novo
     banco.faturamento.faturamento_mensal()
     assert len(chamadas) == 2
-
-
-def test_cnpj_com_mais_de_14_digitos_nao_derruba_o_roteiro(cliente):
-    """Célula com dois CNPJs (28 dígitos) dava erro 500 (VARCHAR(14)); agora a loja entra sem CNPJ, com aviso."""
-    import io
-
-    import pandas as pd
-    entrar(cliente)
-    importar_cadastros(cliente, "promotores")
-    nome = cliente.get("/api/promotores").json()[0]["nome"]
-    sc = pd.DataFrame({"Colaborador": [nome, nome], "CPF/CNPJ": ["12.345.678/0001-90 / 98.765.432/0001-10",
-                                                               "11.222.333/0001-81"],
-                       "RAZÃO SOCIAL": ["Loja Dupla", "Loja Certa"], "Cidade": ["ITAJAI", "ITAJAI"], "UF": ["SC", "SC"]})
-    arquivo = io.BytesIO()
-    with pd.ExcelWriter(arquivo) as planilha:
-        sc.to_excel(planilha, sheet_name="SC", index=False)
-    resposta = cliente.post("/api/importacoes/roteiro", files={"arquivo": ("sc.xlsx", arquivo.getvalue())})
-    assert resposta.status_code == 200, resposta.text
-    assert any("CNPJ inválido" in aviso and "Loja Dupla" in aviso for aviso in resposta.json()["avisos"])
-    pdvs = {p["nome_fantasia"]: p["cnpj_cpf"] for p in cliente.get("/api/pdvs").json()}
-    assert pdvs["Loja Dupla"] == "" and pdvs["Loja Certa"] == "11222333000181"
 
 
 def test_erro_inesperado_vira_mensagem_para_a_tela(banco, monkeypatch):
@@ -279,7 +189,7 @@ def test_so_a_previa_mais_recente_fica_guardada(cliente, banco, monkeypatch):
 def test_arquivo_grande_e_lido_e_gravado_em_processo_separado(cliente, banco, monkeypatch):
     """Acima do limite, ler e gravar rodam num processo que termina no fim e devolve toda a memória."""
     entrar(cliente)
-    importar_cadastros(cliente)
+    importar_atendimento(cliente)
     monkeypatch.setattr(banco.faturamento, "LIMITE_ARQUIVO_PROCESSO", 0)
     monkeypatch.setattr(banco.faturamento, "LIMITE_LINHAS_PROCESSO", 0)
     monkeypatch.setattr(banco.main, "ESPERA_PREVIA_SEGUNDOS", 0)
@@ -313,8 +223,8 @@ def test_uma_leitura_pesada_por_vez(cliente, banco):
     entrar(cliente)
     banco.carga.trava_cadastros.acquire()
     try:
-        with open(EXEMPLOS / "promotores_exemplo.xlsx", "rb") as arquivo:
-            resposta = cliente.post("/api/importacoes/promotores", files={"arquivo": ("p.xlsx", arquivo)})
+        with open(EXEMPLOS / "atendimento_exemplo.xlsx", "rb") as arquivo:
+            resposta = cliente.post("/api/importacoes/atendimento/previa", files={"arquivo": ("a.xlsx", arquivo)})
         assert resposta.status_code == 400 and "outra planilha" in resposta.json()["detail"]
         with open(EXEMPLOS / "faturamento_exemplo.xlsx", "rb") as arquivo:
             resposta = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("f.xlsx", arquivo)})
@@ -322,4 +232,4 @@ def test_uma_leitura_pesada_por_vez(cliente, banco):
         assert cliente.post("/api/cadastros/apagar", json={"confirmacao": "APAGAR"}).status_code == 400
     finally:
         banco.carga.trava_cadastros.release()
-    importar_cadastros(cliente, "promotores")   # liberado, volta a funcionar
+    importar_atendimento(cliente)   # liberado, volta a funcionar

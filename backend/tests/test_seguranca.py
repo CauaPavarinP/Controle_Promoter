@@ -33,9 +33,10 @@ def test_trocar_senha_derruba_as_outras_sessoes(banco, cliente):
 
 def test_pedido_vindo_de_outro_site_e_recusado(cliente):
     entrar(cliente)
-    fora = cliente.post("/api/supervisores", json={"nome": "X"}, headers={"Origin": "https://site-malicioso.com"})
+    regras = cliente.get("/api/regras").json()["regras"]
+    fora = cliente.put("/api/regras", json=regras, headers={"Origin": "https://site-malicioso.com"})
     assert fora.status_code == 403
-    dentro = cliente.post("/api/supervisores", json={"nome": "Y"}, headers={"Origin": "http://testserver"})
+    dentro = cliente.put("/api/regras", json=regras, headers={"Origin": "http://testserver"})
     assert dentro.status_code == 200
 
 

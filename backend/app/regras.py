@@ -15,8 +15,8 @@ MODOS_RATEIO = {"igual", "visitas"}
 ACOES_TIPO = {"soma", "subtrai", "ignora"}
 
 REGRAS_PADRAO = {
-    # Padrão igual à planilha: soma TOTAL VENDA de todas as linhas, sem filtrar tipo de nota nem RECEITA.
-    "valor_faturamento": "total_venda",   # total_venda (coluna AL) | vlr_total (coluna AD)
+    # Valor do faturamento: VLR TOTAL, que vem do ERP (o TOTAL VENDA era uma coluna feita à mão na planilha antiga).
+    "valor_faturamento": "vlr_total",     # vlr_total (coluna VLR TOTAL do ERP) | total_venda
     # Tipo de nota (sem acento, maiúsculo) -> soma | subtrai | ignora.
     "tipos_nf": {},
     "tipos_nf_padrao": "soma",            # o que fazer com tipos que não estão na lista acima

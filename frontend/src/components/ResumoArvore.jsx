@@ -1,30 +1,29 @@
-// Tabela única do Resumo, que abre em níveis: UF da loja → supervisor → promotor.
-// Junta os blocos Monitoramento, Custo e Faturamento PDV da aba RESUMO da planilha.
+// Tabela única do Resumo, que abre em níveis: UF da loja → agência → promotor.
 import { useState } from 'react'
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
 import { exportarExcel, useImprimindo } from './ui.jsx'
 
 const COLUNAS = [
-  { campo: 'nome', titulo: 'UF / Supervisor / Promotor' },
+  { campo: 'nome', titulo: 'UF / Agência / Promotor' },
   { campo: 'promotores', titulo: 'Promotores', num: true },
   { campo: 'lojas', titulo: 'Lojas', num: true },
-  { campo: 'visitas_semana', titulo: 'Visitas/sem.', num: true },
-  { campo: 'custo_periodo', titulo: 'Custo no período', num: true, moeda: true },
-  { campo: 'faturamento', titulo: 'Faturamento', num: true, moeda: true },
+  { campo: 'visitas', titulo: 'Visitas', num: true },
+  { campo: 'custo_periodo', titulo: 'Custo (agências)', num: true, moeda: true },
+  { campo: 'faturamento', titulo: 'Lojas compraram', num: true, moeda: true },
   { campo: 'percentual_custo', titulo: 'Custo ÷ faturamento', num: true },
 ]
 
-/** Monta a árvore com as linhas do painel, que já vêm na ordem UF → supervisor → promotor. */
+/** Monta a árvore com as linhas do painel, que já vêm na ordem UF → agência → promotor. */
 function montarArvore(porUf) {
   const ufs = []
   for (const l of porUf) {
     if (l.nivel === 'uf') {
       ufs.push({ ...l, chave: `uf-${l.uf}`, filhos: [] })
-    } else if (l.nivel === 'supervisor') {
-      ufs[ufs.length - 1].filhos.push({ ...l, chave: `s-${l.uf}-${l.nome}`, filhos: [] })
+    } else if (l.nivel === 'agencia') {
+      ufs[ufs.length - 1].filhos.push({ ...l, chave: `a-${l.uf}-${l.agencia_chave}`, filhos: [] })
     } else {
       const equipe = ufs[ufs.length - 1].filhos
-      equipe[equipe.length - 1].filhos.push({ ...l, chave: `p-${l.uf}-${l.codigo}`, promotores: null })
+      equipe[equipe.length - 1].filhos.push({ ...l, chave_promotor: l.chave, chave: `p-${l.uf}-${l.chave}`, promotores: null })
     }
   }
   return ufs
@@ -43,8 +42,7 @@ export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor })
   const [abertos, setAbertos] = useState(() => new Set())
   const imprimindo = useImprimindo()
   const arvore = montarArvore(porUf)
-  // Visitas por semana: a planilha não tem; a coluna só aparece quando alguma loja tiver o dado.
-  const colunas = porUf.some((l) => l.visitas_semana != null) ? COLUNAS : COLUNAS.filter((c) => c.campo !== 'visitas_semana')
+  const colunas = COLUNAS
   const total = { ...resumo, nome: 'Total geral', custo_periodo: resumo.custo }
   const aberto = (chave) => imprimindo || abertos.has(chave)
 
@@ -84,16 +82,15 @@ export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor })
   return (
     <section className="bloco">
       <div className="bloco-cabecalho">
-        <h2>Custo × faturamento por UF, supervisor e promotor</h2>
+        <h2>Custo × compras por UF, agência e promotor</h2>
         <div className="bloco-ferramentas nao-imprimir">
           <button className="secundario" onClick={abrirTudo}>Abrir tudo</button>
           <button className="secundario" onClick={() => setAbertos(new Set())}>Fechar tudo</button>
         </div>
       </div>
       <p className="dica nao-imprimir">
-        A UF é a da loja: promotor que atende mais de uma UF aparece em cada uma, com a parte do custo dele que foi para
-        aquelas lojas. Clique numa UF para ver os supervisores, num supervisor para ver os promotores e num promotor para
-        ver as lojas dele.
+        A UF é a da loja: promotor que atende mais de uma UF aparece em cada uma, com o custo e as compras daquelas lojas.
+        Clique numa UF para ver as agências, numa agência para ver os promotores e num promotor para ver as lojas dele.
       </p>
       <div className="tabela-rolagem">
         <table className="arvore">
@@ -104,7 +101,7 @@ export default function ResumoArvore({ porUf, resumo, regras, aoAbrirPromotor })
             {!linhas.length && <tr><td colSpan={colunas.length} className="vazio">Nenhum promotor com esses filtros.</td></tr>}
             {linhas.map((l) => {
               const temFilhos = l.nivel < 2 && l.filhos.length > 0
-              const clicar = l.nivel === 2 ? () => aoAbrirPromotor(l.codigo) : temFilhos ? () => alternar(l.chave) : undefined
+              const clicar = l.nivel === 2 ? () => aoAbrirPromotor(l.chave_promotor) : temFilhos ? () => alternar(l.chave) : undefined
               return (
                 <tr key={l.chave} className={`nivel-${l.nivel} ${clicar ? 'clicavel' : ''}`} onClick={clicar}>
                   {colunas.map((c, i) => (

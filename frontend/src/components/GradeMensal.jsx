@@ -1,4 +1,4 @@
-// Faturamento mês a mês por loja (substitui as abas SC, SP, PR, MG, RS da planilha).
+// Faturamento mês a mês por loja atendida (clicável para ver as notas do ERP).
 import { useEffect, useState } from 'react'
 import { http } from '../api.js'
 import { formatarCnpj, formatarData, formatarMes, formatarMoeda } from '../formato.js'
@@ -38,7 +38,7 @@ export function DetalheNotas({ linha, mes, aoFechar }) {
               { campo: 'tipo_nf', titulo: 'Tipo' },
               { campo: 'descricao_item', titulo: 'Item', quebra: true },
               { campo: 'qtde', titulo: 'Qtde', num: true },
-              { campo: 'total_venda', titulo: 'TOTAL VENDA', num: true, mostrar: (i) => formatarMoeda(i.total_venda) },
+              { campo: 'vlr_total', titulo: 'VLR TOTAL', num: true, mostrar: (i) => formatarMoeda(i.vlr_total) },
               { campo: 'acao', titulo: 'No faturamento', mostrar: (i) => NOMES_ACAO[i.acao] },
               { campo: 'valor_considerado', titulo: 'Considerado', num: true, mostrar: (i) => formatarMoeda(i.valor_considerado) },
             ]}
@@ -70,7 +70,7 @@ export default function GradeMensal({ grade, acoes }) {
 
   return (
     <section className="bloco">
-      <h2>Faturamento PDV ({grade.linhas.length})</h2>
+      <h2>Compras mês a mês ({grade.linhas.length})</h2>
       <p className="dica nao-imprimir">Clique num valor para ver as notas daquele mês.</p>
       <div className="grade-mensal">
         <Tabela
@@ -79,9 +79,9 @@ export default function GradeMensal({ grade, acoes }) {
           porPagina={100}
           arquivo="faturamento-pdv"
           vazio="Nenhuma loja com esses filtros."
-          rodape={[{ supervisor: 'Total', ...grade.totais }]}
+          rodape={[{ agencia: 'Total', ...grade.totais }]}
           colunas={[
-            { campo: 'supervisor', titulo: 'Supervisor', quebra: true },
+            { campo: 'agencia', titulo: 'Agência', quebra: true },
             { campo: 'promotor', titulo: 'Promotor', quebra: true },
             { campo: 'cnpj', titulo: 'CNPJ', mostrar: (l) => (l.meses ? formatarCnpj(l.cnpj) : ''), exportar: (l) => (l.cnpj ? formatarCnpj(l.cnpj) : '') },
             { campo: 'loja', titulo: 'PDV', quebra: true,

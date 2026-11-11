@@ -218,3 +218,32 @@ class FaturamentoItem(Base):
     bonificacao: Mapped[float | None] = _valor()
     total_venda: Mapped[float | None] = _valor()
     grupo: Mapped[str | None] = _texto(60)
+
+
+class Atendimento(Base):
+    """Uma loja atendida por uma agência (ou MEI, ou a própria 101) num mês, com o valor cobrado.
+
+    Vem do arquivo que a agência manda (modelo "Atendimento das agências"). Lojas, promotores e agências do
+    sistema são montados a partir destas linhas.
+    """
+    __tablename__ = "atendimentos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    importacao_id: Mapped[int] = mapped_column(ForeignKey("importacoes.id", ondelete="CASCADE"))
+    ano: Mapped[int] = mapped_column(Integer)
+    mes: Mapped[int] = mapped_column(Integer)
+    agencia: Mapped[str] = mapped_column(String(150))
+    agencia_chave: Mapped[str] = mapped_column(String(150))
+    cnpj: Mapped[str] = mapped_column(String(14), default="")
+    loja: Mapped[str] = mapped_column(String(200))
+    loja_chave: Mapped[str] = mapped_column(String(200))
+    cidade: Mapped[str] = mapped_column(String(120), default="")
+    uf: Mapped[str] = mapped_column(String(2), default="")
+    promotor: Mapped[str] = mapped_column(String(150), default="")
+    promotor_codigo: Mapped[str] = mapped_column(String(40), default="")
+    promotor_chave: Mapped[str] = mapped_column(String(200), default="")
+    dias: Mapped[str] = mapped_column(String(80), default="")
+    visitas: Mapped[int | None] = mapped_column(Integer)
+    valor: Mapped[float] = mapped_column(Numeric(12, 2, asdecimal=False), default=0)
+    status: Mapped[str] = mapped_column(String(20), default="Ativa")
+    observacao: Mapped[str] = mapped_column(Text, default="")
+    linha: Mapped[int | None] = mapped_column(Integer)

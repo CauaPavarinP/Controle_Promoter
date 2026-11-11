@@ -6,6 +6,7 @@ import os
 import shutil
 import secrets
 import tempfile
+from pathlib import Path
 import threading
 from contextlib import asynccontextmanager
 
@@ -17,7 +18,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
@@ -25,15 +25,16 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from .limites import LimiteDeTamanho
-from . import cadastros, db, exportar, faturamento, pendencias, respostas_guardadas, usuarios
+from . import atendimento, cadastros, db, exportar, faturamento, respostas_guardadas, usuarios
 from .autenticacao import exigir_admin, usuario_logado
-from .calculos import Filtros, calcular_painel, indice_mes, opcoes_de_filtro, resumo_faturamento, tipos_de_nota
-from .carga import aplicar_promotores, aplicar_roteiro, preparar_banco
+from .calculo_atendimento import FiltrosAtendimento, calcular as calcular_painel
+from .calculo_atendimento import opcoes as opcoes_de_filtro
+from .calculos import indice_mes, resumo_faturamento, tipos_de_nota
+from .carga import preparar_banco
 from .carga import trava_cadastros as _trava_cadastros
 from .config import FRONTEND_DIST, PRODUCAO, SECRET_KEY, SESSAO_HORAS
-from .dados import colaboradores_pendentes, tabelas_do_calculo
-from .importacao import ErroImportacao, devolver_memoria, importar_promotores, importar_roteiro, ler_totais_abas_uf
-from .modelos import Pdv, Roteiro, Usuario
+from .importacao import ErroImportacao, devolver_memoria
+from .modelos import Importacao, Usuario
 from .regras import gravar_regras, ler_regras
 
 log = logging.getLogger("uvicorn.error")
@@ -130,7 +131,6 @@ async def erro_inesperado(request: Request, erro: Exception):
 
 app.include_router(usuarios.rotas)
 app.include_router(cadastros.rotas)
-app.include_router(pendencias.rotas)
 app.include_router(exportar.rotas)
 
 
@@ -149,6 +149,7 @@ def _erro(mensagem: str, status: int = 400):
 
 # A planilha inteira tem ~63 MB; o limite evita que um arquivo enorme derrube o servidor.
 TAMANHO_MAXIMO_MB = 150
+MODELO_ATENDIMENTO = Path(__file__).resolve().parent.parent / "exemplos" / "modelo_atendimento_agencias.xlsx"
 OCUPADO = ("O servidor já está lendo outra planilha (faturamento ou cadastros). Espere ela terminar e envie de "
            "novo: duas leituras juntas passariam do limite de memória do servidor.")
 
@@ -162,33 +163,9 @@ async def _ler_arquivo(arquivo: UploadFile) -> tuple[bytes, str]:
     return await arquivo.read(), nome
 
 
-def _cnpjs_no_roteiro(sessao: Session) -> set[str]:
-    return set(sessao.scalars(select(Pdv.cnpj_cpf).join(Roteiro, Roteiro.pdv_id == Pdv.id)).all())
-
-
-def _importar_cadastro_uma_vez(sessao: Session, tipo: str, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
-    if faturamento.lendo_agora() or not _trava_cadastros.acquire(blocking=False):
-        raise ErroImportacao(OCUPADO)
-    try:
-        return _importar_cadastro(sessao, tipo, conteudo, nome, usuario)
-    finally:
-        _trava_cadastros.release()
-        devolver_memoria()
-
-
-def _importar_cadastro(sessao: Session, tipo: str, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
-    leitor, aplicar = {"promotores": (importar_promotores, aplicar_promotores),
-                       "roteiro": (importar_roteiro, aplicar_roteiro)}[tipo]
-    tabela, resumo = leitor(conteudo, nome)
-    resumo["cadastros"] = aplicar(sessao, tabela)
-    resumo["avisos"] += resumo["cadastros"].pop("avisos", [])
-    faturamento.registrar(sessao, tipo, nome, usuario.usuario, len(tabela), resumo["avisos"])
-    pendentes = colaboradores_pendentes(sessao)
-    if tipo == "roteiro" and pendentes:
-        resumo["avisos"].append(
-            f"{len(pendentes)} colaborador(es) do roteiro não encontrados nos promotores (viraram pendência): "
-            + ", ".join(pendentes[:10]) + (" …" if len(pendentes) > 10 else ""))
-    return resumo
+def _cnpjs_no_roteiro(_sessao: Session = None) -> set[str]:
+    """CNPJs das lojas que alguma agência atende (dos arquivos das agências)."""
+    return atendimento.cnpjs_atendidos()
 
 
 ESPERA_PREVIA_SEGUNDOS = 15
@@ -237,63 +214,40 @@ def andamento_da_leitura(codigo: str, _=Depends(exigir_admin)):
         _erro(str(erro))
 
 
-@app.post("/api/importacoes/planilha")
-async def importar_planilha(arquivo: UploadFile = File(...), sessao: Session = Depends(db.sessao_db),
-                            usuario: Usuario = Depends(exigir_admin)):
-    """Importação inicial: a planilha "ROTEIROS X FATURAMENTOS" inteira.
+# --- Atendimento das agências (modelo único) -----------------------------------------------------------------
 
-    Grava promotores e roteiro nos cadastros, guarda os totais das abas por UF para a conferência
-    e devolve a pré-visualização do faturamento (que o usuário ainda precisa confirmar).
-    """
+@app.post("/api/importacoes/atendimento/previa")
+async def previa_atendimento(arquivo: UploadFile = File(...), usuario: Usuario = Depends(exigir_admin)):
+    """Lê o arquivo de uma (ou mais) agências e mostra o resumo antes de gravar."""
     conteudo, nome = await _ler_arquivo(arquivo)
     if faturamento.lendo_agora() or not _trava_cadastros.acquire(blocking=False):
         _erro(OCUPADO)
     try:
-        return await run_in_threadpool(_importar_planilha_inteira, sessao, conteudo, nome, usuario)
+        return await run_in_threadpool(atendimento.preparar_previa, conteudo, nome, usuario.usuario)
+    except ErroImportacao as erro:
+        _erro(str(erro))
     finally:
         _trava_cadastros.release()
         devolver_memoria()
 
 
-def _importar_planilha_inteira(sessao: Session, conteudo: bytes, nome: str, usuario: Usuario) -> dict:
-    resultado = {}
-    for tipo in ("promotores", "roteiro"):
-        try:
-            resultado[tipo] = _importar_cadastro(sessao, tipo, conteudo, nome, usuario)
-        except ErroImportacao as erro:
-            resultado[tipo] = {"erro": str(erro)}
-    try:
-        resultado["faturamento"] = faturamento.preparar_previa(conteudo, nome, usuario.usuario, _cnpjs_no_roteiro(sessao))
-    except ErroImportacao as erro:
-        resultado["faturamento"] = {"erro": str(erro)}
-    totais = ler_totais_abas_uf(conteudo, nome)
-    if not totais.empty:
-        meses = resultado["faturamento"].get("meses") or []
-        ano = max(int(m[:4]) for m in meses) if meses else None
-        if ano:
-            pendencias.guardar_totais_planilha(totais, ano)
-        resultado["conferencia"] = {"abas": sorted(totais["aba"].unique().tolist()), "ano": ano}
-    return resultado
+class Confirmacao(BaseModel):
+    substituir: bool = False
 
 
-# Declarada depois de /planilha e /faturamento/previa para não "engolir" essas rotas.
-@app.post("/api/importacoes/{tipo}")
-async def importar_cadastro(tipo: str, arquivo: UploadFile = File(...), sessao: Session = Depends(db.sessao_db),
-                            usuario: Usuario = Depends(exigir_admin)):
-    """Promotores ou roteiro: grava direto nos cadastros (não apaga nada)."""
-    if tipo not in ("promotores", "roteiro"):
-        _erro("Tipo de importação inválido.", 404)
-    conteudo, nome = await _ler_arquivo(arquivo)
+@app.post("/api/importacoes/atendimento/{token}/confirmar")
+def confirmar_atendimento(token: str, dados: Confirmacao, _=Depends(exigir_admin)):
     try:
-        # Ler a planilha de 64 MB leva até 1 minuto no servidor gratuito: fora da linha principal, para as outras
-        # telas continuarem respondendo enquanto isso.
-        return await run_in_threadpool(_importar_cadastro_uma_vez, sessao, tipo, conteudo, nome, usuario)
+        return atendimento.confirmar(token, dados.substituir)
     except ErroImportacao as erro:
         _erro(str(erro))
 
 
-class Confirmacao(BaseModel):
-    substituir: bool = False
+@app.get("/api/modelo-atendimento", include_in_schema=False)
+def baixar_modelo(_=Depends(usuario_logado)):
+    """O modelo em Excel que as agências preenchem."""
+    return FileResponse(MODELO_ATENDIMENTO, filename="Modelo_Atendimento_Agencias_101.xlsx",
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.post("/api/importacoes/faturamento/{token}/confirmar")
@@ -322,6 +276,11 @@ def erros_da_importacao(ident: int, sessao: Session = Depends(db.sessao_db), _=D
 
 @app.post("/api/importacoes/{ident}/desfazer")
 def desfazer(ident: int, sessao: Session = Depends(db.sessao_db), _=Depends(exigir_admin)):
+    importacao = sessao.get(Importacao, ident)
+    if importacao is not None and importacao.tipo == "atendimento":
+        if importacao.situacao != "ativa":
+            _erro("Esta importação já foi desfeita ou substituída.")
+        return atendimento.desfazer(sessao, importacao)
     try:
         return faturamento.desfazer(sessao, ident)
     except ErroImportacao as erro:
@@ -335,8 +294,7 @@ def desfazer(ident: int, sessao: Session = Depends(db.sessao_db), _=Depends(exig
 @app.get("/api/opcoes")
 def opcoes(pedido: Request, sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
     def calcular():
-        promotores, _custos, roteiro = tabelas_do_calculo(sessao)
-        dados = opcoes_de_filtro(faturamento.faturamento_mensal(), promotores, roteiro, colaboradores_pendentes(sessao))
+        dados = opcoes_de_filtro(faturamento.faturamento_mensal(), atendimento.carregar())
         dados["importacoes"] = faturamento.ultimas_por_tipo(sessao)
         dados["reimportar_faturamento"] = faturamento.tem_faturamento_antigo()
         return dados
@@ -348,20 +306,19 @@ MESES_MAXIMOS = 60
 
 
 @app.get("/api/painel")
-def painel(pedido: Request, inicio: str, fim: str, supervisor: str = "", promotor: str = "", uf: str = "", cidade: str = "",
-           pdv: str = "", sessao: Session = Depends(db.sessao_db), _=Depends(usuario_logado)):
+def painel(pedido: Request, inicio: str, fim: str, agencia: str = "", promotor: str = "", uf: str = "",
+           cidade: str = "", loja: str = "", _=Depends(usuario_logado)):
     try:
         indice_inicio, indice_fim = indice_mes(inicio), indice_mes(fim)
     except ValueError as erro:
         raise HTTPException(status_code=400, detail=str(erro)) from erro
     if abs(indice_fim - indice_inicio) >= MESES_MAXIMOS:
         _erro("Escolha um período de até 5 anos.")
-    filtros = Filtros(inicio=inicio, fim=fim, supervisor=supervisor, promotor=promotor, uf=uf, cidade=cidade, pdv=pdv)
-
-    def calcular():
-        promotores, custos, roteiro = tabelas_do_calculo(sessao)
-        return calcular_painel(faturamento.faturamento_mensal(), promotores, roteiro, filtros, ler_regras(), custos)
-    return respostas_guardadas.responder(pedido, ("painel", *astuple(filtros)), calcular)
+    filtros = FiltrosAtendimento(inicio=inicio, fim=fim, agencia=agencia, promotor=promotor, uf=uf, cidade=cidade,
+                                 loja=loja)
+    return respostas_guardadas.responder(
+        pedido, ("painel", *astuple(filtros)),
+        lambda: calcular_painel(faturamento.faturamento_mensal(), atendimento.carregar(), filtros, ler_regras()))
 
 
 def _ano_mes(texto: str) -> tuple[int, int]:
