@@ -49,7 +49,7 @@ backend/            API em Python (FastAPI + pandas)
   app/db.py           banco (SQLite local / Postgres no Render)
   app/main.py         rotas da API, login e entrega do front
   migrations/         estrutura do banco (Alembic), aplicada sozinha ao iniciar
-  scripts/            gerador de planilhas FICTÍCIAS para teste
+  scripts/            planilhas FICTÍCIAS para teste, modelo das agências, conversor da planilha, limpeza
   exemplos/           planilhas fictícias geradas
   tests/              testes automatizados (pytest)
 frontend/           tela em React (Vite)
@@ -59,33 +59,35 @@ frontend/           tela em React (Vite)
 
 ## Importações (só administrador)
 
+O sistema é alimentado por duas fontes:
+
 | Onde | Arquivo | O que faz |
 |---|---|---|
-| **Faturamento** | Exportação do ERP no layout da aba FATURAMENTO (ou a planilha inteira) | Mostra a **pré-visualização** (período, linhas, TOTAL VENDA, notas, clientes, linhas com erro, CNPJs sem roteiro) e só grava ao confirmar. |
-| **Promotores** | Planilha com a aba PROMOTORES BRASIL | Cria ou atualiza pelo código; custo diferente vira reajuste a partir do mês corrente. |
-| **Lojas por UF** | Planilha com as abas SC, SP, PR, MG, RS | Cria PDVs (CNPJ + nome) e vínculos novos; colaborador sem promotor fica pendente. Importe os promotores antes. |
+| **Faturamento** | Relatório de faturamento do Focco: o ".xls" do **Gera Excel** (é HTML), o **Gera TXT**, ou .xlsx/.csv | Prévia (período, linhas, total, notas, clientes, linhas com erro, CNPJs sem agência) e só grava ao confirmar. Até 300 MB em .xls/.txt/.csv; 150 MB em .xlsx. |
+| **Agências** | Arquivo de cada agência, MEI ou da própria 101 (CLT) no modelo "Atendimento das agências" (baixar na aba Agências) | Uma linha por loja × mês: agência, tipo, CNPJ, loja, promotor, visitas e valor do mês. Prévia com avisos (CNPJ inválido, lojas repetidas em outra agência, nomes parecidos, linhas descartadas). |
 
-- Aba sem coluna UF/Estado preenchida (caso da aba PR): a UF é o nome da aba. Na aba PR a cidade está na
-  coluna "Coluna1", que também é reconhecida.
-- Colunas reconhecidas **pelo nome do cabeçalho** (sem diferenciar acento ou maiúscula), em qualquer uma das
-  30 primeiras linhas e em qualquer aba. Nomes aceitos: listas `APELIDOS_*` de `app/importacao.py`.
-- **Faturamento item a item:** todas as colunas da aba FATURAMENTO são guardadas (tabela `faturamento_itens`).
-- **Mês que já existe:** só é substituído se o usuário marcar a confirmação (apaga os itens daquele ano/mês e
-  grava os novos). Reimportar o mesmo arquivo não duplica.
-- **Linhas com erro** (CNPJ vazio, data inválida, TOTAL VENDA que não é número) ficam de fora e aparecem na
-  pré-visualização e no histórico, com o número da linha no Excel (exportável).
-- **Histórico** com **desfazer** (apaga os itens daquela importação). Meses que ela substituiu não voltam.
-- Promotores e roteiro **não apagam nada** (rodar de novo não duplica). O primeiro custo de um promotor vale
-  desde a admissão; o vínculo do roteiro começa em 01/01 do ano corrente **ou na admissão, o que for depois**.
-- **Números em texto:** só vale um número (`1.234,56`, `1234.56`, `R$ 600,00`). Texto como `600 + 120m` fica 0 com
-  aviso (antes virava 600120). Item de custo acima de R$ 50.000/mês também fica 0 com aviso; reimportar a planilha
-  corrige custo gravado errado antes.
-- **Ligação loja → promotor:** se a linha tem código e nome, os dois precisam ser da mesma pessoa (código de outra
-  pessoa não liga a loja). Nome repetido em dois promotores usa o da UF da loja; sem como decidir, fica pendente.
-  Lojas numa UF diferente da do promotor aparecem nos avisos da importação.
-- **Supervisor na lista de promotores** ("Sup."/"Supervisor" no nome ou município, ou nome que está na coluna
-  SUPERVISOR) entra com função Supervisor e fica fora do custo e da contagem de promotores.
-- **Visitas por semana** na planilha: só inteiro de 1 a 7; o resto fica vazio, com aviso.
+- **Mês que já existe** (faturamento) ou **agência + mês que já existe** (agências): só substitui com confirmação.
+- **Histórico** com **desfazer**. "Apagar os dados das agências" guarda um backup no banco antes (aba Agências).
+- **Faturamento:** valor = VLR TOTAL (bruto). "Vale a pena?" = custo do atendimento até 3% do faturamento das lojas
+  (limite editável na tela).
+
+### Promotores CLT da 101 a partir da planilha do Maurício
+
+A planilha "ROTEIROS X FATURAMENTOS" (abas PROMOTORES BRASIL e SC/SP/PR/MG/RS) pode ser convertida no modelo das
+agências, para não redigitar os CLT. Roda no computador onde está a planilha (nada é enviado):
+
+```
+cd backend
+python scripts/converter_planilha_mauricio.py "C:\caminho\ROTEIROS X FATURAMENTOS.xlsm" --de 2026-01 --ate 2026-09
+```
+
+- Valor de cada loja no mês = custo do promotor (TOTAL da PROMOTORES BRASIL) ÷ lojas do roteiro dele.
+- Agência "101 do Brasil", Tipo CLT, código do promotor; supervisor na Observação; quem foi admitido depois do mês
+  não entra naquele mês.
+- O arquivo gerado tem a aba **Conferência** (e o mesmo resumo na tela): promotor do roteiro sem cadastro de custo,
+  cadastro sem loja, nomes ligados por semelhança, CNPJ inválido, supervisor "#N/A".
+- Depois, importe o arquivo gerado na aba **Agências**, como o de qualquer agência. O arquivo gerado tem dados reais:
+  não coloque no repositório.
 
 ## Regras do cálculo
 
