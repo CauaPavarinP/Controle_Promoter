@@ -12,7 +12,7 @@ import Usuarios from './cadastros/Usuarios.jsx'
 import { definirSubtituloExportacao } from './ui.jsx'
 import MeuPerfil from './cadastros/MeuPerfil.jsx'
 
-const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', agencia: '', promotor: '', uf: '', cidade: '', loja: '' }
+const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', agencia: '', tipo: '', promotor: '', uf: '', cidade: '', loja: '' }
 
 // grupo: título no menu | admin: só administrador vê
 const ABAS = [
@@ -33,6 +33,7 @@ function descreverFiltros(filtros, opcoes) {
   const agencia = opcoes?.agencias.find((a) => a.chave === filtros.agencia)
   const partes = [filtros.inicio === fim ? `Mês: ${formatarMes(fim)}` : `Período: ${formatarMes(filtros.inicio)} a ${formatarMes(fim)}`]
   if (agencia) partes.push(`Agência: ${agencia.nome}`)
+  if (filtros.tipo) partes.push(`Tipo: ${filtros.tipo}`)
   if (promotor) partes.push(`Promotor: ${promotor.nome}`)
   if (filtros.uf) partes.push(`UF: ${filtros.uf}`)
   if (filtros.cidade) partes.push(`Cidade: ${filtros.cidade}`)
@@ -241,7 +242,7 @@ export default function Painel({ usuario, aoSair }) {
         {aba === 'faturamento' && opcoes && (
           <Faturamento admin={admin} meses={opcoes.meses} aoImportar={carregarOpcoes} />
         )}
-        {aba === 'promotores' && opcoes && <PromotoresAba admin={admin} meses={opcoes.meses} />}
+        {aba === 'promotores' && opcoes && <PromotoresAba admin={admin} meses={opcoes.meses} opcoes={opcoes} />}
         {aba === 'agencias' && opcoes && (
           <Agencias admin={admin} meses={opcoes.meses} aoImportar={() => { carregarOpcoes(); setVersaoDados((v) => v + 1) }} />
         )}

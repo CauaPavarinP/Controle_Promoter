@@ -259,7 +259,7 @@ export default function Agencias({ admin, meses, aoImportar }) {
         <>
           <QuadroSePaga titulo="As agências valem o que custam?" meses={meses} periodo={sePaga.periodo} contar="agencias"
             linhas={sePaga.dados ? agencias : undefined}
-            setPeriodo={sePaga.setPeriodo} dados={sePaga.dados} podeEditar={admin} aoMudarMargem={sePaga.recarregar} />
+            setPeriodo={sePaga.setPeriodo} dados={sePaga.dados} podeEditar={admin} aoMudarLimite={sePaga.recarregar} />
           {sePaga.erro && <div className="erro-caixa">{sePaga.erro}</div>}
           <section className="bloco">
             <div className="bloco-cabecalho">
@@ -274,6 +274,7 @@ export default function Agencias({ admin, meses, aoImportar }) {
                 vazio="Nenhuma agência neste período. Importe os arquivos das agências."
                 colunas={[
                   { campo: 'nome', titulo: 'Agência ou MEI', quebra: true },
+                  { campo: 'tipo', titulo: 'Tipo' },
                   { campo: 'ufs', titulo: 'UF' },
                   { campo: 'lojas', titulo: 'Lojas', num: true, formato: 'inteiro' },
                   { campo: 'promotores', titulo: 'Promotores', num: true, formato: 'inteiro' },

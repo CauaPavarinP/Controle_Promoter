@@ -37,6 +37,7 @@ from .modelos import Atendimento, Importacao
 APELIDOS = {
     "mes": ["MES DE REFERENCIA", "MES REFERENCIA", "MES", "COMPETENCIA", "REFERENCIA"],
     "agencia": ["AGENCIA OU MEI", "AGENCIA", "EMPRESA", "AGENCIA MEI"],
+    "tipo": ["TIPO", "TIPO DE CONTRATACAO", "TIPO DO PROMOTOR", "TIPO PROMOTOR", "VINCULO", "CONTRATACAO"],
     "cnpj": ["CNPJ DA LOJA", "CNPJ", "ESTAB CNPJ", "CNPJ LOJA", "CPF CNPJ"],
     "loja": ["LOJA", "ESTABELECIMENTO", "MERCADO", "LOJAS", "PDV"],
     "cidade": ["CIDADE", "MUNICIPIO"],
@@ -54,6 +55,7 @@ UFS = set("AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR 
 NOMES_MESES = {"JAN": 1, "FEV": 2, "MAR": 3, "ABR": 4, "MAI": 5, "JUN": 6, "JUL": 7, "AGO": 8, "SET": 9, "OUT": 10,
                "NOV": 11, "DEZ": 12}
 SEM_PROMOTOR = "Sem promotor informado"
+TIPOS = ("Agência", "CLT", "MEI", "Freelancer")
 VALIDADE_PREVIA = 30 * 60
 
 
@@ -124,6 +126,24 @@ def _status(valor) -> str:
     return "Encerrada" if normalizar_texto(valor).startswith("ENCERR") else "Ativa"
 
 
+def ler_tipo(valor, agencia: str) -> tuple[str, bool]:
+    """(tipo, veio_do_arquivo). Sem a coluna Tipo (ou com valor fora da lista), deduz pelo nome da agência:
+    a própria 101 ou "CLT" no nome = CLT; "MEI" = MEI; "Freelancer" = Freelancer; o resto = Agência."""
+    texto = normalizar_texto(valor)
+    for tipo, chaves in (("CLT", ("CLT",)), ("MEI", ("MEI",)), ("Freelancer", ("FREELANCER", "FREELA", "FREE LANCER")),
+                         ("Agência", ("AGENCIA",))):
+        if texto and any(texto == c or texto.startswith(c + " ") for c in chaves):
+            return tipo, True
+    nome = f" {normalizar_texto(agencia)} "
+    if " CLT " in nome or nome.startswith(" 101 DO BRASIL"):
+        return "CLT", False
+    if " MEI " in nome:
+        return "MEI", False
+    if " FREELA" in nome or " FREE LANCER " in nome:
+        return "Freelancer", False
+    return "Agência", False
+
+
 def chave_promotor(agencia_chave: str, codigo: str, nome: str) -> str:
     """Mesmo promotor em arquivos diferentes: pelo código, se a agência informar; senão pelo nome na agência."""
     if codigo:
@@ -183,6 +203,7 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
             "Loja e Valor do mês (use o modelo \"Atendimento das agências\").")
     linhas, erros, descartadas, cnpjs_invalidos = [], [], [], []
     corrigidos, sem_valor, sem_promotor, promotor_agencia, sem_mes_coluna = [], [], [], [], False
+    tipo_invalido = []
     for aba, primeira, tabela in tabelas:
         if "mes" not in tabela:
             sem_mes_coluna = True
@@ -234,12 +255,15 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
             elif normalizar_texto(promotor) == normalizar_texto(agencia) or \
                     normalizar_texto(promotor).startswith("AGENCIA "):
                 promotor_agencia.append(f"{promotor} (linha {numero})")
+            tipo, do_arquivo = ler_tipo(registro.get("tipo"), agencia)
+            if "tipo" in registro and not _vazio(registro.get("tipo")) and not do_arquivo:
+                tipo_invalido.append(f"{_texto(registro.get('tipo'))[:20]} (linha {numero})")
             codigo = _texto(registro.get("codigo"))
             uf = normalizar_texto(registro.get("uf"))[:2]
             agencia_chave = normalizar_texto(agencia)
             linhas.append({
                 "linha": numero, "aba": aba, "ano": mes[0], "mes": mes[1], "agencia": agencia[:150],
-                "agencia_chave": agencia_chave[:150], "cnpj": cnpj, "loja": loja[:200],
+                "agencia_chave": agencia_chave[:150], "tipo": tipo, "cnpj": cnpj, "loja": loja[:200],
                 "loja_chave": normalizar_texto(loja)[:200], "cidade": _texto(registro.get("cidade"))[:120].upper(),
                 "uf": uf if uf in UFS else "", "promotor": promotor[:150], "promotor_codigo": codigo[:40],
                 "promotor_chave": chave_promotor(agencia_chave, codigo, promotor)[:200],
@@ -269,6 +293,10 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
     if descartadas:
         avisos.append(f"{len(descartadas)} linha(s) descartadas por parecerem cabeçalho ou título: veja a lista "
                       "\"Linhas descartadas\" abaixo.")
+    if tipo_invalido:
+        avisos.append(f"{len(tipo_invalido)} linha(s) com Tipo fora da lista (Agência, CLT, MEI, Freelancer): o tipo "
+                      "foi deduzido pelo nome da agência: " + "; ".join(tipo_invalido[:6])
+                      + (" …" if len(tipo_invalido) > 6 else ""))
     if promotor_agencia:
         avisos.append(f"{len(promotor_agencia)} promotor(es) com nome de agência (confira se a coluna Promotor está "
                       "certa): " + "; ".join(promotor_agencia[:6]) + (" …" if len(promotor_agencia) > 6 else ""))
@@ -469,7 +497,7 @@ def confirmar(token: str, substituir: bool, repetidas: str | None = None) -> dic
         registros = []
         for linha in df.to_dict("records"):
             registros.append({c: linha[c] for c in (
-                "ano", "mes", "agencia", "agencia_chave", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
+                "ano", "mes", "agencia", "agencia_chave", "tipo", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
                 "promotor_codigo", "promotor_chave", "dias", "valor", "status", "observacao", "linha")}
                 | {"importacao_id": importacao_id,
                    "visitas": None if pd.isna(linha["visitas"]) else int(linha["visitas"])})
@@ -499,9 +527,9 @@ def exportar_xlsx(sessao) -> tuple[bytes, int]:
     from .main import MODELO_ATENDIMENTO   # import aqui: main importa este módulo
     livro = load_workbook(MODELO_ATENDIMENTO)
     aba = livro["Atendimentos"]
-    for coluna in range(1, 14):            # tira a linha de exemplo (a coluna N, conferência do CNPJ, fica)
+    for coluna in range(1, 15):            # tira a linha de exemplo (a coluna O, conferência do CNPJ, fica)
         aba.cell(2, coluna).value = None
-    campos = ("ano", "mes", "agencia", "cnpj", "loja", "cidade", "uf", "promotor", "promotor_codigo", "dias",
+    campos = ("ano", "mes", "agencia", "tipo", "cnpj", "loja", "cidade", "uf", "promotor", "promotor_codigo", "dias",
               "visitas", "valor", "status", "observacao")
     consulta = select(*[getattr(Atendimento, c) for c in campos]).order_by(
         Atendimento.ano, Atendimento.mes, Atendimento.agencia, Atendimento.loja)
@@ -509,7 +537,7 @@ def exportar_xlsx(sessao) -> tuple[bytes, int]:
     for numero, linha in enumerate(sessao.execute(consulta), start=2):
         r = dict(zip(campos, linha))
         promotor = "" if r["promotor"] == SEM_PROMOTOR else r["promotor"]
-        valores = [f"{r['mes']:02d}/{r['ano']}", r["agencia"], formatar_cnpj(r["cnpj"]), r["loja"], r["cidade"],
+        valores = [f"{r['mes']:02d}/{r['ano']}", r["agencia"], r["tipo"], formatar_cnpj(r["cnpj"]), r["loja"], r["cidade"],
                    r["uf"], promotor, r["promotor_codigo"], r["dias"], r["visitas"], r["valor"], r["status"],
                    r["observacao"]]
         for coluna, valor in enumerate(valores, start=1):
@@ -540,7 +568,7 @@ def apagar_tudo(sessao) -> int:
 # Leitura para o cálculo (guardada na memória até mudar)
 # ---------------------------------------------------------------------------------------------------------------
 
-COLUNAS = ["ano", "mes", "agencia", "agencia_chave", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
+COLUNAS = ["ano", "mes", "agencia", "agencia_chave", "tipo", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
            "promotor_codigo", "promotor_chave", "dias", "visitas", "valor", "status"]
 _guardado: dict = {"versao": None, "df": None}
 _versao = 0

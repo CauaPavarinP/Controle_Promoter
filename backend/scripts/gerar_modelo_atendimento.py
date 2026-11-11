@@ -7,6 +7,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.comments import Comment
+from openpyxl.utils import get_column_letter
 
 import sys
 from pathlib import Path
@@ -23,6 +24,7 @@ ULTIMA = 1000  # linhas preparadas para preencher
 COLUNAS = [  # (título, largura, obrigatória, ajuda)
     ("Mês de referência", 14, True, "Mês e ano do serviço, no formato MM/AAAA. Ex.: 10/2026"),
     ("Agência ou MEI", 26, True, "Nome da agência, ou do MEI, que presta o serviço"),
+    ("Tipo", 13, True, "Tipo de contratação do promotor: Agência, CLT, MEI ou Freelancer (escolha na lista)"),
     ("CNPJ da loja", 22, True, "CNPJ da LOJA atendida (não o da agência). Só o CNPJ nesta coluna, sem o nome da loja"),
     ("Loja", 32, True, "Nome da loja (ex.: Max Atacadista 142 - Assis)"),
     ("Cidade", 20, True, "Cidade da loja"),
@@ -36,6 +38,10 @@ COLUNAS = [  # (título, largura, obrigatória, ajuda)
     ("Observação", 34, False, "Qualquer informação importante (início no meio do mês, troca de promotor…)"),
     ("Conferência do CNPJ", 30, False, "Preenchido automaticamente: não digite nesta coluna"),
 ]
+TIPOS = ["Agência", "CLT", "MEI", "Freelancer"]
+POS = {titulo: i for i, (titulo, *_resto) in enumerate(COLUNAS, start=1)}   # título -> número da coluna
+LETRA = {titulo: get_column_letter(i) for titulo, i in POS.items()}
+CONFERENCIA = POS["Conferência do CNPJ"]
 UFS = "AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO".split()
 
 wb = Workbook()
@@ -55,6 +61,7 @@ linhas = [
     ("item", ("1. Uma linha por loja", "Cada loja atendida no mês ocupa uma linha da aba Atendimentos. Não junte várias lojas numa linha.")),
     ("item", ("2. Sem títulos nem totais no meio", "Não coloque linhas de título (ex.: \"ATENDIMENTOS FORT\") nem de total. Os totais aparecem sozinhos na aba Resumo.")),
     ("item", ("3. Células amarelas", "São as que você preenche. A última coluna (Conferência do CNPJ) é automática.")),
+    ("item", ("Tipo", "Agência (promotor de agência), CLT (funcionário da 101), MEI ou Freelancer. Escolha na lista.")),
     ("item", ("Promotor", "Escreva o nome sempre do mesmo jeito em todos os meses. Se a agência tiver código ou matrícula do promotor, preencha a coluna Código do promotor: ele identifica a pessoa mesmo que o nome venha escrito diferente.")),
     ("item", ("4. CNPJ da loja", "O CNPJ da LOJA atendida, com 14 dígitos (com ou sem pontos). Só o CNPJ na célula, sem o nome. Se a conferência mostrar \"Verificar\", o número está errado.")),
     ("item", ("5. Mês de referência", "No formato MM/AAAA (ex.: 10/2026). Todas as linhas do arquivo devem ser do mesmo mês.")),
@@ -102,10 +109,12 @@ for tipo, conteudo in linhas:
 
 # ------------------------------------------------------------------ Listas (oculta)
 lst = wb.create_sheet("Listas")
-lst["A1"], lst["B1"] = "UF", "Status"
+lst["A1"], lst["B1"], lst["C1"] = "UF", "Status", "Tipo"
 for i, uf in enumerate(UFS, start=2):
     lst.cell(i, 1, uf)
 lst["B2"], lst["B3"] = "Ativa", "Encerrada"
+for i, tipo in enumerate(TIPOS, start=2):
+    lst.cell(i, 3, tipo)
 lst.sheet_state = "hidden"
 
 # ------------------------------------------------------------------ Atendimentos
@@ -114,7 +123,7 @@ at.sheet_view.showGridLines = False
 for i, (titulo, largura, obrig, ajuda) in enumerate(COLUNAS, start=1):
     c = at.cell(1, i, titulo)
     c.font = F(bold=True, color="FFFFFF", size=10)
-    c.fill = CABECALHO if i < 14 else PatternFill("solid", fgColor=CINZA)
+    c.fill = CABECALHO if i < CONFERENCIA else PatternFill("solid", fgColor=CINZA)
     c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     c.border = BORDA
     c.comment = Comment(("Obrigatória. " if obrig else "Opcional. ") + ajuda, "101 do Brasil", width=260, height=90)
@@ -123,28 +132,29 @@ at.row_dimensions[1].height = 34
 at.freeze_panes = "A2"
 
 for linha in range(2, ULTIMA + 1):
-    for col in range(1, 15):
+    for col in range(1, CONFERENCIA + 1):
         c = at.cell(linha, col)
         c.font = F(size=10)
         c.border = BORDA
-        c.fill = AMARELO if col < 14 else FUNDO_CINZA
-    at.cell(linha, 1).number_format = "@"   # 10/2026 não vira data
-    at.cell(linha, 3).number_format = "@"   # CNPJ não perde o zero da frente
-    at.cell(linha, 10).number_format = "0"
-    at.cell(linha, 11).number_format = '#,##0.00'
+        c.fill = AMARELO if col < CONFERENCIA else FUNDO_CINZA
+    at.cell(linha, POS["Mês de referência"]).number_format = "@"   # 10/2026 não vira data
+    at.cell(linha, POS["CNPJ da loja"]).number_format = "@"        # CNPJ não perde o zero da frente
+    at.cell(linha, POS["Visitas no mês"]).number_format = "0"
+    at.cell(linha, POS["Valor do mês (R$)"]).number_format = '#,##0.00'
     # Conferência do CNPJ: 14 dígitos e dígitos verificadores.
-    d = f'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(C{linha},".",""),"/",""),"-","")," ","")'
+    cnpj = f'{LETRA["CNPJ da loja"]}{linha}'
+    d = f'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE({cnpj},".",""),"/",""),"-","")," ","")'
     s1 = f"SUMPRODUCT(VALUE(MID({d},{{1,2,3,4,5,6,7,8,9,10,11,12}},1)),{{5,4,3,2,9,8,7,6,5,4,3,2}})"
     s2 = f"SUMPRODUCT(VALUE(MID({d},{{1,2,3,4,5,6,7,8,9,10,11,12,13}},1)),{{6,5,4,3,2,9,8,7,6,5,4,3,2}})"
     dv1 = f"IF(MOD({s1},11)<2,0,11-MOD({s1},11))"
     dv2 = f"IF(MOD({s2},11)<2,0,11-MOD({s2},11))"
-    at.cell(linha, 14).value = (
-        f'=IF(TRIM(C{linha})="","",IF(LEN({d})<>14,"Verificar: precisa ter 14 dígitos",'
+    at.cell(linha, CONFERENCIA).value = (
+        f'=IF(TRIM({cnpj})="","",IF(LEN({d})<>14,"Verificar: precisa ter 14 dígitos",'
         f'IFERROR(IF(AND(VALUE(MID({d},13,1))={dv1},VALUE(MID({d},14,1))={dv2}),"OK",'
         f'"Verificar: número errado"),"Verificar: só números")))')
-    at.cell(linha, 14).font = F(size=10, color=CINZA)
+    at.cell(linha, CONFERENCIA).font = F(size=10, color=CINZA)
 
-exemplo = ["10/2026", "Agência Exemplo Ltda", "11.222.333/0001-81", "Supermercado Exemplo - Centro", "Curitiba", "PR",
+exemplo = ["10/2026", "Agência Exemplo Ltda", "Agência", "11.222.333/0001-81", "Supermercado Exemplo - Centro", "Curitiba", "PR",
            "Maria Silva", "", "Seg, Qui", 8, 240, "Ativa", "EXEMPLO - apague esta linha antes de enviar"]
 for col, valor in enumerate(exemplo, start=1):
     c = at.cell(2, col, valor)
@@ -159,18 +169,22 @@ dv_visitas = DataValidation(type="whole", operator="between", formula1="0", form
                             error="Número inteiro de 0 a 31.", errorTitle="Visitas no mês", showErrorMessage=True)
 dv_valor = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True,
                           error="Digite só o número, sem R$ (ex.: 240,00).", errorTitle="Valor do mês", showErrorMessage=True)
+dv_tipo = DataValidation(type="list", formula1=f"=Listas!$C$2:$C${len(TIPOS) + 1}", allow_blank=True,
+                         error="Escolha Agência, CLT, MEI ou Freelancer.", errorTitle="Tipo inválido", showErrorMessage=True)
 dv_mes = DataValidation(type="custom", allow_blank=True,
                         formula1='AND(LEN(A2)=7,MID(A2,3,1)="/",ISNUMBER(VALUE(LEFT(A2,2))),VALUE(LEFT(A2,2))>=1,VALUE(LEFT(A2,2))<=12,ISNUMBER(VALUE(RIGHT(A2,4))))',
                         error="Use o formato MM/AAAA. Ex.: 10/2026", errorTitle="Mês de referência", showErrorMessage=True)
-for dv, col in ((dv_uf, "F"), (dv_status, "L"), (dv_visitas, "J"), (dv_valor, "K"), (dv_mes, "A")):
+for dv, col in ((dv_uf, LETRA["UF"]), (dv_status, LETRA["Status"]), (dv_visitas, LETRA["Visitas no mês"]),
+                (dv_valor, LETRA["Valor do mês (R$)"]), (dv_mes, LETRA["Mês de referência"]), (dv_tipo, LETRA["Tipo"])):
     at.add_data_validation(dv)
     dv.add(f"{col}2:{col}{ULTIMA}")
 # CNPJ com problema fica vermelho.
-at.conditional_formatting.add(f"N2:N{ULTIMA}", FormulaRule(formula=['LEFT(N2,9)="Verificar"'],
+N = LETRA["Conferência do CNPJ"]
+at.conditional_formatting.add(f"{N}2:{N}{ULTIMA}", FormulaRule(formula=[f'LEFT({N}2,9)="Verificar"'],
                               font=Font(name="Arial", bold=True, color="B42318"),
                               fill=PatternFill("solid", fgColor="FDECEB")))
-at.conditional_formatting.add(f"N2:N{ULTIMA}", FormulaRule(formula=['N2="OK"'], font=Font(name="Arial", color="1D7A46")))
-at.auto_filter.ref = f"A1:N{ULTIMA}"
+at.conditional_formatting.add(f"{N}2:{N}{ULTIMA}", FormulaRule(formula=[f'{N}2="OK"'], font=Font(name="Arial", color="1D7A46")))
+at.auto_filter.ref = f"A1:{N}{ULTIMA}"
 
 # ------------------------------------------------------------------ Resumo
 rs = wb.create_sheet("Resumo", 2)
@@ -183,11 +197,11 @@ rs["B1"].font = F(bold=True, size=14, color=AZUL)
 rs["B2"] = "Não precisa preencher nada aqui: os números vêm da aba Atendimentos."
 rs["B2"].font = F(size=10, color=CINZA)
 itens = [
-    ("Lojas no arquivo", "=COUNTA(Atendimentos!C2:C1000)", "0"),
-    ("Lojas ativas", '=COUNTIF(Atendimentos!L2:L1000,"Ativa")', "0"),
-    ("Visitas no mês", "=SUM(Atendimentos!J2:J1000)", "0"),
-    ("Valor total do mês (R$)", "=SUM(Atendimentos!K2:K1000)", '#,##0.00'),
-    ("CNPJs para verificar", '=COUNTIF(Atendimentos!N2:N1000,"Verificar*")', "0"),
+    ("Lojas no arquivo", f"=COUNTA(Atendimentos!{LETRA['Loja']}2:{LETRA['Loja']}1000)", "0"),
+    ("Lojas ativas", f'=COUNTIF(Atendimentos!{LETRA["Status"]}2:{LETRA["Status"]}1000,"Ativa")', "0"),
+    ("Visitas no mês", f"=SUM(Atendimentos!{LETRA['Visitas no mês']}2:{LETRA['Visitas no mês']}1000)", "0"),
+    ("Valor total do mês (R$)", f"=SUM(Atendimentos!{LETRA['Valor do mês (R$)']}2:{LETRA['Valor do mês (R$)']}1000)", '#,##0.00'),
+    ("CNPJs para verificar", f'=COUNTIF(Atendimentos!{N}2:{N}1000,"Verificar*")', "0"),
 ]
 for i, (rotulo, formula, formato) in enumerate(itens, start=4):
     a = rs.cell(i, 2, rotulo); a.font = F(size=11); a.border = BORDA; a.fill = PatternFill("solid", fgColor=AZUL_CLARO)
