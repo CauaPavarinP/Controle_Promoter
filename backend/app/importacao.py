@@ -187,7 +187,7 @@ APELIDOS_FATURAMENTO = {
     "mes": ["MES"],
     "cod_emp": ["COD EMP", "COD EMPRESA"],
     "num_nf": ["NUM NF", "NUM", "NUMERO NF", "NUMERO", "NF", "NOTA"],
-    "cod_segmento": ["COD SEGMENTO", "COD SEGM"],
+    "cod_segmento": ["COD SEGMENTO", "COD SEGMER", "COD SEGM"],   # o Focco corta em "COD SEGMER"
     "descricao_segmento": ["DESCRICAO SEGMENTO"],
     "cod_cli": ["COD CLI", "COD CLIENTE", "CODIGO CLIENTE"],
     "cod_est": ["COD EST", "COD ESTABELECIMENTO"],
@@ -441,8 +441,8 @@ def ler_faturamento(fonte, nome_arquivo: str, ao_progredir=None):
             "e a data de emissão (ou ANO e MÊS).")
     aba, mapa, primeira_linha, avisos, partes_brutas = achado
     usar_vlr_total = "total_venda" not in mapa
-    if usar_vlr_total:
-        avisos.append("O arquivo não tem a coluna TOTAL VENDA; usei VLR TOTAL no lugar.")
+    # O relatório do Focco não tem TOTAL VENDA (era uma coluna da planilha antiga): o valor é o VLR TOTAL, que é o
+    # padrão do sistema. Não é motivo de aviso.
     partes, erros = [], []
     dicionarios = {campo: {} for campo in CAMPOS_REPETIDOS}
     linhas_lidas = 0
