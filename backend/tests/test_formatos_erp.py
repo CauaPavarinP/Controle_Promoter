@@ -136,3 +136,19 @@ def test_mes_sem_faturamento_do_erp_nao_aparece_como_sem_compras(cliente):
     painel = cliente.get("/api/painel", params={"inicio": "2026-09", "fim": "2026-09"}).json()
     assert painel["resumo"]["sem_erp"] is False and not any("Sem faturamento do ERP" in a for a in painel["resumo"]["avisos"])
     assert not any(l["sem_erp"] for l in painel["lojas"])
+
+
+def test_limite_de_tamanho_por_tipo(cliente, monkeypatch, banco):
+    """Texto do ERP (.xls HTML, .txt, .csv) vai até 300 MB; .xlsx e as outras importações continuam em 150 MB."""
+    from app.limites import FOLGA_ENVIO, LIMITE_FATURAMENTO_TEXTO, LIMITE_IMPORTACAO, limite_para
+    assert limite_para("/api/importacoes/faturamento/previa") == LIMITE_FATURAMENTO_TEXTO + FOLGA_ENVIO
+    assert limite_para("/api/importacoes/atendimento/previa") == LIMITE_IMPORTACAO + FOLGA_ENVIO
+    assert LIMITE_FATURAMENTO_TEXTO == 300 * 1024 * 1024 and LIMITE_IMPORTACAO == 150 * 1024 * 1024
+    entrar(cliente)
+    # Sem gerar 150 MB de verdade: baixa o limite do .xlsx e confere que o .xls com o mesmo tamanho passa.
+    monkeypatch.setattr(banco.main, "TAMANHO_MAXIMO_MB", 0)
+    xlsx = cliente.post("/api/importacoes/faturamento/previa",
+                        files={"arquivo": ("f.xlsx", (EXEMPLOS / "faturamento_exemplo.xlsx").read_bytes())})
+    assert xlsx.status_code == 413 and "máximo 0 MB" in xlsx.json()["detail"]
+    html = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("r.xls", _html_focco(_linhas_exemplo()))})
+    assert html.status_code == 200 and "token" in html.json()

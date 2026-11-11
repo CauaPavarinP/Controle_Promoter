@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from .limites import LimiteDeTamanho
+from .limites import LIMITE_FATURAMENTO_TEXTO, LimiteDeTamanho
 from . import atendimento, cadastros, db, exportar, faturamento, respostas_guardadas, usuarios
 from .autenticacao import exigir_admin, usuario_logado
 from .calculo_atendimento import FiltrosAtendimento, calcular as calcular_painel
@@ -182,8 +182,12 @@ async def previa_faturamento(arquivo: UploadFile = File(...), sessao: Session = 
     nome = arquivo.filename or ""
     if not nome.lower().endswith((".xlsx", ".xlsm", ".csv", ".txt", ".xls")):
         _erro("Envie um arquivo .xlsx, .xlsm, .csv, .txt ou .xls (o do gerador de relatórios do ERP).")
-    if arquivo.size is not None and arquivo.size > TAMANHO_MAXIMO_MB * 1024 * 1024:
-        _erro(f"Arquivo grande demais (máximo {TAMANHO_MAXIMO_MB} MB).", 413)
+    # Texto (.xls do Focco, TXT, CSV) é lido aos poucos: aceita até 300 MB. O .xlsx é aberto inteiro: 150 MB.
+    texto = nome.lower().endswith((".csv", ".txt", ".xls"))
+    maximo_mb = LIMITE_FATURAMENTO_TEXTO // (1024 * 1024) if texto else TAMANHO_MAXIMO_MB
+    if arquivo.size is not None and arquivo.size > maximo_mb * 1024 * 1024:
+        _erro(f"Arquivo grande demais (máximo {maximo_mb} MB para este tipo de arquivo). Exporte do ERP um período "
+              "menor e importe uma parte de cada vez.", 413)
     if _trava_cadastros.locked():
         _erro(OCUPADO)
 

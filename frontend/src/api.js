@@ -8,6 +8,13 @@ export function definirAoExpirarSessao(funcao) {
 // Igual ao limite do servidor (backend/app/limites.py). Acima disso o servidor corta a conexão no meio do envio e o
 // navegador só diz "Failed to fetch"; por isso o tamanho é conferido aqui antes de enviar.
 export const LIMITE_ARQUIVO_MB = 150
+// Faturamento do ERP em texto (.xls do Focco, que é HTML, .txt, .csv): lido aos poucos no servidor, aceita mais.
+export const LIMITE_FATURAMENTO_TEXTO_MB = 300
+
+function limiteDoArquivo(caminho, arquivo) {
+  const texto = /\.(xls|txt|csv)$/i.test(arquivo.name || '')
+  return caminho.includes('/faturamento/') && texto ? LIMITE_FATURAMENTO_TEXTO_MB : LIMITE_ARQUIVO_MB
+}
 
 async function requisitar(caminho, opcoes = {}) {
   let resposta
@@ -44,9 +51,10 @@ export const http = {
   delete: (caminho) => requisitar(caminho, { method: 'DELETE' }),
   enviarArquivo: (caminho, arquivo) => {
     const mb = arquivo.size / 1024 / 1024
-    if (mb > LIMITE_ARQUIVO_MB) {
+    const limite = limiteDoArquivo(caminho, arquivo)
+    if (mb > limite) {
       return Promise.reject(new Error(
-        `O arquivo tem ${Math.round(mb)} MB e o limite é ${LIMITE_ARQUIVO_MB} MB. Exporte do ERP um período menor ` +
+        `O arquivo tem ${Math.round(mb)} MB e o limite é ${limite} MB. Exporte do ERP um período menor ` +
         '(por exemplo, um ou dois meses por vez) e importe um arquivo de cada vez: o sistema junta os meses.'))
     }
     const corpo = new FormData()
