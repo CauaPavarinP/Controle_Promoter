@@ -1,80 +1,129 @@
-// Aba Promotores: cadastro dos promotores (como a aba PROMOTORES BRASIL), com importação da planilha.
+// Aba Promotores: montada a partir dos arquivos das agências. Para cada promotor, quem é, onde atende, quanto custa,
+// quanto as lojas dele compraram e se vale a pena mantê-lo.
 import { useState } from 'react'
-import { http } from '../api.js'
-import { Envio, ResultadoCadastro } from './Importar.jsx'
-import Promotores from './cadastros/Promotores.jsx'
-import Supervisores from './cadastros/Supervisores.jsx'
+import { formatarMes, formatarMoeda } from '../formato.js'
+import {
+  COLUNA_PERCENTUAL_COMPRAS, COLUNA_PERCENTUAL_LUCRO, COLUNAS_SE_PAGA, DICA_VALE_A_PENA, EtiquetaSituacao, FichaSePaga,
+  OpcaoOcultarSemCusto, QuadroSePaga, situacao, textoSituacao, useOcultarSemCusto, useSePaga,
+} from './SePaga.jsx'
+import { Modal, Tabela } from './ui.jsx'
 
-export default function PromotoresAba({ admin }) {
-  const [resultado, setResultado] = useState(null)
-  // Muda depois de importar, para a lista de promotores recarregar.
-  const [versao, setVersao] = useState(0)
-
+function MesAMes({ linhas }) {
+  const comAtendimento = linhas.filter((l) => l.com_atendimento)
+  if (!comAtendimento.length) return <p className="dica">Sem atendimento no período.</p>
   return (
-    <>
-      {admin && (
-        <details className="bloco nao-imprimir">
-          <summary>Importar a aba PROMOTORES BRASIL da planilha</summary>
-          <div className="importar-cartao">
-            <Envio
-              titulo="Promotores e custos"
-              descricao={'Envie a planilha "ROTEIROS X FATURAMENTOS". O sistema lê a aba PROMOTORES BRASIL (código, ' +
-                'colaborador, admissão, salário, ajuda de custo, vale-transporte, município, UF e supervisor). Cria ou ' +
-                'atualiza pelo código; custo diferente vira reajuste a partir deste mês. Não apaga nada.'}
-              aoEnviar={async (arquivo) => {
-                setResultado(await http.enviarArquivo('/api/importacoes/promotores', arquivo))
-                setVersao((v) => v + 1)
-              }}
-            />
-            <ResultadoCadastro titulo="Promotores" resultado={resultado} />
-          </div>
-        </details>
-      )}
-      <Promotores key={versao} podeEditar={admin} />
-      <details className="bloco">
-        <summary>Supervisores</summary>
-        <Supervisores key={versao} podeEditar={admin} />
-      </details>
-      {admin && <ApagarCadastros />}
-    </>
+    <Tabela
+      chave="mes"
+      linhas={linhas}
+      porPagina={24}
+      arquivo="mes-a-mes"
+      colunas={[
+        { campo: 'mes', titulo: 'Mês', mostrar: (l) => formatarMes(l.mes) },
+        { campo: 'lojas', titulo: 'Lojas', num: true, formato: 'inteiro', mostrar: (l) => (l.com_atendimento ? l.lojas : '—') },
+        { campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro', mostrar: (l) => (l.com_atendimento ? l.visitas : '—') },
+        ...COLUNAS_SE_PAGA.map((c) => ({ ...c, semOrdem: true,
+          mostrar: (l) => (l.com_atendimento ? c.mostrar(l) : <span className="dica">sem atendimento</span>) })),
+      ]}
+    />
   )
 }
 
-/** Apaga promotores, custos, lojas e roteiros para importar a planilha do zero. Não tem volta. */
-function ApagarCadastros() {
-  const [apagando, setApagando] = useState(false)
+function FichaPromotor({ promotor, meses, periodo, aoFechar }) {
+  // O painel filtrado por este promotor traz as lojas dele e o mês a mês.
+  const { dados, erro } = useSePaga(meses, { promotor: promotor.chave }, periodo)
+  const linha = dados?.promotores.find((p) => p.chave === promotor.chave)
+  return (
+    <Modal titulo={promotor.nome} aoFechar={aoFechar} largo>
+      {erro && <div className="erro-caixa">{erro}</div>}
+      <section className="detalhe-secao">
+        <h3>Dados</h3>
+        <dl className="dados">
+          <dt>Agência</dt><dd>{promotor.agencia}</dd>
+          {promotor.codigo && (<><dt>Código</dt><dd>{promotor.codigo}</dd></>)}
+          <dt>Onde atende</dt><dd>{promotor.cidades || '—'}{promotor.ufs && ` (${promotor.ufs})`}</dd>
+          <dt>Nos arquivos</dt><dd>de {formatarMes(promotor.primeiro_mes)} a {formatarMes(promotor.ultimo_mes)} ({promotor.meses_com_atendimento} mês(es) com atendimento no período)</dd>
+          <dt>Lojas</dt><dd>{promotor.lojas_ultimo_mes} no último mês · {promotor.visitas} visita(s) no período</dd>
+        </dl>
+      </section>
+      <section className="detalhe-secao">
+        <h3>Vale a pena mantê-lo?</h3>
+        <FichaSePaga linha={linha} lojas={dados?.lojas || []} periodo={periodo} carregado={Boolean(dados)} temFaturamento={meses.length > 0} />
+      </section>
+      <section className="detalhe-secao">
+        <h3>Mês a mês</h3>
+        {dados ? <MesAMes linhas={dados.mes_a_mes} /> : <p className="dica">Calculando…</p>}
+      </section>
+    </Modal>
+  )
+}
 
-  async function apagar() {
-    const resposta = window.prompt(
-      'Isto apaga TODOS os promotores, custos, lojas (PDVs), roteiros, colaboradores não encontrados e ligações ' +
-      'lembradas. Não tem volta.\n\nFica: faturamento do ERP, usuários, regras e o histórico de importações.\n\n' +
-      'Para confirmar, digite APAGAR:')
-    if (resposta === null) return
-    setApagando(true)
-    try {
-      const apagados = await http.post('/api/cadastros/apagar', { confirmacao: resposta })
-      window.alert(`Cadastros apagados: ${apagados.promotores} promotores, ${apagados.custos} custos, ` +
-        `${apagados.lojas} lojas, ${apagados.roteiros} roteiros e ${apagados.supervisores} supervisores.\n\n` +
-        'Agora importe a aba PROMOTORES BRASIL e depois as abas SC, SP, PR, MG e RS.')
-      window.location.reload()
-    } catch (e) {
-      window.alert(e.message)
-    } finally {
-      setApagando(false)
-    }
+export default function PromotoresAba({ admin, meses }) {
+  const sePaga = useSePaga(meses)
+  const [filtros, setFiltros] = useState({ busca: '', agencia: '', resultado: '' })
+  const [aberto, setAberto] = useState(null)
+  const ocultacao = useOcultarSemCusto(sePaga.dados?.agencias)
+
+  if (!meses.length) {
+    return <div className="aviso">Ainda não há dados. Importe o faturamento do ERP e os arquivos das agências.</div>
   }
+  const promotores = sePaga.dados?.promotores || []
+  const agencias = [...new Map(promotores.map((p) => [p.agencia_chave, p.agencia])).entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  const termo = filtros.busca.trim().toLowerCase()
+  const visiveis = promotores.filter((p) => ocultacao.visivel([p.agencia_chave]) &&
+    (!filtros.agencia || p.agencia_chave === filtros.agencia) &&
+    (!filtros.resultado || filtros.resultado.split(',').includes(situacao(p))) &&
+    (!termo || `${p.nome} ${p.codigo} ${p.cidades} ${p.agencia}`.toLowerCase().includes(termo)))
 
   return (
-    <details className="bloco nao-imprimir">
-      <summary>Apagar cadastros e começar do zero</summary>
-      <p className="dica">
-        Apaga todos os promotores, custos, lojas (PDVs), roteiros, colaboradores não encontrados e ligações lembradas,
-        para importar a planilha de novo do zero. <b>Não tem volta.</b> O faturamento do ERP, os usuários, as regras
-        do cálculo e o histórico de importações ficam. Supervisor ligado a um usuário também fica.
-      </p>
-      <button className="secundario perigo" disabled={apagando} onClick={apagar}>
-        {apagando ? 'Apagando…' : 'Apagar cadastros…'}
-      </button>
-    </details>
+    <>
+      <QuadroSePaga titulo="Os promotores valem o que custam?" meses={meses} periodo={sePaga.periodo}
+        linhas={sePaga.dados ? promotores.filter((p) => ocultacao.visivel([p.agencia_chave])) : undefined}
+        setPeriodo={sePaga.setPeriodo} dados={sePaga.dados} podeEditar={admin} aoMudarMargem={sePaga.recarregar} />
+      {sePaga.erro && <div className="erro-caixa">{sePaga.erro}</div>}
+      <section className="bloco">
+        <div className="bloco-cabecalho">
+          <div className="bloco-ferramentas">
+            <input placeholder="Buscar nome, código, cidade ou agência" value={filtros.busca}
+              onChange={(e) => setFiltros({ ...filtros, busca: e.target.value })} />
+            <select value={filtros.agencia} onChange={(e) => setFiltros({ ...filtros, agencia: e.target.value })} aria-label="Agência">
+              <option value="">Todas as agências</option>
+              {agencias.map(([chave, nome]) => <option key={chave} value={chave}>{nome}</option>)}
+            </select>
+            <select value={filtros.resultado} onChange={(e) => setFiltros({ ...filtros, resultado: e.target.value })} aria-label="Vale a pena?">
+              <option value="">Vale a pena? Todos</option>
+              <option value="prejuizo,sem-faturamento">🔴 Só quem não vale a pena</option>
+              <option value="limite">🟡 Só no limite</option>
+              <option value="ok">🟢 Só quem vale a pena</option>
+            </select>
+            <OpcaoOcultarSemCusto {...ocultacao} />
+          </div>
+        </div>
+        <p className="dica">
+          Promotores dos arquivos das agências no período. Clique num promotor para ver os dados dele, as lojas e o mês a mês.
+        </p>
+        {!sePaga.dados ? <p className="carregando">Calculando…</p> : (
+          <Tabela
+            chave="chave"
+            linhas={visiveis}
+            arquivo="promotores"
+            aoClicar={(p) => setAberto(p)}
+            vazio="Nenhum promotor nos arquivos das agências neste período."
+            colunas={[
+              { campo: 'nome', titulo: 'Promotor', quebra: true },
+              { campo: 'agencia', titulo: 'Agência', quebra: true },
+              { campo: 'ufs', titulo: 'UF' },
+              { campo: 'lojas_ultimo_mes', titulo: 'Lojas', num: true, formato: 'inteiro' },
+              { campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro' },
+              { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (p) => formatarMoeda(p.custo_periodo) },
+              COLUNA_PERCENTUAL_COMPRAS,
+              COLUNA_PERCENTUAL_LUCRO,
+              { campo: 'se_paga', titulo: 'Vale a pena?', ordenar: (p) => p.percentual_do_lucro ?? 9999,
+                dica: DICA_VALE_A_PENA, exportar: textoSituacao, mostrar: (p) => <EtiquetaSituacao linha={p} /> },
+            ]}
+          />
+        )}
+      </section>
+      {aberto && <FichaPromotor promotor={aberto} meses={meses} periodo={sePaga.periodo} aoFechar={() => setAberto(null)} />}
+    </>
   )
 }

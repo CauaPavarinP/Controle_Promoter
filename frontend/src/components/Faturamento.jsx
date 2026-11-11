@@ -36,10 +36,11 @@ function Importacao({ aoImportar }) {
         <div className="importar-cartao destaque">
           <Envio
             titulo="Importar faturamento do ERP"
-            descricao={'Arquivo exportado do ERP no layout da aba FATURAMENTO (uma linha por item de nota), ou a própria ' +
-              'planilha "ROTEIROS X FATURAMENTOS". Você confere o resumo antes de gravar; mês que já existe só é ' +
-              'substituído se você confirmar.'}
+            descricao={'Relatório de faturamento do ERP (uma linha por item de nota): o arquivo do "Gera Excel" (.xls), ' +
+              'o "Gera TXT" (.txt), ou já salvo como .xlsx/.csv. Arquivos grandes: exporte um período menor (ex.: um ' +
+              'trimestre por vez). Você confere o resumo antes de gravar; mês que já existe só é substituído se você confirmar.'}
             rotulo="Ler arquivo"
+            aceitar=".xlsx,.xlsm,.csv,.txt,.xls"
             aoEnviar={enviar}
           />
         </div>
@@ -85,7 +86,8 @@ function colunasDosMeses(meses, aoClicar) {
       if (!valor) return '—'
       if (!aoClicar) return formatarMoeda(valor)
       return (
-        <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => aoClicar(l, m)}>
+        <button className="valor-clicavel" title="Ver as notas deste mês" onClick={() => aoClicar(l, m)}
+          aria-label={`Ver as notas de ${l.razao_social || l.cnpj || ''} em ${formatarMes(m)}: ${formatarMoeda(valor)}`}>
           {formatarMoeda(valor)}
         </button>
       )

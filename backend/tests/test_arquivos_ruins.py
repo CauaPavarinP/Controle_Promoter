@@ -49,7 +49,7 @@ def _esperar_leitura(cliente, resposta):
 
 
 @pytest.mark.parametrize("nome", ARQUIVOS)
-@pytest.mark.parametrize("rota", ["promotores", "roteiro", "faturamento/previa"])
+@pytest.mark.parametrize("rota", ["atendimento/previa", "faturamento/previa"])
 def test_arquivo_ruim_vira_mensagem(cliente, rota, nome):
     entrar(cliente)
     resposta = cliente.post(f"/api/importacoes/{rota}", files={"arquivo": (nome, ARQUIVOS[nome])})
@@ -76,7 +76,7 @@ def _bomba(parte: str, conteudo_inicio: bytes, tamanho: int, fim: bytes) -> byte
     return saida.getvalue()
 
 
-@pytest.mark.parametrize("rota", ["promotores", "roteiro", "faturamento/previa"])
+@pytest.mark.parametrize("rota", ["atendimento/previa", "faturamento/previa"])
 def test_excel_inflado_e_recusado_sem_abrir(cliente, rota):
     """Zip bomb: um arquivo de poucos KB que abriria centenas de MB derrubava o servidor (512 MB)."""
     entrar(cliente)

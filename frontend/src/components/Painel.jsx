@@ -7,18 +7,20 @@ import ResumoArvore from './ResumoArvore.jsx'
 import Faturamento from './Faturamento.jsx'
 import LojasUf from './LojasUf.jsx'
 import PromotoresAba from './PromotoresAba.jsx'
+import Agencias from './Agencias.jsx'
 import Usuarios from './cadastros/Usuarios.jsx'
 import { definirSubtituloExportacao } from './ui.jsx'
 import MeuPerfil from './cadastros/MeuPerfil.jsx'
 
-const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', supervisor: '', promotor: '', uf: '', cidade: '', pdv: '' }
+const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', agencia: '', promotor: '', uf: '', cidade: '', loja: '' }
 
 // grupo: título no menu | admin: só administrador vê
 const ABAS = [
-  { id: 'resumo', grupo: 'Controle', titulo: 'Resumo', subtitulo: 'Monitoramento, custo dos promotores e faturamento dos PDVs' },
+  { id: 'resumo', grupo: 'Controle', titulo: 'Resumo', subtitulo: 'Custo do atendimento das agências × o que as lojas compraram (ERP)' },
   { id: 'faturamento', grupo: 'Controle', titulo: 'Faturamento', subtitulo: 'O que o ERP faturou, por UF e por cliente' },
-  { id: 'promotores', grupo: 'Controle', titulo: 'Promotores', subtitulo: 'Promotores e repositores, custos e lojas de cada um' },
-  { id: 'lojas', grupo: 'Controle', titulo: 'Lojas por UF', subtitulo: 'Lojas atendidas e faturamento mês a mês (abas SC, SP, PR, MG, RS)' },
+  { id: 'promotores', grupo: 'Controle', titulo: 'Promotores', subtitulo: 'Quem atende, onde, quanto custa e se vale a pena' },
+  { id: 'lojas', grupo: 'Controle', titulo: 'Lojas por UF', subtitulo: 'Lojas atendidas pelas agências e o faturamento mês a mês' },
+  { id: 'agencias', grupo: 'Controle', titulo: 'Agências', subtitulo: 'Arquivos das agências e o resultado de cada uma' },
   { id: 'usuarios', grupo: 'Configuração', titulo: 'Usuários', subtitulo: 'Quem acessa o sistema e com qual perfil', admin: true },
   { id: 'perfil', grupo: null, titulo: 'Meu perfil', subtitulo: 'Seus dados de acesso' },
 ]
@@ -27,13 +29,14 @@ const ABAS_COM_FILTRO = ['resumo', 'lojas']
 // Texto dos filtros para o cabeçalho da impressão.
 function descreverFiltros(filtros, opcoes) {
   const fim = filtros.modo === 'mes' ? filtros.inicio : filtros.fim
-  const promotor = opcoes?.promotores.find((p) => p.codigo === filtros.promotor)
+  const promotor = opcoes?.promotores.find((p) => p.chave === filtros.promotor)
+  const agencia = opcoes?.agencias.find((a) => a.chave === filtros.agencia)
   const partes = [filtros.inicio === fim ? `Mês: ${formatarMes(fim)}` : `Período: ${formatarMes(filtros.inicio)} a ${formatarMes(fim)}`]
-  if (filtros.supervisor) partes.push(`Supervisor: ${filtros.supervisor}`)
+  if (agencia) partes.push(`Agência: ${agencia.nome}`)
   if (promotor) partes.push(`Promotor: ${promotor.nome}`)
   if (filtros.uf) partes.push(`UF: ${filtros.uf}`)
   if (filtros.cidade) partes.push(`Cidade: ${filtros.cidade}`)
-  if (filtros.pdv) partes.push(`PDV: ${filtros.pdv}`)
+  if (filtros.loja) partes.push(`Loja: ${filtros.loja}`)
   return partes.join(' · ')
 }
 
@@ -129,8 +132,8 @@ export default function Painel({ usuario, aoSair }) {
   const alterarFiltro = (campo, valor) => setFiltros((atual) => ({ ...atual, [campo]: valor }))
 
   // Clicar num promotor no Resumo abre as lojas dele.
-  function verLojasDoPromotor(codigo) {
-    alterarFiltro('promotor', codigo)
+  function verLojasDoPromotor(chave) {
+    alterarFiltro('promotor', chave)
     irPara('lojas')
   }
 
@@ -152,9 +155,6 @@ export default function Painel({ usuario, aoSair }) {
               {abasPermitidas.filter((a) => a.grupo === grupo).map((a) => (
                 <button key={a.id} className={aba === a.id ? 'ativo' : ''} onClick={() => irPara(a.id)}>
                   {a.titulo}
-                  {a.id === 'lojas' && opcoes?.roteiro_sem_vinculo?.length > 0 && (
-                    <span className="contador" title="Colaboradores não encontrados">{opcoes.roteiro_sem_vinculo.length}</span>
-                  )}
                 </button>
               ))}
             </div>
@@ -213,7 +213,7 @@ export default function Painel({ usuario, aoSair }) {
         )}
 
         {ABAS_COM_FILTRO.includes(aba) && (!opcoes || (temDados && carregando)) && !erro && (
-          <p className="carregando nao-imprimir">Calculando… com a planilha inteira isso pode levar alguns segundos.</p>
+          <p className="carregando nao-imprimir">Calculando…</p>
         )}
 
         {aba === 'resumo' && temDados && dados && (
@@ -224,15 +224,16 @@ export default function Painel({ usuario, aoSair }) {
           </div>
         )}
 
-        {aba === 'lojas' && opcoes && (
+        {aba === 'lojas' && opcoes && temDados && (
           <div className={carregando ? 'atualizando' : ''}>
             <LojasUf
-              admin={admin}
               uf={filtros.uf}
               ufs={opcoes.ufs}
               aoMudarUf={(valor) => setFiltros((atual) => ({ ...atual, uf: valor, cidade: '' }))}
-              grade={temDados && dados ? dados.grade : null}
-              aoAlterar={() => { carregarOpcoes(); setVersaoDados((v) => v + 1) }}
+              lojas={dados ? dados.lojas : null}
+              grade={dados ? dados.grade : null}
+              avisos={dados ? dados.resumo.avisos : []}
+              agencias={dados ? dados.agencias : []}
             />
           </div>
         )}
@@ -240,7 +241,10 @@ export default function Painel({ usuario, aoSair }) {
         {aba === 'faturamento' && opcoes && (
           <Faturamento admin={admin} meses={opcoes.meses} aoImportar={carregarOpcoes} />
         )}
-        {aba === 'promotores' && <PromotoresAba admin={admin} />}
+        {aba === 'promotores' && opcoes && <PromotoresAba admin={admin} meses={opcoes.meses} />}
+        {aba === 'agencias' && opcoes && (
+          <Agencias admin={admin} meses={opcoes.meses} aoImportar={() => { carregarOpcoes(); setVersaoDados((v) => v + 1) }} />
+        )}
         {aba === 'usuarios' && admin && <Usuarios eu={usuario} />}
         {aba === 'perfil' && <MeuPerfil usuario={usuario} />}
       </main>

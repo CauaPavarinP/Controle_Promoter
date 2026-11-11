@@ -114,7 +114,7 @@ input, select {
 .tabela-rolagem { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { padding: 8px; border-bottom: 1px solid var(--borda); text-align: left; white-space: nowrap; }
-td.quebra { white-space: normal; min-width: 120px; }
+td.quebra { white-space: normal; min-width: 120px; overflow-wrap: anywhere; }
 th { background: var(--primaria-clara); color: var(--primaria); font-weight: 600; position: sticky; top: 0; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .vazio { text-align: center; color: var(--texto-suave); padding: 20px; }
@@ -372,3 +372,34 @@ details.lembrados > summary { cursor: pointer; color: var(--primaria); font-weig
 /* Troca obrigatória da senha provisória */
 .troca-obrigatoria { max-width: 560px; margin: 40px auto; padding-left: 16px; padding-right: 16px; display: grid; gap: 12px; }
 .troca-obrigatoria > .secundario { justify-self: start; }
+/* Protótipo: o promotor está se pagando? */
+.se-paga { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.se-paga-ok { background: var(--ok-fundo); color: var(--ok); }
+.se-paga-limite { background: var(--alerta-fundo); color: var(--alerta); }
+.se-paga-prejuizo, .se-paga-sem-faturamento { background: var(--critico-fundo); color: var(--critico); }
+.se-paga-margem { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.se-paga-margem .dica { flex-basis: 100%; margin: 0; }
+.margem-campo { width: 80px; }
+.margem-valor { font-size: 18px; }
+.se-paga-legenda { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 0; }
+.se-paga-quadro .cards { margin-top: 12px; }
+
+/* Histórico de importações: cabe na tela sem rolagem (nome de arquivo longo quebra, botões descem). */
+.historico td.quebra { min-width: 0; }
+.historico td .acoes { flex-wrap: wrap; gap: 6px; }
+.historico td:nth-child(3) { min-width: 140px; }
+
+/* Explicação no título da coluna (title + ⓘ) */
+.th-dica { font-size: 11px; opacity: .7; cursor: help; }
+
+/* Aviso de servidor demorando (acordando) */
+.aviso-conectando { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 50; background: var(--alerta, #b7791f);
+  color: #fff; padding: 8px 16px; border-radius: 0 0 8px 8px; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.2); max-width: calc(100% - 32px); }
+
+/* Prévia das agências: lojas repetidas por outra agência */
+.repetidas { margin: 12px 0; }
+.escolha { border: 1px solid var(--borda); border-radius: 8px; padding: 8px 12px; margin-top: 10px; display: grid; gap: 8px; }
+.escolha legend { font-weight: 600; padding: 0 4px; }
+.escolha .marcar { align-items: flex-start; }
+.lista-backups { padding-left: 18px; margin: 4px 0; }
+.lista-backups li { margin: 4px 0; overflow-wrap: anywhere; }

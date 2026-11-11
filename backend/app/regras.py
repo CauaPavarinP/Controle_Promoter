@@ -15,8 +15,8 @@ MODOS_RATEIO = {"igual", "visitas"}
 ACOES_TIPO = {"soma", "subtrai", "ignora"}
 
 REGRAS_PADRAO = {
-    # Padrão igual à planilha: soma TOTAL VENDA de todas as linhas, sem filtrar tipo de nota nem RECEITA.
-    "valor_faturamento": "total_venda",   # total_venda (coluna AL) | vlr_total (coluna AD)
+    # Valor do faturamento: VLR TOTAL, que vem do ERP (o TOTAL VENDA era uma coluna feita à mão na planilha antiga).
+    "valor_faturamento": "vlr_total",     # vlr_total (coluna VLR TOTAL do ERP) | total_venda
     # Tipo de nota (sem acento, maiúsculo) -> soma | subtrai | ignora.
     "tipos_nf": {},
     "tipos_nf_padrao": "soma",            # o que fazer com tipos que não estão na lista acima
@@ -25,6 +25,9 @@ REGRAS_PADRAO = {
     "rateio_custo": "visitas",
     # % de custo sobre faturamento a partir do qual a loja fica destacada. Vazio = sem destaque.
     "limite_percentual": None,
+    # Margem da 101 sobre o que vende às lojas (%). Com ela, cada promotor mostra se "se paga": lucro estimado
+    # das lojas dele (faturamento × margem) menos o custo dele. Vazio = ainda não informada (aba Promotores).
+    "margem_percentual": None,
 }
 
 
@@ -59,6 +62,16 @@ def validar_regras(dados: dict) -> dict:
             raise ValueError("O limite de % precisa ser um número.")
         if not 0 < regras["limite_percentual"] <= 1000:
             raise ValueError("O limite de % precisa ficar entre 0 e 1000.")
+    margem = regras["margem_percentual"]
+    if margem in (None, ""):
+        regras["margem_percentual"] = None
+    else:
+        try:
+            regras["margem_percentual"] = float(str(margem).replace(",", "."))
+        except (TypeError, ValueError):
+            raise ValueError("A margem precisa ser um número (ex.: 12,5).")
+        if not 0 < regras["margem_percentual"] < 100:
+            raise ValueError("A margem precisa ficar entre 0 e 100%.")
     return regras
 
 

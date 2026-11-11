@@ -17,19 +17,18 @@ def recarregar_app():
     import app.autenticacao
     import app.cadastros
     import app.carga
+    import app.atendimento
     import app.config
-    import app.dados
     import app.exportar
     import app.db
     import app.faturamento
     import app.main
-    import app.pendencias
     import app.regras
     import app.respostas_guardadas
     import app.seguranca
     import app.usuarios
-    for modulo in (app.config, app.respostas_guardadas, app.seguranca, app.db, app.regras, app.faturamento, app.carga, app.dados, app.autenticacao,
-                   app.usuarios, app.cadastros, app.pendencias, app.exportar, app.main):
+    for modulo in (app.config, app.respostas_guardadas, app.seguranca, app.db, app.regras, app.faturamento, app.carga, app.atendimento, app.autenticacao,
+                   app.usuarios, app.cadastros, app.exportar, app.main):
         importlib.reload(modulo)
     return app
 
@@ -65,11 +64,16 @@ def entrar(cliente, usuario="mauricio", senha="senha-teste"):
     return resposta.json()
 
 
-def importar_cadastros(cliente, *tipos):
-    for tipo in tipos or ("promotores", "roteiro"):
-        with open(EXEMPLOS / f"{tipo}_exemplo.xlsx", "rb") as arquivo:
-            resposta = cliente.post(f"/api/importacoes/{tipo}", files={"arquivo": (f"{tipo}.xlsx", arquivo)})
-        assert resposta.status_code == 200, resposta.text
+def importar_atendimento(cliente, conteudo: bytes | None = None, substituir=False):
+    """Importa o arquivo das agências (padrão: exemplos/atendimento_exemplo.xlsx) e devolve o resultado."""
+    if conteudo is None:
+        conteudo = (EXEMPLOS / "atendimento_exemplo.xlsx").read_bytes()
+    previa = cliente.post("/api/importacoes/atendimento/previa", files={"arquivo": ("atendimento.xlsx", conteudo)})
+    assert previa.status_code == 200, previa.text
+    resposta = cliente.post(f"/api/importacoes/atendimento/{previa.json()['token']}/confirmar",
+                            json={"substituir": substituir})
+    assert resposta.status_code == 200, resposta.text
+    return resposta.json()
 
 
 def importar_faturamento(cliente, arquivo="faturamento_exemplo.xlsx", substituir=False):

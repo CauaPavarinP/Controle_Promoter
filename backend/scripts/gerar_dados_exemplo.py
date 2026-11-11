@@ -27,18 +27,18 @@ PROMOTORES = [
 
 # código promotor, loja, CNPJ, COD CLI no ERP, cidade, UF, visitas/semana, compra média mensal (0 = não compra)
 LOJAS = [
-    ("90001", "REDE ALFA - CENTRO", "00.000.001/0001-01", "1001", "TIJUCAS", "SC", 3, 9000),
-    ("90001", "REDE ALFA - PRAIA", "00.000.001/0001-01", "1001", "TIJUCAS", "SC", 2, 0),  # rede compra pela matriz
-    ("90001", "MERCADO BETA", "00.000.002/0001-02", "1002", "PORTO BELO", "SC", 3, 1200),
-    ("90002", "SUPER GAMA", "00.000.003/0001-03", "1003", "ITAJAI", "SC", 5, 25000),
-    ("90002", "MERCADO DELTA", "00.000.004/0001-04", "1004", "ITAJAI", "SC", 3, 0),  # nunca compra
-    ("90003", "REDE OMEGA - BATEL", "00.000.005/0001-05", "1005", "CURITIBA", "PR", 4, 60000),
-    ("90003", "REDE OMEGA - PORTAO", "00.000.005/0001-05", "1005", "CURITIBA", "PR", 4, 0),
-    ("90003", "ATACADO SIGMA", "00.000.006/0001-06", "1006", "CURITIBA", "PR", 2, 40000),
-    ("90004", "MERCADO KAPPA", "00.000.007/0001-07", "1007", "LONDRINA", "PR", 3, 3000),
+    ("90001", "REDE ALFA - CENTRO", "00.000.001/0001-36", "1001", "TIJUCAS", "SC", 3, 9000),
+    ("90001", "REDE ALFA - PRAIA", "00.000.001/0001-36", "1001", "TIJUCAS", "SC", 2, 0),  # rede compra pela matriz
+    ("90001", "MERCADO BETA", "00.000.002/0001-80", "1002", "PORTO BELO", "SC", 3, 1200),
+    ("90002", "SUPER GAMA", "00.000.003/0001-25", "1003", "ITAJAI", "SC", 5, 25000),
+    ("90002", "MERCADO DELTA", "00.000.004/0001-70", "1004", "ITAJAI", "SC", 3, 0),  # nunca compra
+    ("90003", "REDE OMEGA - BATEL", "00.000.005/0001-14", "1005", "CURITIBA", "PR", 4, 60000),
+    ("90003", "REDE OMEGA - PORTAO", "00.000.005/0001-14", "1005", "CURITIBA", "PR", 4, 0),
+    ("90003", "ATACADO SIGMA", "00.000.006/0001-69", "1006", "CURITIBA", "PR", 2, 40000),
+    ("90004", "MERCADO KAPPA", "00.000.007/0001-03", "1007", "LONDRINA", "PR", 3, 3000),
     # Mesmo CNPJ, mas cada loja com o seu COD CLI no ERP: dá para separar o faturamento.
-    ("90004", "LAMBDA - CENTRO", "00.000.008/0001-08", "2001", "LONDRINA", "PR", 2, 5000),
-    ("90004", "LAMBDA - ZONA SUL", "00.000.008/0001-08", "2002", "LONDRINA", "PR", 2, 2000),
+    ("90004", "LAMBDA - CENTRO", "00.000.008/0001-58", "2001", "LONDRINA", "PR", 2, 5000),
+    ("90004", "LAMBDA - ZONA SUL", "00.000.008/0001-58", "2002", "LONDRINA", "PR", 2, 2000),
 ]
 
 PRODUTOS = [("1603045", "COCKTAIL EXEMPLO (VIDRO) 900ML CX6UN", 75.0, "APERITIVO"),
