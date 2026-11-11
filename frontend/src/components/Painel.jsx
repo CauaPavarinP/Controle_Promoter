@@ -232,6 +232,7 @@ export default function Painel({ usuario, aoSair }) {
               aoMudarUf={(valor) => setFiltros((atual) => ({ ...atual, uf: valor, cidade: '' }))}
               lojas={dados ? dados.lojas : null}
               grade={dados ? dados.grade : null}
+              avisos={dados ? dados.resumo.avisos : []}
             />
           </div>
         )}

@@ -78,7 +78,7 @@ export function PreviaFaturamento({ previa, aoConcluir, aoCancelar }) {
   )
 }
 
-export function Envio({ titulo, descricao, rotulo = 'Enviar', aoEnviar }) {
+export function Envio({ titulo, descricao, rotulo = 'Enviar', aoEnviar, aceitar = '.xlsx,.xlsm,.csv' }) {
   const [arquivo, setArquivo] = useState(null)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
@@ -100,7 +100,7 @@ export function Envio({ titulo, descricao, rotulo = 'Enviar', aoEnviar }) {
     <>
       <h3>{titulo}</h3>
       <p className="dica">{descricao}</p>
-      <input type="file" accept=".xlsx,.xlsm,.csv" onChange={(e) => setArquivo(e.target.files[0] || null)} />
+      <input type="file" accept={aceitar} onChange={(e) => setArquivo(e.target.files[0] || null)} />
       <button disabled={!arquivo || enviando} onClick={enviar}>
         {enviando ? 'Lendo o arquivo… (arquivos grandes demoram)' : rotulo}
       </button>

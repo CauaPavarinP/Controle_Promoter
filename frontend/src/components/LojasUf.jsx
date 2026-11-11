@@ -5,7 +5,7 @@ import GradeMensal from './GradeMensal.jsx'
 import { COLUNAS_SE_PAGA } from './SePaga.jsx'
 import { Tabela } from './ui.jsx'
 
-export default function LojasUf({ uf, aoMudarUf, ufs, lojas, grade }) {
+export default function LojasUf({ uf, aoMudarUf, ufs, lojas, grade, avisos = [] }) {
   return (
     <>
       <nav className="abas-uf nao-imprimir">
@@ -14,6 +14,7 @@ export default function LojasUf({ uf, aoMudarUf, ufs, lojas, grade }) {
           <button key={u} className={uf === u ? 'ativo' : ''} onClick={() => aoMudarUf(u)}>{u}</button>
         ))}
       </nav>
+      {avisos.map((aviso) => <p key={aviso} className="nota">⚠ {aviso}</p>)}
       {lojas && (
         <section className="bloco">
           <h2>Lojas atendidas ({lojas.length})</h2>

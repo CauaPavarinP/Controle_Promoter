@@ -71,6 +71,11 @@ def _indicadores(custo: float, faturamento: float, margem) -> dict:
     return linha
 
 
+def _indicadores_grupo(g: pd.DataFrame, margem) -> dict:
+    """Indicadores de um grupo de linhas; sem_erp = nenhum mês do grupo tem faturamento do ERP importado."""
+    return {**_indicadores(g["valor"].sum(), g["faturamento"].sum(), margem), "sem_erp": not bool(g["tem_erp"].any())}
+
+
 def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAtendimento, regras: dict) -> dict:
     inicio, fim = sorted([indice_mes(filtros.inicio), indice_mes(filtros.fim)])
     meses = list(range(inicio, fim + 1))
@@ -83,6 +88,10 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
     a = a[a["indice"].between(inicio, fim)] if not a.empty else a
     # A divisão do faturamento do CNPJ usa todas as lojas do mês, antes dos filtros (o filtro só escolhe o que mostrar).
     a = atribuir_faturamento(a, fat_mes) if not a.empty else a.assign(faturamento=0.0, compartilhado=False)
+    # Meses do período que têm faturamento do ERP importado (de qualquer cliente). Loja atendida num mês sem ERP
+    # não "não comprou": o faturamento daquele mês só ainda não foi importado.
+    meses_erp = set(int(m) for m in fat_mes["indice"].unique())
+    a = a.assign(tem_erp=a["indice"].isin(meses_erp) if not a.empty else pd.Series(dtype=bool))
     if filtros.agencia:
         a = a[a["agencia_chave"] == filtros.agencia]
     if filtros.promotor:
@@ -103,7 +112,8 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
               "agencias": int(a["agencia_chave"].nunique()) if not a.empty else 0,
               "visitas": int(a["visitas"].fillna(0).sum()) if not a.empty else 0,
               "cnpjs_compartilhados": int(a.loc[a["compartilhado"], "cnpj"].nunique()) if not a.empty else 0,
-              "avisos": _avisos(a, meses, meses_com_atendimento)}
+              "sem_erp": not meses_erp,
+              "avisos": _avisos(a, meses, meses_com_atendimento, meses_erp)}
 
     return {
         "resumo": resumo,
@@ -112,13 +122,18 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
         "lojas": _por_loja(a, margem),
         "agencias": _por_agencia(a, margem),
         "por_uf": _arvore(a, margem),
-        "mes_a_mes": _mes_a_mes(a, meses, margem),
+        "mes_a_mes": _mes_a_mes(a, meses, margem, meses_erp),
         "grade": _grade(a, meses),
     }
 
 
-def _avisos(a: pd.DataFrame, meses: list, com_atendimento: list) -> list[str]:
+def _avisos(a: pd.DataFrame, meses: list, com_atendimento: list, meses_erp: set) -> list[str]:
     avisos = []
+    sem_erp = [m for m in com_atendimento if m not in meses_erp]
+    if sem_erp:
+        avisos.append("Sem faturamento do ERP importado em " + ", ".join(_rotulo(m) for m in sem_erp)
+                      + ": nesses meses as lojas aparecem com compras R$ 0,00 e o resultado fica negativo. "
+                      "Importe o faturamento desses meses na aba Faturamento.")
     sem_arquivo = [m for m in meses if m not in com_atendimento]
     if a.empty:
         avisos.append("Nenhum atendimento de agência no período. Importe os arquivos das agências na aba Agências.")
@@ -148,7 +163,7 @@ def _por_promotor(a: pd.DataFrame, margem) -> list[dict]:
             "visitas": int(g["visitas"].fillna(0).sum()),
             "primeiro_mes": _rotulo(int(g["indice"].min())), "ultimo_mes": _rotulo(int(g["indice"].max())),
             "meses_com_atendimento": int(g["indice"].nunique()),
-            **_indicadores(g["valor"].sum(), g["faturamento"].sum(), margem),
+            **_indicadores_grupo(g, margem),
         })
     return sorted(linhas, key=lambda l: l["nome"])
 
@@ -166,7 +181,7 @@ def _por_loja(a: pd.DataFrame, margem) -> list[dict]:
             "promotor_chaves": sorted(set(g["promotor_chave"])), "dias": _juntar(ultimo["dias"]),
             "visitas": int(g["visitas"].fillna(0).sum()), "compartilhado": bool(g["compartilhado"].any()),
             "status": ultimo["status"].iloc[-1], "meses_com_atendimento": int(g["indice"].nunique()),
-            **_indicadores(g["valor"].sum(), g["faturamento"].sum(), margem),
+            **_indicadores_grupo(g, margem),
         })
     return sorted(linhas, key=lambda l: (l["uf"], l["cidade"], l["loja"]))
 
@@ -181,7 +196,7 @@ def _por_agencia(a: pd.DataFrame, margem) -> list[dict]:
             "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "promotores": int(g["promotor_chave"].nunique()), "visitas": int(g["visitas"].fillna(0).sum()),
             "meses": sorted(_rotulo(int(m)) for m in g["indice"].unique()),
-            **_indicadores(g["valor"].sum(), g["faturamento"].sum(), margem),
+            **_indicadores_grupo(g, margem),
         })
     return sorted(linhas, key=lambda l: l["nome"])
 
@@ -196,7 +211,7 @@ def _arvore(a: pd.DataFrame, margem) -> list[dict]:
         return {"nivel": nivel, "nome": nome, "promotores": int(g["promotor_chave"].nunique()),
                 "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
                 "visitas": int(g["visitas"].fillna(0).sum()),
-                **_indicadores(g["valor"].sum(), g["faturamento"].sum(), margem), **extra}
+                **_indicadores_grupo(g, margem), **extra}
 
     a = a.assign(uf=a["uf"].replace("", "—"))
     for uf, gu in sorted(a.groupby("uf"), key=lambda x: (x[0] == "—", x[0])):
@@ -209,7 +224,7 @@ def _arvore(a: pd.DataFrame, margem) -> list[dict]:
     return linhas
 
 
-def _mes_a_mes(a: pd.DataFrame, meses: list, margem) -> list[dict]:
+def _mes_a_mes(a: pd.DataFrame, meses: list, margem, meses_erp: set) -> list[dict]:
     linhas = []
     for indice in meses:
         g = a[a["indice"] == indice] if not a.empty else a
@@ -218,7 +233,8 @@ def _mes_a_mes(a: pd.DataFrame, meses: list, margem) -> list[dict]:
                        "lojas": 0 if vazio else int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
                        "visitas": 0 if vazio else int(g["visitas"].fillna(0).sum()),
                        **_indicadores(0 if vazio else g["valor"].sum(), 0 if vazio else g["faturamento"].sum(),
-                                      margem)})
+                                      margem),
+                       "sem_erp": indice not in meses_erp})
     return linhas
 
 

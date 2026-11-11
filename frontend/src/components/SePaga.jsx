@@ -8,8 +8,9 @@ import { Tabela } from './ui.jsx'
 // Faixas de EXEMPLO (a definir com o Maurício): quanto do lucro das lojas vai para pagar o atendimento.
 export const FAIXAS = { bom: 50, limite: 100 }
 
-/** 'ok' | 'limite' | 'prejuizo' | 'sem-faturamento' | null (sem margem). */
+/** 'ok' | 'limite' | 'prejuizo' | 'sem-faturamento' | 'sem-erp' | null (sem margem). */
 export function situacao(linha) {
+  if (linha?.sem_erp) return 'sem-erp'
   if (!linha || linha.resultado == null) return null
   if (!linha.lucro_estimado) return linha.custo_periodo > 0 ? 'sem-faturamento' : null
   if (linha.percentual_do_lucro <= FAIXAS.bom) return 'ok'
@@ -19,6 +20,7 @@ export function situacao(linha) {
 
 const TEXTOS = {
   ok: '🟢 Vale a pena', limite: '🟡 No limite', prejuizo: '🔴 Não vale a pena', 'sem-faturamento': '🔴 Sem compras',
+  'sem-erp': '⚪ Falta o faturamento do ERP',
 }
 
 export function EtiquetaSituacao({ linha }) {
@@ -32,9 +34,10 @@ export const textoSituacao = (linha) => TEXTOS[situacao(linha)] || ''
 // Colunas de dinheiro e do veredito, iguais nas tabelas de promotores, agências e lojas.
 export const COLUNAS_SE_PAGA = [
   { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (l) => formatarMoeda(l.custo_periodo) },
-  { campo: 'faturamento', titulo: 'Compraram', num: true, formato: 'moeda', mostrar: (l) => formatarMoeda(l.faturamento) },
-  { campo: 'resultado', titulo: 'Sobra p/ 101', num: true, formato: 'moeda', ordenar: (l) => l.resultado ?? -1e12,
-    mostrar: (l) => (l.resultado == null ? '—'
+  { campo: 'faturamento', titulo: 'Compraram', num: true, formato: 'moeda',
+    mostrar: (l) => (l.sem_erp ? '—' : formatarMoeda(l.faturamento)) },
+  { campo: 'resultado', titulo: 'Sobra p/ 101', num: true, formato: 'moeda', ordenar: (l) => (l.sem_erp ? null : l.resultado) ?? -1e12,
+    mostrar: (l) => (l.resultado == null || l.sem_erp ? '—'
       : <b className={l.resultado >= 0 ? 'texto-ok' : 'texto-critico'}>{formatarMoeda(l.resultado)}</b>) },
   { campo: 'se_paga', titulo: 'Vale a pena?', ordenar: (l) => l.percentual_do_lucro ?? 9999,
     exportar: textoSituacao, mostrar: (l) => <EtiquetaSituacao linha={l} /> },
@@ -74,7 +77,7 @@ export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEd
   const [editando, setEditando] = useState(null)
   const [erro, setErro] = useState('')
   const resumo = dados?.resumo
-  const contagem = { ok: 0, limite: 0, prejuizo: 0, 'sem-faturamento': 0 }
+  const contagem = { ok: 0, limite: 0, prejuizo: 0, 'sem-faturamento': 0, 'sem-erp': 0 }
   for (const p of dados?.[contar] || []) {
     const s = situacao(p)
     if (s) contagem[s] += 1
@@ -133,6 +136,7 @@ export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEd
         </p>
       </div>
 
+      {(resumo?.avisos || []).map((aviso) => <p key={aviso} className="nota">⚠ {aviso}</p>)}
       {margem == null && (
         <div className="aviso">Informe a margem para ver quem vale a pena. Sem ela, só dá para comparar o custo com as compras.</div>
       )}

@@ -180,8 +180,8 @@ async def previa_faturamento(arquivo: UploadFile = File(...), sessao: Session = 
     vem {"situacao": "lendo", "leitura": código} e a tela pergunta o andamento em /leitura/{código}.
     """
     nome = arquivo.filename or ""
-    if not nome.lower().endswith((".xlsx", ".xlsm", ".csv")):
-        _erro("Envie um arquivo .xlsx, .xlsm ou .csv.")
+    if not nome.lower().endswith((".xlsx", ".xlsm", ".csv", ".txt", ".xls")):
+        _erro("Envie um arquivo .xlsx, .xlsm, .csv, .txt ou .xls (o do gerador de relatórios do ERP).")
     if arquivo.size is not None and arquivo.size > TAMANHO_MAXIMO_MB * 1024 * 1024:
         _erro(f"Arquivo grande demais (máximo {TAMANHO_MAXIMO_MB} MB).", 413)
     if _trava_cadastros.locked():

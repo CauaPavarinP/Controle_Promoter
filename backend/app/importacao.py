@@ -10,6 +10,7 @@ import unicodedata
 import numpy as np
 import pandas as pd
 
+from .leitor_texto import ArquivoTextoInvalido, eh_texto, linhas_do_texto
 from .leitor_xlsx import ArquivoNaoSuportado, ArquivoSuspeito, LivroXlsx, conferir_zip
 
 SEM_TIPO = "Sem tipo"
@@ -125,6 +126,14 @@ def _linhas_protegidas(linhas):
         yield from linhas
     except ArquivoSuspeito as erro:
         raise ErroImportacao(MENSAGEM_SUSPEITO) from erro
+
+
+def _linhas_de_texto_protegidas(linhas):
+    """Erro de leitura do arquivo de texto vira mensagem para o usuário."""
+    try:
+        yield from linhas
+    except ArquivoTextoInvalido as erro:
+        raise ErroImportacao(str(erro)) from erro
 
 
 def _ler_abas(conteudo: bytes, nome_arquivo: str):
@@ -274,26 +283,16 @@ def _partes_do_arquivo(fonte, nome_arquivo: str, apelidos: dict, valida):
             yield pd.DataFrame({campo: [linha[pos] if pos < len(linha) else None for linha in bloco]
                                 for campo, pos in posicoes})
 
-    if nome_arquivo.lower().endswith(".csv"):
-        import csv
-        if isinstance(fonte, (bytes, bytearray)):
-            arquivo_texto = io.StringIO(fonte.decode("utf-8-sig", errors="replace"))
-        else:
-            arquivo_texto = open(fonte, encoding="utf-8-sig", errors="replace", newline="")  # noqa: SIM115
-        primeira = arquivo_texto.readline()
-        arquivo_texto.seek(0)
-        separador = ";" if primeira.count(";") > primeira.count(",") else ","
-        try:
-            linhas = (tuple(c if c != "" else None for c in linha)
-                      for linha in csv.reader(arquivo_texto, delimiter=separador))
-            primeiras = list(islice(linhas, 30))
-        except Exception as erro:  # noqa: BLE001 - CSV mal formado vira mensagem para o usuário
-            raise ErroImportacao(f"Não consegui ler o CSV: {erro}") from erro
+    if eh_texto(nome_arquivo):
+        # CSV, TXT ou o ".xls" do Focco (página HTML): app/leitor_texto.py, lido aos poucos.
+        linhas = _linhas_de_texto_protegidas(linhas_do_texto(fonte, nome_arquivo))
+        primeiras = list(islice(linhas, 30))
         achado = _cabecalho(primeiras, apelidos, valida)
         if achado is None:
             return None
         indice, mapa = achado
-        return "CSV", mapa, indice + 2, [], em_partes(chain(primeiras[indice + 1:], linhas), mapa)
+        aba = "HTML" if nome_arquivo.lower().endswith(".xls") else "Texto"
+        return aba, mapa, indice + 2, [], em_partes(chain(primeiras[indice + 1:], linhas), mapa)
 
     candidatas = []
     _recusar_suspeito(fonte)
