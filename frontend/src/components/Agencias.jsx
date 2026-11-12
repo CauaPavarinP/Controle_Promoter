@@ -142,7 +142,7 @@ function PreviaAtendimento({ previa, aoConcluir, aoCancelar }) {
   )
 }
 
-function Importacao({ aoImportar }) {
+export function ImportacaoAgencias({ aoImportar }) {
   const [previa, setPrevia] = useState(null)
   const [concluido, setConcluido] = useState(null)
   const [versao, setVersao] = useState(0)
@@ -164,6 +164,10 @@ function Importacao({ aoImportar }) {
           <p className="dica">
             <a href="/api/modelo-atendimento">Baixar o modelo em Excel</a> para mandar às agências (com instruções e
             conferência do CNPJ).
+          </p>
+          <p className="dica">
+            Promotores CLT da 101: gere o arquivo a partir da planilha do Maurício com o programa
+            <code> scripts/converter_planilha_mauricio.py</code> e importe aqui, como o de uma agência.
           </p>
         </div>
       </section>
@@ -207,7 +211,7 @@ function Backups({ versao }) {
   )
 }
 
-function ApagarDados({ aoApagar }) {
+export function ApagarDados({ aoApagar }) {
   const [texto, setTexto] = useState('')
   const [mensagem, setMensagem] = useState(null)
   const [versao, setVersao] = useState(0)
@@ -247,14 +251,18 @@ function ApagarDados({ aoApagar }) {
   )
 }
 
-export default function Agencias({ admin, meses, aoImportar }) {
+export default function Agencias({ admin, meses }) {
   const sePaga = useSePaga(meses)
-  const recarregar = () => { sePaga.recarregar(); aoImportar() }
   const ocultacao = useOcultarSemCusto(sePaga.dados?.agencias)
   const agencias = (sePaga.dados?.agencias || []).filter((a) => ocultacao.visivel([a.chave]))
   return (
     <>
-      {admin && <Importacao aoImportar={recarregar} />}
+      {!meses.length && (
+        <div className="aviso">
+          Ainda não há dados.{' '}
+          {admin ? <a href="#importar-agencias">Importar em Importações › Arquivos das agências.</a> : 'Peça a um administrador para importar.'}
+        </div>
+      )}
       {meses.length > 0 && (
         <>
           <QuadroSePaga titulo="As agências valem o que custam?" meses={meses} periodo={sePaga.periodo} contar="agencias"
@@ -291,7 +299,6 @@ export default function Agencias({ admin, meses, aoImportar }) {
           </section>
         </>
       )}
-      {admin && <ApagarDados aoApagar={recarregar} />}
     </>
   )
 }

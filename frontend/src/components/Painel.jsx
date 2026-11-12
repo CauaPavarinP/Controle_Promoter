@@ -4,10 +4,10 @@ import { formatarMes } from '../formato.js'
 import Filtros from './Filtros.jsx'
 import CardsResumo from './CardsResumo.jsx'
 import ResumoArvore from './ResumoArvore.jsx'
-import Faturamento from './Faturamento.jsx'
+import Faturamento, { ImportacaoFaturamento } from './Faturamento.jsx'
 import LojasUf from './LojasUf.jsx'
 import PromotoresAba from './PromotoresAba.jsx'
-import Agencias from './Agencias.jsx'
+import Agencias, { ApagarDados, ImportacaoAgencias } from './Agencias.jsx'
 import Usuarios from './cadastros/Usuarios.jsx'
 import { definirSubtituloExportacao } from './ui.jsx'
 import MeuPerfil from './cadastros/MeuPerfil.jsx'
@@ -20,7 +20,11 @@ const ABAS = [
   { id: 'faturamento', grupo: 'Controle', titulo: 'Faturamento', subtitulo: 'O que o ERP faturou, por UF e por cliente' },
   { id: 'promotores', grupo: 'Controle', titulo: 'Promotores', subtitulo: 'Quem atende, onde, quanto custa e se vale a pena' },
   { id: 'lojas', grupo: 'Controle', titulo: 'Lojas por UF', subtitulo: 'Lojas atendidas pelas agências e o faturamento mês a mês' },
-  { id: 'agencias', grupo: 'Controle', titulo: 'Agências', subtitulo: 'Arquivos das agências e o resultado de cada uma' },
+  { id: 'agencias', grupo: 'Controle', titulo: 'Agências', subtitulo: 'O resultado de cada agência, MEI e dos CLT da 101' },
+  { id: 'importar-faturamento', grupo: 'Importações', titulo: 'Faturamento do ERP', admin: true,
+    subtitulo: 'Relatório de faturamento do Focco: importar, conferir e desfazer' },
+  { id: 'importar-agencias', grupo: 'Importações', titulo: 'Arquivos das agências', admin: true,
+    subtitulo: 'Custo e roteiro das agências, MEIs e CLT da 101: importar, conferir, desfazer e backups' },
   { id: 'usuarios', grupo: 'Configuração', titulo: 'Usuários', subtitulo: 'Quem acessa o sistema e com qual perfil', admin: true },
   { id: 'perfil', grupo: null, titulo: 'Meu perfil', subtitulo: 'Seus dados de acesso' },
 ]
@@ -99,12 +103,12 @@ export default function Painel({ usuario, aoSair }) {
     }
   }, [aba, carregarOpcoes])
 
-  // Sem faturamento, o administrador cai direto na aba Faturamento para importar — só na abertura.
+  // Sem faturamento, o administrador cai direto na importação do faturamento — só na abertura.
   const jaDirecionou = useRef(false)
   useEffect(() => {
     if (!opcoes || jaDirecionou.current) return
     jaDirecionou.current = true
-    if (!opcoes.meses.length && admin && aba === 'resumo') irPara('faturamento')
+    if (!opcoes.meses.length && admin && aba === 'resumo') irPara('importar-faturamento')
   }, [opcoes, admin, aba])
 
   // Recalcula o painel sempre que um filtro muda.
@@ -193,14 +197,14 @@ export default function Painel({ usuario, aoSair }) {
         {opcoes?.reimportar_faturamento && ABAS_COM_FILTRO.includes(aba) && (
           <div className="aviso">
             O sistema agora guarda o faturamento item a item. O faturamento importado na versão anterior não é usado:
-            {admin ? <> importe o arquivo de novo na aba <a href="#faturamento">Faturamento</a>.</> : ' peça a um administrador para importar de novo.'}
+            {admin ? <> importe o arquivo de novo em <a href="#importar-faturamento">Importações › Faturamento do ERP</a>.</> : ' peça a um administrador para importar de novo.'}
           </div>
         )}
 
         {ABAS_COM_FILTRO.includes(aba) && !temDados && opcoes && (
           <div className="aviso">
             Ainda não há faturamento importado.{' '}
-            {admin ? <a href="#faturamento">Importe o arquivo do ERP na aba Faturamento.</a> : 'Peça a um administrador para importar.'}
+            {admin ? <a href="#importar-faturamento">Importe o arquivo do ERP em Importações › Faturamento do ERP.</a> : 'Peça a um administrador para importar.'}
           </div>
         )}
 
@@ -240,11 +244,20 @@ export default function Painel({ usuario, aoSair }) {
         )}
 
         {aba === 'faturamento' && opcoes && (
-          <Faturamento admin={admin} meses={opcoes.meses} aoImportar={carregarOpcoes} />
+          <Faturamento admin={admin} meses={opcoes.meses} />
         )}
         {aba === 'promotores' && opcoes && <PromotoresAba admin={admin} meses={opcoes.meses} opcoes={opcoes} />}
         {aba === 'agencias' && opcoes && (
-          <Agencias admin={admin} meses={opcoes.meses} aoImportar={() => { carregarOpcoes(); setVersaoDados((v) => v + 1) }} />
+          <Agencias admin={admin} meses={opcoes.meses} />
+        )}
+        {aba === 'importar-faturamento' && admin && (
+          <ImportacaoFaturamento aoImportar={() => { carregarOpcoes(); setVersaoDados((v) => v + 1) }} />
+        )}
+        {aba === 'importar-agencias' && admin && (
+          <>
+            <ImportacaoAgencias aoImportar={() => { carregarOpcoes(); setVersaoDados((v) => v + 1) }} />
+            <ApagarDados aoApagar={() => { carregarOpcoes(); setVersaoDados((v) => v + 1) }} />
+          </>
         )}
         {aba === 'usuarios' && admin && <Usuarios eu={usuario} />}
         {aba === 'perfil' && <MeuPerfil usuario={usuario} />}

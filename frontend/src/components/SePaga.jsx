@@ -23,10 +23,16 @@ function textos(limite) {
 let limiteAtual = 3
 export const definirLimite = (limite) => { if (limite != null) limiteAtual = limite }
 
-export function EtiquetaSituacao({ linha }) {
+export function EtiquetaSituacao({ linha, soBolinha = false }) {
   const s = situacao(linha)
   if (!s) return <span className="dica" title="Sem custo no período">—</span>
-  return <span className={`se-paga se-paga-${s}`}>{textos(limiteAtual)[s]}</span>
+  const texto = textos(limiteAtual)[s]
+  if (soBolinha) {
+    // Nas tabelas: só a bolinha; o texto aparece ao passar o mouse (e vai no Excel exportado).
+    const [bolinha, ...resto] = texto.split(' ')
+    return <span className="se-paga-bolinha" title={resto.join(' ')} aria-label={resto.join(' ')} role="img">{bolinha}</span>
+  }
+  return <span className={`se-paga se-paga-${s}`}>{texto}</span>
 }
 
 export const textoSituacao = (linha) => textos(limiteAtual)[situacao(linha)] || ''
@@ -45,10 +51,24 @@ export const COLUNA_PERCENTUAL = {
   },
 }
 
+// Legenda das bolinhas, embaixo das tabelas que têm a coluna "Vale a pena?".
+export function LegendaBolinhas() {
+  const limite = formatarPercentual(limiteAtual)
+  return (
+    <p className="legenda-bolinhas">
+      <span>🟢 Vale a pena: custo até {limite} do faturamento</span>
+      <span>🔴 Acima de {limite}, ou com custo e nenhuma compra</span>
+      <span>⚪ Falta o faturamento do ERP no período</span>
+      <span>— Sem custo</span>
+    </p>
+  )
+}
+
 export const COLUNA_VALE_A_PENA = {
+  legenda: () => <LegendaBolinhas />,
   campo: 'se_paga', titulo: 'Vale a pena?', ordenar: (l) => (l.sem_erp ? null : l.percentual_custo) ?? 9999,
   get dica() { return dicaValeAPena() },
-  exportar: (l) => textoSituacao(l), mostrar: (l) => <EtiquetaSituacao linha={l} />,
+  exportar: (l) => textoSituacao(l), mostrar: (l) => <EtiquetaSituacao linha={l} soBolinha />,
 }
 
 // Colunas de dinheiro e do veredito, iguais nas tabelas de promotores, agências e lojas.
@@ -281,7 +301,7 @@ export function FichaSePaga({ linha, lojas, periodo, carregado, temFaturamento }
   if (!temFaturamento) {
     return (
       <div className="aviso">
-        Ainda não há faturamento importado. Importe o arquivo do ERP na aba <b>Faturamento</b> para ver quanto as lojas
+        Ainda não há faturamento importado. Importe o arquivo do ERP em <b>Importações › Faturamento do ERP</b> para ver quanto as lojas
         compraram e se vale a pena.
       </div>
     )

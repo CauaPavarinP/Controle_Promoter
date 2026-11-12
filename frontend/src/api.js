@@ -5,15 +5,19 @@ export function definirAoExpirarSessao(funcao) {
   aoExpirarSessao = funcao
 }
 
-// Igual ao limite do servidor (backend/app/limites.py). Acima disso o servidor corta a conexão no meio do envio e o
-// navegador só diz "Failed to fetch"; por isso o tamanho é conferido aqui antes de enviar.
-export const LIMITE_ARQUIVO_MB = 150
-// Faturamento do ERP em texto (.xls do Focco, que é HTML, .txt, .csv): lido aos poucos no servidor, aceita mais.
-export const LIMITE_FATURAMENTO_TEXTO_MB = 300
+// Limites do servidor (GET /api/limites; o do faturamento em texto é configurável: LIMITE_FATURAMENTO_MB no .env).
+// Acima deles o servidor corta a conexão no meio do envio e o navegador só diz "Failed to fetch"; por isso o tamanho
+// é conferido aqui antes de enviar. Os valores abaixo valem se o servidor não responder.
+const LIMITES_PADRAO = { faturamento_texto_mb: 300, planilha_mb: 150 }
+let limitesDoServidor = null
 
-function limiteDoArquivo(caminho, arquivo) {
+async function limiteDoArquivo(caminho, arquivo) {
+  if (!limitesDoServidor) {
+    limitesDoServidor = await requisitar('/api/limites').catch(() => null)
+  }
+  const limites = { ...LIMITES_PADRAO, ...(limitesDoServidor || {}) }
   const texto = /\.(xls|txt|csv)$/i.test(arquivo.name || '')
-  return caminho.includes('/faturamento/') && texto ? LIMITE_FATURAMENTO_TEXTO_MB : LIMITE_ARQUIVO_MB
+  return caminho.includes('/faturamento/') && texto ? limites.faturamento_texto_mb : limites.planilha_mb
 }
 
 // Tempo máximo de espera. O servidor gratuito do Render "dorme" e leva ~50 s para acordar: 60 s cobre isso.
@@ -88,13 +92,13 @@ export const http = {
   post: (caminho, corpo) => requisitar(caminho, json('POST', corpo)),
   put: (caminho, corpo) => requisitar(caminho, json('PUT', corpo)),
   delete: (caminho) => requisitar(caminho, { method: 'DELETE' }),
-  enviarArquivo: (caminho, arquivo) => {
+  enviarArquivo: async (caminho, arquivo) => {
     const mb = arquivo.size / 1024 / 1024
-    const limite = limiteDoArquivo(caminho, arquivo)
+    const limite = await limiteDoArquivo(caminho, arquivo)
     if (mb > limite) {
-      return Promise.reject(new Error(
+      throw new Error(
         `O arquivo tem ${Math.round(mb)} MB e o limite é ${limite} MB. Exporte do ERP um período menor ` +
-        '(por exemplo, um ou dois meses por vez) e importe um arquivo de cada vez: o sistema junta os meses.'))
+        '(por exemplo, um ou dois meses por vez) e importe um arquivo de cada vez: o sistema junta os meses.')
     }
     const corpo = new FormData()
     corpo.append('arquivo', arquivo)
