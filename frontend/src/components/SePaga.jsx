@@ -51,7 +51,21 @@ export const COLUNA_PERCENTUAL = {
   },
 }
 
+// Legenda das bolinhas, embaixo das tabelas que têm a coluna "Vale a pena?".
+export function LegendaBolinhas() {
+  const limite = formatarPercentual(limiteAtual)
+  return (
+    <p className="legenda-bolinhas">
+      <span>🟢 Vale a pena: custo até {limite} do faturamento</span>
+      <span>🔴 Acima de {limite}, ou com custo e nenhuma compra</span>
+      <span>⚪ Falta o faturamento do ERP no período</span>
+      <span>— Sem custo</span>
+    </p>
+  )
+}
+
 export const COLUNA_VALE_A_PENA = {
+  legenda: () => <LegendaBolinhas />,
   campo: 'se_paga', titulo: 'Vale a pena?', ordenar: (l) => (l.sem_erp ? null : l.percentual_custo) ?? 9999,
   get dica() { return dicaValeAPena() },
   exportar: (l) => textoSituacao(l), mostrar: (l) => <EtiquetaSituacao linha={l} soBolinha />,

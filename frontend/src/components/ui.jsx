@@ -109,6 +109,7 @@ export async function exportarExcel(nomeArquivo, colunas, linhas, totais = [], d
 /**
  * colunas: [{ campo, titulo, num, mostrar(linha), ordenar(linha), exportar(linha), dica }]
  *   dica: explicação da coluna (aparece ao passar o mouse no título, marcado com ⓘ)
+ *   legenda(): o que mostrar embaixo da tabela para explicar a coluna (ex.: as bolinhas do "Vale a pena?")
  * Clicar no título ordena; a lista é paginada e pode ser exportada para Excel.
  */
 export function Tabela({
@@ -194,6 +195,7 @@ export function Tabela({
           )}
         </table>
       </div>
+      {colunas.filter((c) => c.legenda).map((c) => <div key={`legenda-${c.campo}`}>{c.legenda()}</div>)}
       <div className="tabela-rodape nao-imprimir">
         <span className="dica">{linhas.length} registro(s)</span>
         {paginas > 1 && (

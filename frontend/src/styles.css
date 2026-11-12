@@ -412,3 +412,4 @@ details.lembrados > summary { cursor: pointer; color: var(--primaria); font-weig
 
 /* "Vale a pena?" nas tabelas: só a bolinha (o texto fica no title) */
 .se-paga-bolinha { font-size: 15px; cursor: help; display: inline-block; text-align: center; min-width: 22px; }
+.legenda-bolinhas { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0 0; font-size: 13px; color: var(--texto-suave, #667085); }
