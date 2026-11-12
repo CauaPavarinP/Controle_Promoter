@@ -49,10 +49,10 @@ def _inteiro(nome: str, padrao: int, minimo: int, maximo: int) -> int:
     return min(max(valor, minimo), maximo)
 
 
-# Tamanho máximo do arquivo de faturamento em texto (.xls do Focco, .txt, .csv), em MB. Ele é lido aos poucos, então
-# o que pesa na memória é o número de linhas, não os MB. No Render (512 MB de memória) deixe o padrão, 300; no
-# computador dá para subir (ex.: LIMITE_FATURAMENTO_MB=1000 no .env) e importar o ano inteiro de uma vez.
-LIMITE_FATURAMENTO_MB = _inteiro("LIMITE_FATURAMENTO_MB", 300, 1, 5000)
+# Tamanho máximo do arquivo de faturamento, em MB. 0 (padrão) = sem limite: o arquivo é lido e gravado em partes, com
+# memória constante, então o tamanho não derruba o servidor; o que limita é o espaço em disco (conferido no envio).
+# Para impor um teto (ex.: tempo de envio), defina LIMITE_FATURAMENTO_MB no .env.
+LIMITE_FATURAMENTO_MB = _inteiro("LIMITE_FATURAMENTO_MB", 0, 0, 1_000_000)
 
 # Pasta do front (React) já compilado com "npm run build".
 FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"

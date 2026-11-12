@@ -37,8 +37,9 @@ export function ImportacaoFaturamento({ aoImportar }) {
           <Envio
             titulo="Importar faturamento do ERP"
             descricao={'Relatório de faturamento do ERP (uma linha por item de nota): o arquivo do "Gera Excel" (.xls), ' +
-              'o "Gera TXT" (.txt), ou já salvo como .xlsx/.csv. Arquivos grandes: exporte um período menor (ex.: um ' +
-              'trimestre por vez). Você confere o resumo antes de gravar; mês que já existe só é substituído se você confirmar.'}
+              'o "Gera TXT" (.txt), ou já salvo como .xlsx/.csv. Sem limite de tamanho: arquivo grande (o ano inteiro) ' +
+              'demora mais para subir e ler, e a tela mostra o andamento. Você confere o resumo antes de gravar; empresa ' +
+              'e mês que já existem só são substituídos se você confirmar.'}
             rotulo="Ler arquivo"
             aceitar=".xlsx,.xlsm,.csv,.txt,.xls"
             aoEnviar={enviar}

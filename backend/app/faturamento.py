@@ -24,7 +24,7 @@ from sqlalchemy import and_, delete, func, inspect, literal_column, or_, select,
 from sqlalchemy.orm import Session
 
 from . import db, respostas_guardadas
-from .importacao import ErroImportacao, devolver_memoria, ler_faturamento, normalizar_texto
+from .importacao import ErroImportacao, devolver_memoria, ler_faturamento_em_partes, normalizar_texto
 from .modelos import FaturamentoItem, Importacao
 
 VALIDADE_PREVIA = 30 * 60
@@ -123,49 +123,91 @@ def _descartar_previas() -> None:
         _descartar_previa(token)
 
 
+MAXIMO_ERROS_GUARDADOS = 5000   # linhas com erro guardadas para a tela/Excel (a contagem é sempre a total)
+
+
+def _partes_gravadas(caminho: str):
+    """Lê de volta, uma a uma, as partes que a leitura gravou no disco."""
+    with open(caminho, "rb") as arquivo:
+        while True:
+            try:
+                yield pickle.load(arquivo)
+            except EOFError:
+                return
+
+
 def _ler_para_arquivo(fonte, nome: str, cnpjs_no_roteiro: set[str], ao_progredir=None) -> dict:
-    """Lê o arquivo do ERP, monta o resumo da prévia e grava os itens num arquivo temporário."""
-    itens, erros, avisos, aba = ler_faturamento(fonte, nome, ao_progredir=ao_progredir)
-    if itens.empty:
-        raise ErroImportacao("O arquivo não tem nenhuma linha válida (com CNPJ, data e valor).")
-    meses = sorted({(int(a), int(m)) for a, m in zip(itens["ano"], itens["mes"])})
-    with db.engine.connect() as conexao:
-        conflitos = periodos_em_conflito(conexao, periodos_do_arquivo(itens))
-    existentes = sorted({(a, m) for a, m, *_ in conflitos})
-    empresas = sorted({e for _, _, e in periodos_do_arquivo(itens)} - {""})
+    """Lê o arquivo do ERP aos poucos, grava as partes num arquivo temporário e monta o resumo da prévia.
 
-    por_cnpj = (itens.groupby("cnpj_cpf", observed=True)
-                     .agg(valor=("total_venda", "sum"), razao_social=("razao_social", "first"),
-                          cidade=("cidade", "first"), uf=("uf", "first"))
-                     .reset_index())
-    for coluna in ("cnpj_cpf", "razao_social", "cidade", "uf"):  # "category" vazio vira NaN: volta para texto
-        por_cnpj[coluna] = por_cnpj[coluna].astype(object).where(por_cnpj[coluna].notna(), "")
-    sem_roteiro = por_cnpj[~por_cnpj["cnpj_cpf"].isin(cnpjs_no_roteiro)].sort_values("valor", ascending=False)
-
+    Memória constante: cada parte (LINHAS_POR_PARTE linhas) vai para o disco assim que é lida, e da parte só ficam
+    os números do resumo (total, meses, empresas, notas, clientes). Por isso não há limite de tamanho de arquivo.
+    """
+    aba, avisos, partes = ler_faturamento_em_partes(fonte, nome)
     PASTA_PREVIAS.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=PASTA_PREVIAS, suffix=".itens", delete=False) as arquivo:
         caminho_itens = arquivo.name
-    itens.to_pickle(caminho_itens)
+    linhas = lidas = total_erros = 0
+    total, periodos, notas, clientes, erros = 0.0, set(), set(), {}, []
+    try:
+        with open(caminho_itens, "wb") as saida:
+            for numero, (brutas, parte, erros_parte) in enumerate(partes, start=1):
+                lidas += brutas
+                total_erros += len(erros_parte)
+                erros += erros_parte[:max(0, MAXIMO_ERROS_GUARDADOS - len(erros))]
+                if not parte.empty:
+                    pickle.dump(parte, saida, protocol=pickle.HIGHEST_PROTOCOL)
+                    linhas += len(parte)
+                    total += float(parte["total_venda"].sum())
+                    periodos |= periodos_do_arquivo(parte)
+                    notas.update(parte["num_nf"].dropna().unique().tolist())
+                    resumo_parte = (parte.groupby("cnpj_cpf", observed=True)
+                                    .agg(valor=("total_venda", "sum"), razao_social=("razao_social", "first"),
+                                         cidade=("cidade", "first"), uf=("uf", "first")))
+                    for cnpj, valor, razao, cidade, uf in resumo_parte.itertuples():
+                        cliente = clientes.setdefault(cnpj, [0.0, razao, cidade, uf])
+                        cliente[0] += float(valor)
+                del parte
+                if ao_progredir:
+                    ao_progredir(lidas)
+                if numero % 10 == 0:
+                    devolver_memoria()
+    except BaseException:
+        _apagar_arquivo(caminho_itens)
+        raise
+    if not linhas:
+        _apagar_arquivo(caminho_itens)
+        raise ErroImportacao("O arquivo não tem nenhuma linha válida (com CNPJ, data e valor).")
+
+    meses = sorted({(a, m) for a, m, _ in periodos})
+    with db.engine.connect() as conexao:
+        conflitos = periodos_em_conflito(conexao, periodos)
+    existentes = sorted({(a, m) for a, m, *_ in conflitos})
+    empresas = sorted({e for _, _, e in periodos} - {""})
+    texto = lambda v: "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)  # noqa: E731
+    sem_roteiro = sorted(((c, d) for c, d in clientes.items() if c not in cnpjs_no_roteiro),
+                         key=lambda item: -item[1][0])
     resumo = {
         "arquivo": nome, "aba": aba,
-        "linhas_lidas": len(itens) + len(erros), "linhas_validas": len(itens), "linhas_com_erro": len(erros),
+        "linhas_lidas": linhas + total_erros, "linhas_validas": linhas, "linhas_com_erro": total_erros,
         "erros": erros[:100], "avisos": avisos,
         "meses": [_rotulo(a, m) for a, m in meses],
         "meses_existentes": [_rotulo(a, m) for a, m in existentes],
         "empresas": empresas,
         "periodos_existentes": [{"mes": mes, "empresa": e} for mes, e in
                                 sorted({(_rotulo(a, m), e) for a, m, e, _g in conflitos})],
-        "total_venda": round(float(itens["total_venda"].sum()), 2),
-        "notas": int(itens["num_nf"].nunique()),
-        "clientes": int(itens["cnpj_cpf"].nunique()),
+        "total_venda": round(total, 2),
+        "notas": len(notas),
+        "clientes": len(clientes),
         "cnpjs_sem_roteiro": {
-            "quantidade": int(len(sem_roteiro)), "valor": round(float(sem_roteiro["valor"].sum()), 2),
-            "exemplos": [{"cnpj": r.cnpj_cpf, "razao_social": r.razao_social, "cidade": r.cidade, "uf": r.uf,
-                          "valor": round(float(r.valor), 2)} for r in sem_roteiro.head(20).itertuples()],
+            "quantidade": len(sem_roteiro), "valor": round(sum(d[0] for _, d in sem_roteiro), 2),
+            "exemplos": [{"cnpj": c, "razao_social": texto(d[1]), "cidade": texto(d[2]), "uf": texto(d[3]),
+                          "valor": round(d[0], 2)} for c, d in sem_roteiro[:20]],
         },
     }
-    return {"resumo": resumo, "caminho_itens": caminho_itens, "erros": erros, "avisos": avisos,
-            "linhas": len(itens)}
+    if total_erros > len(erros):
+        avisos.append(f"{total_erros} linhas com erro; o histórico guarda as primeiras {len(erros)}.")
+    return {"resumo": resumo, "caminho_itens": caminho_itens, "erros": erros, "total_erros": total_erros,
+            "avisos": avisos, "linhas": linhas, "periodos": sorted(periodos), "total_venda": round(total, 2)}
 
 
 def _registrar_previa(lido: dict, nome: str, usuario: str) -> dict:
@@ -173,7 +215,9 @@ def _registrar_previa(lido: dict, nome: str, usuario: str) -> dict:
     _descartar_previas()  # cada prévia segura um arquivo de itens; só a mais recente vale
     token = secrets.token_urlsafe(16)
     _previas[token] = {"criado": time.time(), "caminho_itens": lido["caminho_itens"], "linhas": lido["linhas"],
-                       "erros": lido["erros"], "avisos": lido["avisos"], "arquivo": nome, "usuario": usuario}
+                       "erros": lido["erros"], "total_erros": lido["total_erros"], "avisos": lido["avisos"],
+                       "periodos": lido["periodos"], "total_venda": lido["total_venda"],
+                       "arquivo": nome, "usuario": usuario}
     # Prévia não confirmada em 30 minutos é descartada.
     relogio = threading.Timer(VALIDADE_PREVIA, _descartar_previa, args=[token])
     relogio.daemon = True
@@ -332,12 +376,14 @@ def _gravar_itens(conexao, itens: pd.DataFrame, importacao_id: int) -> None:
 
 
 def _gravar(previa: dict, substituir: bool, avisos_extra: list[str] | None, ao_progredir=None) -> dict:
-    """Grava os itens da prévia numa transação (tudo ou nada). Roda aqui ou no processo separado."""
-    itens = pd.read_pickle(previa["caminho_itens"])
-    meses = sorted({(int(a), int(m)) for a, m in zip(itens["ano"], itens["mes"])})
+    """Grava os itens da prévia numa transação (tudo ou nada). Roda aqui ou no processo separado.
+
+    As partes são lidas do disco e gravadas uma por vez: a memória não cresce com o tamanho do arquivo."""
+    periodos = {tuple(p) for p in previa["periodos"]}
+    meses = sorted({(a, m) for a, m, _ in periodos})
 
     with db.engine.begin() as conexao:   # tudo ou nada
-        conflitos = periodos_em_conflito(conexao, periodos_do_arquivo(itens))
+        conflitos = periodos_em_conflito(conexao, periodos)
         existentes = sorted({(a, m) for a, m, *_ in conflitos})
         if conflitos and not substituir:
             raise ErroImportacao(
@@ -349,18 +395,24 @@ def _gravar(previa: dict, substituir: bool, avisos_extra: list[str] | None, ao_p
             Importacao.__table__.insert().values(
                 tipo="faturamento", arquivo_nome=previa["arquivo"], usuario=previa["usuario"],
                 periodos=",".join(_rotulo(a, m) for a, m in meses),
-                linhas_lidas=len(itens) + len(previa["erros"]), linhas_importadas=len(itens),
-                linhas_com_erro=len(previa["erros"]), total_venda=round(float(itens["total_venda"].sum()), 2),
+                linhas_lidas=previa["linhas"] + previa["total_erros"], linhas_importadas=previa["linhas"],
+                linhas_com_erro=previa["total_erros"], total_venda=previa["total_venda"],
                 avisos=json.dumps(previa["avisos"] + (avisos_extra or []), ensure_ascii=False),
                 log_erros=json.dumps(previa["erros"], ensure_ascii=False), situacao="ativa")
         ).inserted_primary_key[0]
-        _gravar_itens(conexao, itens, importacao_id)
+        gravadas = 0
+        for parte in _partes_gravadas(previa["caminho_itens"]):
+            _gravar_itens(conexao, parte, importacao_id)
+            gravadas += len(parte)
+            del parte
+            if ao_progredir:
+                ao_progredir(gravadas)
         # Importações antigas que ficaram sem nenhum item (todos os meses substituídos).
         conexao.execute(text(
             "UPDATE importacoes SET situacao = 'substituida' WHERE tipo = 'faturamento' AND situacao = 'ativa' "
             "AND id <> :atual AND NOT EXISTS (SELECT 1 FROM faturamento_itens f WHERE f.importacao_id = importacoes.id)"),
             {"atual": importacao_id})
-    return {"importacao_id": importacao_id, "linhas_importadas": len(itens),
+    return {"importacao_id": importacao_id, "linhas_importadas": previa["linhas"],
             "meses": [_rotulo(a, m) for a, m in meses], "meses_substituidos": [_rotulo(a, m) for a, m in existentes],
             "periodos_substituidos": [{"mes": mes, "empresa": e} for mes, e in
                                       sorted({(_rotulo(a, m), e) for a, m, e, _g in conflitos})]}

@@ -63,7 +63,7 @@ O sistema é alimentado por duas fontes:
 
 | Onde | Arquivo | O que faz |
 |---|---|---|
-| **Faturamento** | Relatório de faturamento do Focco: o ".xls" do **Gera Excel** (é HTML), o **Gera TXT**, ou .xlsx/.csv | Prévia (período, linhas, total, notas, clientes, linhas com erro, CNPJs sem agência) e só grava ao confirmar. Até 300 MB em .xls/.txt/.csv (configurável: `LIMITE_FATURAMENTO_MB` no `.env`; no Render deixe 300); 150 MB em .xlsx. |
+| **Faturamento** | Relatório de faturamento do Focco: o ".xls" do **Gera Excel** (é HTML), o **Gera TXT**, ou .xlsx/.csv | Prévia (período, linhas, total, notas, clientes, linhas com erro, CNPJs sem agência) e só grava ao confirmar. **Sem limite de tamanho**: lido e gravado em partes de 5 mil linhas, com memória constante (pico ~330 MB no teste com 300 MB e com 650 MB de arquivo). O limite é o espaço em disco, conferido no envio. Teto opcional: `LIMITE_FATURAMENTO_MB` no `.env`. |
 | **Agências** | Arquivo de cada agência, MEI ou da própria 101 (CLT) no modelo "Atendimento das agências" (baixar na aba Agências) | Uma linha por loja × mês: agência, tipo, CNPJ, loja, promotor, visitas e valor do mês. Prévia com avisos (CNPJ inválido, lojas repetidas em outra agência, nomes parecidos, linhas descartadas). |
 
 - **Mês que já existe** (faturamento) ou **agência + mês que já existe** (agências): só substitui com confirmação.
