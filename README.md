@@ -89,6 +89,22 @@ python scripts/converter_planilha_mauricio.py "C:\caminho\ROTEIROS X FATURAMENTO
 - Depois, importe o arquivo gerado na aba **Agências**, como o de qualquer agência. O arquivo gerado tem dados reais:
   não coloque no repositório.
 
+### Filial que manda a "Sistemática de atendimento" (ex.: PR)
+
+Para a filial passar a usar o modelo, o primeiro arquivo pode ser gerado a partir da Sistemática:
+
+```
+cd backend
+python scripts/converter_sistematica.py "SISTEMATICA_DE_ATENDIMENTO_PR_OUT_2026.xlsx" --mes 2026-10 [--custo-clt custos.xlsx]
+```
+
+- Preenche tipo (CLT/MEI/Freelancer), agência, loja, cidade, UF, promotor, supervisor, dias e visitas do mês; o CNPJ
+  quando está escrito junto do nome da loja; o valor dos MEIs (aba dos MEIs, dividido pelas lojas, pelas visitas).
+- **Laranja** = falta preencher: CNPJ da loja e valor dos CLT. Com `--custo-clt` (Excel com Promotor e Custo do mês),
+  o custo dos CLT é dividido pelas lojas de cada um.
+- Aba **Conferência** com o resumo e os avisos (MEI sem valor, agência escrita no lugar do promotor…).
+- O arquivo gerado tem dados reais: não coloque no repositório.
+
 ## Regras do cálculo
 
 Valores padrão em `REGRAS_PADRAO` (`app/regras.py`): valor = TOTAL VENDA, todos os tipos de nota somam (como a
