@@ -8,6 +8,7 @@ Fluxo da importação:
 3. desfazer(): apaga os itens de uma importação.
 """
 import json
+import re
 import logging
 import multiprocessing
 import os
@@ -34,13 +35,48 @@ def _rotulo(ano: int, mes: int) -> str:
     return f"{ano}-{mes:02d}"
 
 
-def meses_com_itens(conexao) -> set[tuple[int, int]]:
-    linhas = conexao.execute(select(FaturamentoItem.ano, FaturamentoItem.mes).distinct())
-    return {(int(a), int(m)) for a, m in linhas}
+# Substituição por EMPRESA (COD EMP) + mês: o relatório do Focco sai por empresa, então importar a empresa 10 não
+# pode apagar o que já está gravado da empresa 11 no mesmo mês. "" = sem COD EMP (arquivo sem a coluna ou linha
+# vazia): por segurança, conflita com todas as empresas do mês, para nunca contar a mesma venda duas vezes.
+_EMPRESA = func.coalesce(FaturamentoItem.cod_emp, "")
 
 
-def _filtro_meses(meses):
-    return or_(*[and_(FaturamentoItem.ano == a, FaturamentoItem.mes == m) for a, m in meses])
+def _empresa(valor) -> str:
+    """Código da empresa sem variação de formato: 10, "10", "10,00", "10.0" e "010" são a mesma empresa."""
+    texto = "" if valor is None or (isinstance(valor, float) and pd.isna(valor)) else str(valor).strip()
+    numero = re.fullmatch(r"(\d+)(?:[.,]0+)?", texto)
+    return str(int(numero.group(1))) if numero else texto
+
+
+def periodos_do_arquivo(itens: pd.DataFrame) -> set[tuple[int, int, str]]:
+    empresas = itens["cod_emp"].astype(object) if "cod_emp" in itens else pd.Series("", index=itens.index)
+    return {(int(a), int(m), _empresa(e)) for a, m, e in zip(itens["ano"], itens["mes"], empresas)}
+
+
+def periodos_em_conflito(conexao, do_arquivo: set[tuple[int, int, str]]) -> list[tuple[int, int, str, str]]:
+    """Empresa + mês já gravados que o arquivo substitui: (ano, mês, empresa normalizada, valor gravado no banco).
+    O valor gravado é o que se usa para apagar (pode ser "10,00" num arquivo antigo)."""
+    if not do_arquivo:
+        return []
+    meses = {(a, m) for a, m, _ in do_arquivo}
+    gravados = conexao.execute(select(FaturamentoItem.ano, FaturamentoItem.mes, _EMPRESA).distinct()
+                               .where(or_(*[and_(FaturamentoItem.ano == a, FaturamentoItem.mes == m)
+                                            for a, m in sorted(meses)]))).all()
+    conflito = set()
+    for a, m, gravado in gravados:
+        a, m, e = int(a), int(m), _empresa(gravado)
+        if (a, m, e) in do_arquivo or (a, m, "") in do_arquivo or (e == "" and (a, m) in meses):
+            conflito.add((a, m, e, gravado))
+    return sorted(conflito)
+
+
+def _filtro_periodos(periodos):
+    return or_(*[and_(FaturamentoItem.ano == a, FaturamentoItem.mes == m, _EMPRESA == gravado)
+                 for a, m, _e, gravado in periodos])
+
+
+def rotulo_periodo(ano: int, mes: int, empresa: str) -> str:
+    return f"{_rotulo(ano, mes)}" + (f" (empresa {empresa})" if empresa else " (sem empresa)")
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +130,9 @@ def _ler_para_arquivo(fonte, nome: str, cnpjs_no_roteiro: set[str], ao_progredir
         raise ErroImportacao("O arquivo não tem nenhuma linha válida (com CNPJ, data e valor).")
     meses = sorted({(int(a), int(m)) for a, m in zip(itens["ano"], itens["mes"])})
     with db.engine.connect() as conexao:
-        existentes = sorted(set(meses) & meses_com_itens(conexao))
+        conflitos = periodos_em_conflito(conexao, periodos_do_arquivo(itens))
+    existentes = sorted({(a, m) for a, m, *_ in conflitos})
+    empresas = sorted({e for _, _, e in periodos_do_arquivo(itens)} - {""})
 
     por_cnpj = (itens.groupby("cnpj_cpf", observed=True)
                      .agg(valor=("total_venda", "sum"), razao_social=("razao_social", "first"),
@@ -114,6 +152,9 @@ def _ler_para_arquivo(fonte, nome: str, cnpjs_no_roteiro: set[str], ao_progredir
         "erros": erros[:100], "avisos": avisos,
         "meses": [_rotulo(a, m) for a, m in meses],
         "meses_existentes": [_rotulo(a, m) for a, m in existentes],
+        "empresas": empresas,
+        "periodos_existentes": [{"mes": mes, "empresa": e} for mes, e in
+                                sorted({(_rotulo(a, m), e) for a, m, e, _g in conflitos})],
         "total_venda": round(float(itens["total_venda"].sum()), 2),
         "notas": int(itens["num_nf"].nunique()),
         "clientes": int(itens["cnpj_cpf"].nunique()),
@@ -296,13 +337,14 @@ def _gravar(previa: dict, substituir: bool, avisos_extra: list[str] | None, ao_p
     meses = sorted({(int(a), int(m)) for a, m in zip(itens["ano"], itens["mes"])})
 
     with db.engine.begin() as conexao:   # tudo ou nada
-        existentes = sorted(set(meses) & meses_com_itens(conexao))
-        if existentes and not substituir:
+        conflitos = periodos_em_conflito(conexao, periodos_do_arquivo(itens))
+        existentes = sorted({(a, m) for a, m, *_ in conflitos})
+        if conflitos and not substituir:
             raise ErroImportacao(
-                "Já existe faturamento para " + ", ".join(_rotulo(a, m) for a, m in existentes)
-                + ". Confirme a substituição desses meses para continuar.")
-        if existentes:
-            conexao.execute(delete(FaturamentoItem).where(_filtro_meses(existentes)))
+                "Já existe faturamento para " + ", ".join(sorted({rotulo_periodo(a, m, e) for a, m, e, _g in conflitos}))
+                + ". Confirme a substituição para continuar.")
+        for inicio in range(0, len(conflitos), 200):
+            conexao.execute(delete(FaturamentoItem).where(_filtro_periodos(conflitos[inicio:inicio + 200])))
         importacao_id = conexao.execute(
             Importacao.__table__.insert().values(
                 tipo="faturamento", arquivo_nome=previa["arquivo"], usuario=previa["usuario"],
@@ -319,7 +361,9 @@ def _gravar(previa: dict, substituir: bool, avisos_extra: list[str] | None, ao_p
             "AND id <> :atual AND NOT EXISTS (SELECT 1 FROM faturamento_itens f WHERE f.importacao_id = importacoes.id)"),
             {"atual": importacao_id})
     return {"importacao_id": importacao_id, "linhas_importadas": len(itens),
-            "meses": [_rotulo(a, m) for a, m in meses], "meses_substituidos": [_rotulo(a, m) for a, m in existentes]}
+            "meses": [_rotulo(a, m) for a, m in meses], "meses_substituidos": [_rotulo(a, m) for a, m in existentes],
+            "periodos_substituidos": [{"mes": mes, "empresa": e} for mes, e in
+                                      sorted({(_rotulo(a, m), e) for a, m, e, _g in conflitos})]}
 
 
 def confirmar(token: str, substituir: bool, avisos_extra: list[str] | None = None) -> dict:

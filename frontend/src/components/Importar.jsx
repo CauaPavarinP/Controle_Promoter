@@ -12,6 +12,14 @@ export function PreviaFaturamento({ previa, aoConcluir, aoCancelar }) {
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
   const existentes = previa.meses_existentes.length > 0
+  // Substituição por empresa (COD EMP) + mês: { "11": ["2026-09", …], "": [...] }
+  const porEmpresa = {}
+  for (const p of previa.periodos_existentes || previa.meses_existentes.map((mes) => ({ mes, empresa: '' }))) {
+    (porEmpresa[p.empresa] ||= []).push(p.mes)
+  }
+  const descricaoExistentes = Object.entries(porEmpresa)
+    .map(([empresa, meses]) => `${empresa ? `empresa ${empresa}` : 'sem código de empresa'} em ${meses.map(formatarMes).join(', ')}`)
+    .join('; ')
 
   async function confirmar() {
     setEnviando(true)
@@ -31,6 +39,7 @@ export function PreviaFaturamento({ previa, aoConcluir, aoCancelar }) {
       <h3>Confira antes de gravar — {previa.arquivo}</h3>
       <div className="previa-numeros">
         <div><span>Período</span><b>{formatarMes(previa.meses[0])} a {formatarMes(previa.meses[previa.meses.length - 1])}</b></div>
+        {(previa.empresas || []).length > 0 && <div><span>Empresa (COD EMP)</span><b>{previa.empresas.join(', ')}</b></div>}
         <div><span>Linhas</span><b>{previa.linhas_validas} válidas{previa.linhas_com_erro > 0 && <span className="texto-critico"> · {previa.linhas_com_erro} com erro</span>}</b></div>
         <div><span>Total faturado</span><b>{formatarMoeda(previa.total_venda)}</b></div>
         <div><span>Notas fiscais</span><b>{previa.notas}</b></div>
@@ -63,8 +72,8 @@ export function PreviaFaturamento({ previa, aoConcluir, aoCancelar }) {
       {existentes && (
         <label className="marcar caixa-alerta">
           <input type="checkbox" checked={substituir} onChange={(e) => setSubstituir(e.target.checked)} />
-          Já existe faturamento de {previa.meses_existentes.map(formatarMes).join(', ')}. Substituir esses meses
-          (apaga o que está no sistema nesses meses e grava o arquivo novo).
+          Já existe faturamento da {descricaoExistentes}. Substituir (apaga só o que está no sistema dessa empresa
+          nesses meses e grava o arquivo novo; as outras empresas não são mexidas).
         </label>
       )}
       {erro && <p className="erro">{erro}</p>}

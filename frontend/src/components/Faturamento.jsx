@@ -63,7 +63,9 @@ function Importacao({ aoImportar }) {
       {concluido && (
         <div className="sucesso">
           Faturamento gravado: {concluido.linhas_importadas} linhas de {concluido.meses.map(formatarMes).join(', ')}.
-          {concluido.meses_substituidos.length > 0 && <> Meses substituídos: {concluido.meses_substituidos.map(formatarMes).join(', ')}.</>}
+          {(concluido.periodos_substituidos || []).length > 0 && (
+            <> Substituídos: {concluido.periodos_substituidos.map((p) => `${formatarMes(p.mes)}${p.empresa ? ` (empresa ${p.empresa})` : ''}`).join(', ')}.</>
+          )}
           {concluido.aviso && <p className="aviso-texto">⚠ {concluido.aviso}</p>}
         </div>
       )}

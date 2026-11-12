@@ -152,3 +152,67 @@ def test_limite_de_tamanho_por_tipo(cliente, monkeypatch, banco):
     assert xlsx.status_code == 413 and "máximo 0 MB" in xlsx.json()["detail"]
     html = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("r.xls", _html_focco(_linhas_exemplo()))})
     assert html.status_code == 200 and "token" in html.json()
+
+
+def _faturamento_da_empresa(empresa) -> bytes:
+    """O faturamento de exemplo como se fosse de outra empresa (COD EMP); None = sem a coluna COD EMP."""
+    import io
+
+    from openpyxl import Workbook
+    linhas = _linhas_exemplo()
+    livro = Workbook()
+    aba = livro.active
+    coluna = linhas[0].index("COD EMP")
+    for numero, linha in enumerate(linhas):
+        linha = list(linha)
+        if numero and empresa is not None:
+            linha[coluna] = empresa
+        if empresa is None:
+            linha.pop(coluna)
+        aba.append(linha)
+    saida = io.BytesIO()
+    livro.save(saida)
+    return saida.getvalue()
+
+
+def test_substituicao_e_por_empresa_e_mes(cliente):
+    """O relatório do Focco sai por empresa: importar a empresa 10 não pode apagar a 11 do mesmo mês."""
+    entrar(cliente)
+    total = lambda: cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"]
+    previa_11, resposta = _importar(cliente, "empresa11.xlsx", _faturamento_da_empresa(11))
+    assert resposta.status_code == 200 and previa_11["empresas"] == ["11"]
+    um = total()
+    # Empresa 10, mesmos meses: não conflita, soma.
+    previa_10 = cliente.post("/api/importacoes/faturamento/previa",
+                             files={"arquivo": ("empresa10.xlsx", _faturamento_da_empresa(10))}).json()
+    assert previa_10["meses_existentes"] == [] and previa_10["periodos_existentes"] == []
+    assert cliente.post(f"/api/importacoes/faturamento/{previa_10['token']}/confirmar", json={}).status_code == 200
+    assert total() == round(um * 2, 2)
+    # Empresa 11 de novo: substitui só a 11.
+    de_novo = cliente.post("/api/importacoes/faturamento/previa",
+                           files={"arquivo": ("empresa11.xlsx", _faturamento_da_empresa(11))}).json()
+    assert {p["empresa"] for p in de_novo["periodos_existentes"]} == {"11"} and len(de_novo["meses_existentes"]) == 9
+    sem_confirmar = cliente.post(f"/api/importacoes/faturamento/{de_novo['token']}/confirmar", json={})
+    assert sem_confirmar.status_code == 400 and "empresa 11" in sem_confirmar.json()["detail"]
+    feito = cliente.post(f"/api/importacoes/faturamento/{de_novo['token']}/confirmar", json={"substituir": True}).json()
+    assert {p["empresa"] for p in feito["periodos_substituidos"]} == {"11"}
+    assert total() == round(um * 2, 2)   # não duplicou e não apagou a 10
+    # Arquivo sem a coluna COD EMP: conflita com todas as empresas do mês (nunca conta duas vezes).
+    sem_empresa = cliente.post("/api/importacoes/faturamento/previa",
+                               files={"arquivo": ("sem.xlsx", _faturamento_da_empresa(None))}).json()
+    assert {p["empresa"] for p in sem_empresa["periodos_existentes"]} == {"10", "11"}
+    cliente.post(f"/api/importacoes/faturamento/{sem_empresa['token']}/confirmar", json={"substituir": True})
+    assert total() == um
+
+
+def test_codigo_da_empresa_em_formatos_diferentes_e_a_mesma_empresa(cliente):
+    """Gravado como "10,00" (texto do HTML) e importado de novo como 10: é a mesma empresa, substitui de verdade."""
+    entrar(cliente)
+    linhas = _linhas_exemplo()
+    _importar(cliente, "relatorio.xls", _html_focco(linhas))           # COD EMP "10,00"
+    um = cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"]
+    previa = cliente.post("/api/importacoes/faturamento/previa",
+                          files={"arquivo": ("f.xlsx", _faturamento_da_empresa(10))}).json()
+    assert {p["empresa"] for p in previa["periodos_existentes"]} == {"10"}
+    cliente.post(f"/api/importacoes/faturamento/{previa['token']}/confirmar", json={"substituir": True})
+    assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == um   # não duplicou
