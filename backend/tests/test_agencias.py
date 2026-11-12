@@ -14,7 +14,7 @@ def _arquivo(linhas: list[list]) -> bytes:
     """Arquivo no modelo das agências com as linhas dadas (sem a linha de exemplo)."""
     livro = load_workbook(EXEMPLOS / "modelo_atendimento_agencias.xlsx")
     aba = livro["Atendimentos"]
-    for coluna in range(1, 15):
+    for coluna in range(1, 16):
         aba.cell(2, coluna).value = None
     for numero, valores in enumerate(linhas, start=2):
         for coluna, valor in enumerate(valores, start=1):
@@ -25,8 +25,10 @@ def _arquivo(linhas: list[list]) -> bytes:
 
 
 def _linha(mes="10/2026", agencia="Agência Beta", cnpj="11.222.333/0001-81", loja="Loja Um", promotor="Paula",
-           codigo="", valor=100, visitas=4, cidade="Curitiba", uf="PR", status="Ativa", observacao="", tipo=None):
-    return [mes, agencia, tipo, cnpj, loja, cidade, uf, promotor, codigo, "Ter", visitas, valor, status, observacao]
+           codigo="", valor=100, visitas=4, cidade="Curitiba", uf="PR", status="Ativa", observacao="", tipo=None,
+           supervisor=None):
+    return [mes, agencia, tipo, cnpj, loja, cidade, uf, promotor, codigo, "Ter", visitas, valor, status, observacao,
+            supervisor]
 
 
 def _previa(cliente, conteudo):
@@ -485,3 +487,20 @@ def test_apagar_guarda_backup_que_da_para_importar_de_novo(cliente):
     assert vazio == {"atendimentos": 0, "backup": None, "backup_arquivo": None}
     assert len(cliente.get("/api/backups").json()) == 2
     assert cliente.get("/api/backups/999").status_code == 404
+
+
+def test_supervisor_opcional_entra_e_filtra(cliente):
+    entrar(cliente)
+    livro = load_workbook(EXEMPLOS / "modelo_atendimento_agencias.xlsx")
+    assert livro["Atendimentos"].cell(1, 15).value == "Supervisor"
+    importar_atendimento(cliente, _arquivo([
+        _linha(loja="Loja Um", promotor="Paula", supervisor="Jesus"),
+        _linha(loja="Loja Dois", cnpj="77.752.293/0107-46", promotor="Rita", supervisor="#N/A"),
+        _linha(loja="Loja Três", cnpj="09.477.652/0042-64", promotor="Marta"),
+    ]))
+    mes = {"inicio": "2026-10", "fim": "2026-10"}
+    sup = {p["nome"]: p["supervisor"] for p in cliente.get("/api/painel", params=mes).json()["promotores"]}
+    assert sup == {"Paula": "Jesus", "Rita": "", "Marta": ""}      # "#N/A" vira vazio
+    assert cliente.get("/api/opcoes").json()["supervisores"] == ["Jesus"]
+    so_jesus = cliente.get("/api/painel", params={**mes, "supervisor": "Jesus"}).json()
+    assert [p["nome"] for p in so_jesus["promotores"]] == ["Paula"] and so_jesus["resumo"]["custo"] == 100

@@ -183,18 +183,25 @@ async def previa_faturamento(arquivo: UploadFile = File(...), sessao: Session = 
     nome = arquivo.filename or ""
     if not nome.lower().endswith((".xlsx", ".xlsm", ".csv", ".txt", ".xls")):
         _erro("Envie um arquivo .xlsx, .xlsm, .csv, .txt ou .xls (o do gerador de relatórios do ERP).")
-    # Texto (.xls do Focco, TXT, CSV) é lido aos poucos: aceita até 300 MB. O .xlsx é aberto inteiro: 150 MB.
-    texto = nome.lower().endswith((".csv", ".txt", ".xls"))
-    maximo_mb = LIMITE_FATURAMENTO_TEXTO // (1024 * 1024) if texto else TAMANHO_MAXIMO_MB
-    if arquivo.size is not None and arquivo.size > maximo_mb * 1024 * 1024:
-        _erro(f"Arquivo grande demais (máximo {maximo_mb} MB para este tipo de arquivo). Exporte do ERP um período "
-              "menor e importe uma parte de cada vez.", 413)
+    # Sem limite de tamanho (a não ser que LIMITE_FATURAMENTO_MB esteja definido): o arquivo é lido e gravado em partes,
+    # com memória constante. O que limita é o disco: a cópia do arquivo e as partes lidas precisam caber.
+    if LIMITE_FATURAMENTO_TEXTO is not None and arquivo.size is not None and arquivo.size > LIMITE_FATURAMENTO_TEXTO:
+        _erro(f"Arquivo grande demais (máximo {LIMITE_FATURAMENTO_TEXTO // (1024 * 1024)} MB, definido em "
+              "LIMITE_FATURAMENTO_MB). Exporte do ERP um período menor.", 413)
+    if arquivo.size is not None:
+        compactado = nome.lower().endswith((".xlsx", ".xlsm"))
+        precisa = arquivo.size * (5 if compactado else 2) + 200 * 1024 * 1024   # cópia + partes lidas + folga
+        livre = shutil.disk_usage(tempfile.gettempdir()).free
+        if livre < precisa:
+            _erro(f"O servidor não tem espaço em disco para este arquivo (livre: {livre // 1024 ** 2} MB; precisa de "
+                  f"uns {precisa // 1024 ** 2} MB). Exporte do ERP um período menor.", 413)
     if _trava_cadastros.locked():
         _erro(OCUPADO)
 
     def salvar():
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(nome)[1].lower()) as arquivo_disco:
             shutil.copyfileobj(arquivo.file, arquivo_disco, length=1024 * 1024)
+        arquivo.file.close()   # libera já a cópia que o servidor fez durante o envio
         return arquivo_disco
     destino = await run_in_threadpool(salvar)
     try:
@@ -257,7 +264,9 @@ def confirmar_atendimento(token: str, dados: ConfirmacaoAtendimento, _=Depends(e
 @app.get("/api/limites")
 def limites_de_envio(_=Depends(usuario_logado)):
     """Tamanhos máximos de arquivo, para a tela avisar antes de enviar (o servidor confere de novo)."""
-    return {"faturamento_texto_mb": LIMITE_FATURAMENTO_TEXTO // (1024 * 1024), "planilha_mb": TAMANHO_MAXIMO_MB}
+    sem_limite = LIMITE_FATURAMENTO_TEXTO is None
+    return {"faturamento_texto_mb": None if sem_limite else LIMITE_FATURAMENTO_TEXTO // (1024 * 1024),
+            "planilha_mb": TAMANHO_MAXIMO_MB}
 
 
 @app.get("/api/modelo-atendimento", include_in_schema=False)
@@ -324,7 +333,7 @@ MESES_MAXIMOS = 60
 
 @app.get("/api/painel")
 def painel(pedido: Request, inicio: str, fim: str, agencia: str = "", promotor: str = "", uf: str = "",
-           cidade: str = "", loja: str = "", tipo: str = "", _=Depends(usuario_logado)):
+           cidade: str = "", loja: str = "", tipo: str = "", supervisor: str = "", _=Depends(usuario_logado)):
     try:
         indice_inicio, indice_fim = indice_mes(inicio), indice_mes(fim)
     except ValueError as erro:
@@ -332,7 +341,7 @@ def painel(pedido: Request, inicio: str, fim: str, agencia: str = "", promotor: 
     if abs(indice_fim - indice_inicio) >= MESES_MAXIMOS:
         _erro("Escolha um período de até 5 anos.")
     filtros = FiltrosAtendimento(inicio=inicio, fim=fim, agencia=agencia, promotor=promotor, uf=uf, cidade=cidade,
-                                 loja=loja, tipo=tipo)
+                                 loja=loja, tipo=tipo, supervisor=supervisor)
     return respostas_guardadas.responder(
         pedido, ("painel", *astuple(filtros)),
         lambda: calcular_painel(faturamento.faturamento_mensal(), atendimento.carregar(), filtros, ler_regras()))

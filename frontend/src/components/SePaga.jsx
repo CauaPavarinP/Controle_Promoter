@@ -143,7 +143,7 @@ export function useSePaga(meses, extras = {}, periodoInicial = null) {
 }
 
 /** Filtros de local e de quem atende (UF → município → mercado, agência, tipo). Recalculam os números do topo. */
-export function FiltrosLocal({ opcoes, valor, aoMudar, campos = ['uf', 'cidade', 'loja', 'agencia', 'tipo'] }) {
+export function FiltrosLocal({ opcoes, valor, aoMudar, campos = ['uf', 'cidade', 'loja', 'agencia', 'tipo', 'supervisor'] }) {
   if (!opcoes) return null
   const mudar = (campo, v) => {
     const novo = { ...valor, [campo]: v }
@@ -194,6 +194,14 @@ export function FiltrosLocal({ opcoes, valor, aoMudar, campos = ['uf', 'cidade',
           <select value={valor.tipo || ''} onChange={(e) => mudar('tipo', e.target.value)}>
             <option value="">Todos</option>
             {opcoes.tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+      )}
+      {campos.includes('supervisor') && (opcoes.supervisores || []).length > 0 && (
+        <label className="filtro">Supervisor
+          <select value={valor.supervisor || ''} onChange={(e) => mudar('supervisor', e.target.value)}>
+            <option value="">Todos</option>
+            {opcoes.supervisores.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
       )}

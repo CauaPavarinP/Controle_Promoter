@@ -40,6 +40,7 @@ function FichaPromotor({ promotor, meses, periodo, aoFechar }) {
         <dl className="dados">
           <dt>Agência</dt><dd>{promotor.agencia}</dd>
           <dt>Tipo</dt><dd>{promotor.tipo || '—'}</dd>
+          {promotor.supervisor && (<><dt>Supervisor</dt><dd>{promotor.supervisor}</dd></>)}
           {promotor.codigo && (<><dt>Código</dt><dd>{promotor.codigo}</dd></>)}
           <dt>Onde atende</dt><dd>{promotor.cidades || '—'}{promotor.ufs && ` (${promotor.ufs})`}</dd>
           <dt>Nos arquivos</dt><dd>de {formatarMes(promotor.primeiro_mes)} a {formatarMes(promotor.ultimo_mes)} ({promotor.meses_com_atendimento} mês(es) com atendimento no período)</dd>
@@ -74,7 +75,7 @@ export default function PromotoresAba({ admin, meses, opcoes }) {
   const termo = filtros.busca.trim().toLowerCase()
   const visiveis = promotores.filter((p) => ocultacao.visivel([p.agencia_chave]) &&
     (!filtros.resultado || filtros.resultado.split(',').includes(situacao(p))) &&
-    (!termo || `${p.nome} ${p.codigo} ${p.cidades} ${p.agencia}`.toLowerCase().includes(termo)))
+    (!termo || `${p.nome} ${p.codigo} ${p.cidades} ${p.agencia} ${p.supervisor}`.toLowerCase().includes(termo)))
 
   return (
     <>
@@ -112,6 +113,7 @@ export default function PromotoresAba({ admin, meses, opcoes }) {
               { campo: 'nome', titulo: 'Promotor', quebra: true },
               { campo: 'tipo', titulo: 'Tipo' },
               { campo: 'agencia', titulo: 'Agência', quebra: true },
+              { campo: 'supervisor', titulo: 'Supervisor', quebra: true },
               { campo: 'ufs', titulo: 'UF' },
               { campo: 'lojas_ultimo_mes', titulo: 'Lojas', num: true, formato: 'inteiro' },
               { campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro' },

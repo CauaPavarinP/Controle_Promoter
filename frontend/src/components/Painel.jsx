@@ -12,7 +12,7 @@ import Usuarios from './cadastros/Usuarios.jsx'
 import { definirSubtituloExportacao } from './ui.jsx'
 import MeuPerfil from './cadastros/MeuPerfil.jsx'
 
-const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', agencia: '', tipo: '', promotor: '', uf: '', cidade: '', loja: '' }
+const FILTROS_VAZIOS = { modo: 'acumulado', inicio: '', fim: '', agencia: '', tipo: '', supervisor: '', promotor: '', uf: '', cidade: '', loja: '' }
 
 // grupo: título no menu | admin: só administrador vê
 const ABAS = [
@@ -38,6 +38,7 @@ function descreverFiltros(filtros, opcoes) {
   const partes = [filtros.inicio === fim ? `Mês: ${formatarMes(fim)}` : `Período: ${formatarMes(filtros.inicio)} a ${formatarMes(fim)}`]
   if (agencia) partes.push(`Agência: ${agencia.nome}`)
   if (filtros.tipo) partes.push(`Tipo: ${filtros.tipo}`)
+  if (filtros.supervisor) partes.push(`Supervisor: ${filtros.supervisor}`)
   if (promotor) partes.push(`Promotor: ${promotor.nome}`)
   if (filtros.uf) partes.push(`UF: ${filtros.uf}`)
   if (filtros.cidade) partes.push(`Cidade: ${filtros.cidade}`)

@@ -73,8 +73,8 @@ def test_converte_com_as_pegadinhas_da_planilha_real(tmp_path):
     carla = [l for l in jan if l["Promotor"] == "Carla Dias"]
     assert sum(l["Valor do mês (R$)"] for l in carla) == 1800 and {l["UF"] for l in carla} == {"PR"}
     assert {l["Cidade"] for l in carla} == {"CURITIBA"}
-    # Supervisor vai para a observação; "#N/A" usa o supervisor do cadastro.
-    assert all("Supervisor: Laysa" in l["Observação"] for l in ana)
+    # Supervisor na coluna Supervisor; "#N/A" usa o supervisor do cadastro.
+    assert all(l["Supervisor"] == "Laysa" for l in ana)
     # Sem cadastro: entra com R$ 0, com o nome do roteiro.
     assert [l["Valor do mês (R$)"] for l in jan if l["Promotor"] == "ZÉ SEM CADASTRO"] == [0]
     avisos = dict(resultado["avisos"])
@@ -100,4 +100,8 @@ def test_arquivo_gerado_importa_no_sistema(cliente, tmp_path):
     cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
     painel = cliente.get("/api/painel", params={"inicio": "2026-01", "fim": "2026-09"}).json()
     assert {p["tipo"] for p in painel["promotores"]} == {"CLT"}
+    assert {p["supervisor"] for p in painel["promotores"]} == {"Supervisora Um", "Supervisor Dois"}
+    assert cliente.get("/api/opcoes").json()["supervisores"] == ["Supervisor Dois", "Supervisora Um"]
+    so_um = cliente.get("/api/painel", params={"inicio": "2026-01", "fim": "2026-09", "supervisor": "Supervisora Um"}).json()
+    assert {p["nome"] for p in so_um["promotores"]} == {"Ana Teste", "Bruno Teste"}
     assert painel["resumo"]["custo"] == resultado["resumo"]["Valor total gerado (R$)"]

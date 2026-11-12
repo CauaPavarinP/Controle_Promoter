@@ -63,7 +63,7 @@ O sistema é alimentado por duas fontes:
 
 | Onde | Arquivo | O que faz |
 |---|---|---|
-| **Faturamento** | Relatório de faturamento do Focco: o ".xls" do **Gera Excel** (é HTML), o **Gera TXT**, ou .xlsx/.csv | Prévia (período, linhas, total, notas, clientes, linhas com erro, CNPJs sem agência) e só grava ao confirmar. Até 300 MB em .xls/.txt/.csv (configurável: `LIMITE_FATURAMENTO_MB` no `.env`; no Render deixe 300); 150 MB em .xlsx. |
+| **Faturamento** | Relatório de faturamento do Focco: o ".xls" do **Gera Excel** (é HTML), o **Gera TXT**, ou .xlsx/.csv | Prévia (período, linhas, total, notas, clientes, linhas com erro, CNPJs sem agência) e só grava ao confirmar. **Sem limite de tamanho**: lido e gravado em partes de 5 mil linhas, com memória constante (pico ~330 MB no teste com 300 MB e com 650 MB de arquivo). O limite é o espaço em disco, conferido no envio. Teto opcional: `LIMITE_FATURAMENTO_MB` no `.env`. |
 | **Agências** | Arquivo de cada agência, MEI ou da própria 101 (CLT) no modelo "Atendimento das agências" (baixar na aba Agências) | Uma linha por loja × mês: agência, tipo, CNPJ, loja, promotor, visitas e valor do mês. Prévia com avisos (CNPJ inválido, lojas repetidas em outra agência, nomes parecidos, linhas descartadas). |
 
 - **Mês que já existe** (faturamento) ou **agência + mês que já existe** (agências): só substitui com confirmação.
@@ -82,12 +82,28 @@ python scripts/converter_planilha_mauricio.py "C:\caminho\ROTEIROS X FATURAMENTO
 ```
 
 - Valor de cada loja no mês = custo do promotor (TOTAL da PROMOTORES BRASIL) ÷ lojas do roteiro dele.
-- Agência "101 do Brasil", Tipo CLT, código do promotor; supervisor na Observação; quem foi admitido depois do mês
+- Agência "101 do Brasil", Tipo CLT, código do promotor e supervisor; quem foi admitido depois do mês
   não entra naquele mês.
 - O arquivo gerado tem a aba **Conferência** (e o mesmo resumo na tela): promotor do roteiro sem cadastro de custo,
   cadastro sem loja, nomes ligados por semelhança, CNPJ inválido, supervisor "#N/A".
 - Depois, importe o arquivo gerado na aba **Agências**, como o de qualquer agência. O arquivo gerado tem dados reais:
   não coloque no repositório.
+
+### Filial que manda a "Sistemática de atendimento" (ex.: PR)
+
+Para a filial passar a usar o modelo, o primeiro arquivo pode ser gerado a partir da Sistemática:
+
+```
+cd backend
+python scripts/converter_sistematica.py "SISTEMATICA_DE_ATENDIMENTO_PR_OUT_2026.xlsx" --mes 2026-10 [--custo-clt custos.xlsx]
+```
+
+- Preenche tipo (CLT/MEI/Freelancer), agência, loja, cidade, UF, promotor, supervisor, dias e visitas do mês; o CNPJ
+  quando está escrito junto do nome da loja; o valor dos MEIs (aba dos MEIs, dividido pelas lojas, pelas visitas).
+- **Laranja** = falta preencher: CNPJ da loja e valor dos CLT. Com `--custo-clt` (Excel com Promotor e Custo do mês),
+  o custo dos CLT é dividido pelas lojas de cada um.
+- Aba **Conferência** com o resumo e os avisos (MEI sem valor, agência escrita no lugar do promotor…).
+- O arquivo gerado tem dados reais: não coloque no repositório.
 
 ## Regras do cálculo
 

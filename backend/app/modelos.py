@@ -234,6 +234,7 @@ class Atendimento(Base):
     agencia: Mapped[str] = mapped_column(String(150))
     agencia_chave: Mapped[str] = mapped_column(String(150))
     tipo: Mapped[str] = mapped_column(String(20), default="Agência")   # Agência | CLT | MEI | Freelancer
+    supervisor: Mapped[str] = mapped_column(String(100), default="")
     cnpj: Mapped[str] = mapped_column(String(14), default="")
     loja: Mapped[str] = mapped_column(String(200))
     loja_chave: Mapped[str] = mapped_column(String(200))
