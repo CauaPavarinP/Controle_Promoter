@@ -6,7 +6,7 @@ import { DetalheNotas } from './GradeMensal.jsx'
 import { Envio, Historico, PreviaFaturamento } from './Importar.jsx'
 import { definirSubtituloExportacao, Tabela } from './ui.jsx'
 
-function Importacao({ aoImportar }) {
+export function ImportacaoFaturamento({ aoImportar }) {
   const [previa, setPrevia] = useState(null)
   const [concluido, setConcluido] = useState(null)
   const [versao, setVersao] = useState(0)
@@ -37,8 +37,9 @@ function Importacao({ aoImportar }) {
           <Envio
             titulo="Importar faturamento do ERP"
             descricao={'Relatório de faturamento do ERP (uma linha por item de nota): o arquivo do "Gera Excel" (.xls), ' +
-              'o "Gera TXT" (.txt), ou já salvo como .xlsx/.csv. Arquivos grandes: exporte um período menor (ex.: um ' +
-              'trimestre por vez). Você confere o resumo antes de gravar; mês que já existe só é substituído se você confirmar.'}
+              'o "Gera TXT" (.txt), ou já salvo como .xlsx/.csv. Sem limite de tamanho: arquivo grande (o ano inteiro) ' +
+              'demora mais para subir e ler, e a tela mostra o andamento. Você confere o resumo antes de gravar; empresa ' +
+              'e mês que já existem só são substituídos se você confirmar.'}
             rotulo="Ler arquivo"
             aceitar=".xlsx,.xlsm,.csv,.txt,.xls"
             aoEnviar={enviar}
@@ -63,7 +64,9 @@ function Importacao({ aoImportar }) {
       {concluido && (
         <div className="sucesso">
           Faturamento gravado: {concluido.linhas_importadas} linhas de {concluido.meses.map(formatarMes).join(', ')}.
-          {concluido.meses_substituidos.length > 0 && <> Meses substituídos: {concluido.meses_substituidos.map(formatarMes).join(', ')}.</>}
+          {(concluido.periodos_substituidos || []).length > 0 && (
+            <> Substituídos: {concluido.periodos_substituidos.map((p) => `${formatarMes(p.mes)}${p.empresa ? ` (empresa ${p.empresa})` : ''}`).join(', ')}.</>
+          )}
           {concluido.aviso && <p className="aviso-texto">⚠ {concluido.aviso}</p>}
         </div>
       )}
@@ -95,7 +98,7 @@ function colunasDosMeses(meses, aoClicar) {
   }))
 }
 
-export default function Faturamento({ admin, meses, aoImportar }) {
+export default function Faturamento({ admin, meses }) {
   const ultimo = meses[meses.length - 1] || ''
   const [periodo, setPeriodo] = useState({ inicio: '', fim: '' })
   const [dados, setDados] = useState(null)
@@ -134,9 +137,12 @@ export default function Faturamento({ admin, meses, aoImportar }) {
 
   return (
     <>
-      {admin && <Importacao aoImportar={aoImportar} />}
-
-      {!meses.length && <div className="aviso">Ainda não há faturamento importado.</div>}
+      {!meses.length && (
+        <div className="aviso">
+          Ainda não há faturamento importado.{' '}
+          {admin ? <a href="#importar-faturamento">Importar em Importações › Faturamento do ERP.</a> : 'Peça a um administrador para importar.'}
+        </div>
+      )}
       {erro && <div className="erro-caixa">{erro}</div>}
       {carregando && <p className="carregando">Carregando o faturamento… com a planilha inteira isso pode levar alguns segundos.</p>}
 

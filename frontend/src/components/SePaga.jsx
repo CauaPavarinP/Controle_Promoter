@@ -1,51 +1,74 @@
-// "Vale a pena?": o lucro que a 101 tem com as lojas (faturamento do ERP × margem) cobre o que ela paga à agência
-// por elas? Usado nas abas Promotores, Agências e Lojas por UF.
+// "Vale a pena?": o custo do atendimento (o que a 101 paga à agência, ao MEI ou ao CLT) cabe em até 3% do faturamento
+// bruto das lojas (o que elas compraram da 101 no ERP)? O limite é editável. Usado nas abas Promotores, Agências e Lojas.
 import { useEffect, useState } from 'react'
 import { http } from '../api.js'
 import { formatarMes, formatarMoeda, formatarPercentual } from '../formato.js'
 import { Tabela } from './ui.jsx'
 
-// Faixas de EXEMPLO (a definir com o Maurício): quanto do lucro das lojas vai para pagar o atendimento.
-export const FAIXAS = { bom: 50, limite: 100 }
+// Situação calculada no servidor: ok | acima | sem_compras | sem_custo | sem_erp
+const CLASSES = { ok: 'ok', acima: 'prejuizo', sem_compras: 'sem-faturamento', sem_erp: 'sem-erp' }
 
-/** 'ok' | 'limite' | 'prejuizo' | 'sem-faturamento' | 'sem-erp' | null (sem margem). */
-export function situacao(linha) {
-  if (linha?.sem_erp) return 'sem-erp'
-  if (!linha || linha.resultado == null) return null
-  if (!linha.lucro_estimado) return linha.custo_periodo > 0 ? 'sem-faturamento' : null
-  if (linha.percentual_do_lucro <= FAIXAS.bom) return 'ok'
-  if (linha.percentual_do_lucro <= FAIXAS.limite) return 'limite'
-  return 'prejuizo'
+/** 'ok' | 'prejuizo' | 'sem-faturamento' | 'sem-erp' | null (sem custo). */
+export const situacao = (linha) => CLASSES[linha?.situacao] || null
+
+function textos(limite) {
+  const pct = limite != null ? formatarPercentual(limite) : 'do limite'
+  return {
+    ok: '🟢 Vale a pena', prejuizo: `🔴 Acima de ${pct}`, 'sem-faturamento': '🔴 Sem compras',
+    'sem-erp': '⚪ Falta o faturamento do ERP',
+  }
 }
 
-const TEXTOS = {
-  ok: '🟢 Vale a pena', limite: '🟡 No limite', prejuizo: '🔴 Não vale a pena', 'sem-faturamento': '🔴 Sem compras',
-  'sem-erp': '⚪ Falta o faturamento do ERP',
-}
+// O limite em uso (vem do servidor junto com o painel); usado nos textos das etiquetas.
+let limiteAtual = 3
+export const definirLimite = (limite) => { if (limite != null) limiteAtual = limite }
 
-export function EtiquetaSituacao({ linha }) {
+export function EtiquetaSituacao({ linha, soBolinha = false }) {
   const s = situacao(linha)
-  if (!s) return <span className="dica">—</span>
-  return <span className={`se-paga se-paga-${s}`}>{TEXTOS[s]}</span>
+  if (!s) return <span className="dica" title="Sem custo no período">—</span>
+  const texto = textos(limiteAtual)[s]
+  if (soBolinha) {
+    // Nas tabelas: só a bolinha; o texto aparece ao passar o mouse (e vai no Excel exportado).
+    const [bolinha, ...resto] = texto.split(' ')
+    return <span className="se-paga-bolinha" title={resto.join(' ')} aria-label={resto.join(' ')} role="img">{bolinha}</span>
+  }
+  return <span className={`se-paga se-paga-${s}`}>{texto}</span>
 }
 
-export const textoSituacao = (linha) => TEXTOS[situacao(linha)] || ''
+export const textoSituacao = (linha) => textos(limiteAtual)[situacao(linha)] || ''
 
-export const DICA_VALE_A_PENA = `A cor vem do "% do lucro": quanto do lucro estimado da 101 com essas lojas ` +
-  `(compras × margem) vai para pagar o atendimento. Até ${FAIXAS.bom}% = vale a pena; até ${FAIXAS.limite}% = no ` +
-  `limite; acima = a 101 paga mais do que lucra.`
+const dicaValeAPena = () => `Vale a pena quando o custo do atendimento é até ${formatarPercentual(limiteAtual)} do ` +
+  'faturamento bruto das lojas (VLR TOTAL do ERP). Acima disso, ou com custo e nenhuma compra, não vale.'
 
-// Custo ÷ compras: comparação simples, não define a cor.
-export const COLUNA_PERCENTUAL_COMPRAS = {
-  campo: 'percentual_custo', titulo: '% das compras', num: true, mostrar: (l) => formatarPercentual(l.percentual_custo),
-  dica: 'Custo do atendimento ÷ o que as lojas compraram da 101. Só para comparar: não é a conta do "Vale a pena?".',
+// Custo ÷ faturamento bruto: é a conta que define a cor.
+export const COLUNA_PERCENTUAL = {
+  campo: 'percentual_custo', titulo: '% do faturamento', num: true,
+  ordenar: (l) => (l.sem_erp ? null : l.percentual_custo) ?? 9999,
+  mostrar: (l) => (l.sem_erp || l.percentual_custo == null ? '—'
+    : <b className={situacao(l) === 'ok' ? 'texto-ok' : 'texto-critico'}>{formatarPercentual(l.percentual_custo)}</b>),
+  get dica() {
+    return `Custo do atendimento ÷ o que as lojas compraram da 101 (faturamento bruto). O máximo é ${formatarPercentual(limiteAtual)}.`
+  },
 }
 
-// Custo ÷ lucro estimado: é a conta que dá a cor do "Vale a pena?".
-export const COLUNA_PERCENTUAL_LUCRO = {
-  campo: 'percentual_do_lucro', titulo: '% do lucro', num: true, ordenar: (l) => (l.sem_erp ? null : l.percentual_do_lucro) ?? 9999,
-  mostrar: (l) => (l.sem_erp || l.percentual_do_lucro == null ? '—' : formatarPercentual(l.percentual_do_lucro)),
-  dica: 'Custo do atendimento ÷ lucro estimado da 101 (compras × margem). É esta conta que define a cor do "Vale a pena?". Sem margem informada, fica "—".',
+// Legenda das bolinhas, embaixo das tabelas que têm a coluna "Vale a pena?".
+export function LegendaBolinhas() {
+  const limite = formatarPercentual(limiteAtual)
+  return (
+    <p className="legenda-bolinhas">
+      <span>🟢 Vale a pena: custo até {limite} do faturamento</span>
+      <span>🔴 Acima de {limite}, ou com custo e nenhuma compra</span>
+      <span>⚪ Falta o faturamento do ERP no período</span>
+      <span>— Sem custo</span>
+    </p>
+  )
+}
+
+export const COLUNA_VALE_A_PENA = {
+  legenda: () => <LegendaBolinhas />,
+  campo: 'se_paga', titulo: 'Vale a pena?', ordenar: (l) => (l.sem_erp ? null : l.percentual_custo) ?? 9999,
+  get dica() { return dicaValeAPena() },
+  exportar: (l) => textoSituacao(l), mostrar: (l) => <EtiquetaSituacao linha={l} soBolinha />,
 }
 
 // Colunas de dinheiro e do veredito, iguais nas tabelas de promotores, agências e lojas.
@@ -53,12 +76,8 @@ export const COLUNAS_SE_PAGA = [
   { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (l) => formatarMoeda(l.custo_periodo) },
   { campo: 'faturamento', titulo: 'Compraram', num: true, formato: 'moeda',
     mostrar: (l) => (l.sem_erp ? '—' : formatarMoeda(l.faturamento)) },
-  { campo: 'resultado', titulo: 'Sobra p/ 101', num: true, formato: 'moeda', ordenar: (l) => (l.sem_erp ? null : l.resultado) ?? -1e12,
-    mostrar: (l) => (l.resultado == null || l.sem_erp ? '—'
-      : <b className={l.resultado >= 0 ? 'texto-ok' : 'texto-critico'}>{formatarMoeda(l.resultado)}</b>) },
-  COLUNA_PERCENTUAL_LUCRO,
-  { campo: 'se_paga', titulo: 'Vale a pena?', ordenar: (l) => l.percentual_do_lucro ?? 9999,
-    dica: DICA_VALE_A_PENA, exportar: textoSituacao, mostrar: (l) => <EtiquetaSituacao linha={l} /> },
+  COLUNA_PERCENTUAL,
+  COLUNA_VALE_A_PENA,
 ]
 
 function periodoPadrao(meses) {
@@ -123,25 +142,97 @@ export function useSePaga(meses, extras = {}, periodoInicial = null) {
   return { dados, erro, periodo, setPeriodo, recarregar: () => setVersao((v) => v + 1) }
 }
 
-/** Quadro do topo: período, margem da 101 e o resultado geral. */
-export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEditar, aoMudarMargem, contar = 'promotores', linhas }) {
-  const margem = dados?.regras?.margem_percentual
+/** Filtros de local e de quem atende (UF → município → mercado, agência, tipo). Recalculam os números do topo. */
+export function FiltrosLocal({ opcoes, valor, aoMudar, campos = ['uf', 'cidade', 'loja', 'agencia', 'tipo', 'supervisor'] }) {
+  if (!opcoes) return null
+  const mudar = (campo, v) => {
+    const novo = { ...valor, [campo]: v }
+    if (campo === 'uf') { novo.cidade = ''; novo.loja = '' }
+    if (campo === 'cidade') novo.loja = ''
+    aoMudar(novo)
+  }
+  const cidades = opcoes.cidades.filter((c) => !valor.uf || c.uf === valor.uf)
+  const lojas = opcoes.lojas.filter((l) => (!valor.uf || l.uf === valor.uf) && (!valor.cidade || l.cidade === valor.cidade))
+  return (
+    <div className="filtros-local">
+      {campos.includes('uf') && (
+        <label className="filtro">UF
+          <select value={valor.uf || ''} onChange={(e) => mudar('uf', e.target.value)}>
+            <option value="">Todas</option>
+            {opcoes.ufs.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </label>
+      )}
+      {campos.includes('cidade') && (
+        <label className="filtro">Município
+          <select value={valor.cidade || ''} onChange={(e) => mudar('cidade', e.target.value)}>
+            <option value="">Todos</option>
+            {cidades.map((c) => <option key={`${c.uf}-${c.cidade}`} value={c.cidade}>{c.cidade}{!valor.uf && ` - ${c.uf}`}</option>)}
+          </select>
+        </label>
+      )}
+      {campos.includes('loja') && (
+        <label className="filtro">Mercado
+          <input list="lista-mercados" value={valor.loja || ''} placeholder={`Todos (${lojas.length})`}
+            onChange={(e) => mudar('loja', lojas.some((l) => l.nome === e.target.value) || !e.target.value ? e.target.value : valor.loja)}
+            onInput={(e) => { if (!e.target.value) mudar('loja', '') }} />
+          <datalist id="lista-mercados">
+            {lojas.slice(0, 500).map((l) => <option key={`${l.nome}-${l.cidade}`} value={l.nome}>{l.cidade} - {l.uf}</option>)}
+          </datalist>
+        </label>
+      )}
+      {campos.includes('agencia') && (
+        <label className="filtro">Agência
+          <select value={valor.agencia || ''} onChange={(e) => mudar('agencia', e.target.value)}>
+            <option value="">Todas</option>
+            {opcoes.agencias.map((a) => <option key={a.chave} value={a.chave}>{a.nome}</option>)}
+          </select>
+        </label>
+      )}
+      {campos.includes('tipo') && (opcoes.tipos || []).length > 0 && (
+        <label className="filtro">Tipo
+          <select value={valor.tipo || ''} onChange={(e) => mudar('tipo', e.target.value)}>
+            <option value="">Todos</option>
+            {opcoes.tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+      )}
+      {campos.includes('supervisor') && (opcoes.supervisores || []).length > 0 && (
+        <label className="filtro">Supervisor
+          <select value={valor.supervisor || ''} onChange={(e) => mudar('supervisor', e.target.value)}>
+            <option value="">Todos</option>
+            {opcoes.supervisores.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+      )}
+      {Object.values(valor).some(Boolean) && (
+        <button className="secundario" onClick={() => aoMudar({})}>Limpar filtros</button>
+      )}
+    </div>
+  )
+}
+
+/** Quadro do topo: período, limite (máximo de % do faturamento) e o resultado geral. */
+export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEditar, aoMudarLimite, contar = 'promotores',
+  linhas, children }) {
+  const limite = dados?.regras?.limite_percentual
   const [editando, setEditando] = useState(null)
   const [erro, setErro] = useState('')
   const resumo = dados?.resumo
-  const contagem = { ok: 0, limite: 0, prejuizo: 0, 'sem-faturamento': 0, 'sem-erp': 0 }
+  definirLimite(limite)
+  const contagem = { ok: 0, prejuizo: 0, 'sem-faturamento': 0, 'sem-erp': 0 }
   for (const p of linhas || dados?.[contar] || []) {
     const s = situacao(p)
     if (s) contagem[s] += 1
   }
 
-  async function salvarMargem() {
+  async function salvarLimite() {
     setErro('')
     try {
       const { regras } = await http.get('/api/regras')
-      await http.put('/api/regras', { ...regras, margem_percentual: editando === '' ? null : editando })
+      await http.put('/api/regras', { ...regras, limite_percentual: editando === '' ? null : editando })
       setEditando(null)
-      aoMudarMargem()
+      aoMudarLimite()
     } catch (e) {
       setErro(e.message)
     }
@@ -164,58 +255,49 @@ export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEd
           </label>
         </div>
       </div>
+      {children}
 
       <div className="se-paga-margem">
-        <b>Margem da 101 sobre as vendas:</b>{' '}
+        <b>Custo máximo do atendimento:</b>{' '}
         {editando !== null ? (
           <>
-            <input className="margem-campo" inputMode="decimal" value={editando} autoFocus aria-label="Margem da 101 (%)"
-              onChange={(e) => setEditando(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && salvarMargem()} /> %
-            <button onClick={salvarMargem}>Salvar</button>
+            <input className="margem-campo" inputMode="decimal" value={editando} autoFocus aria-label="Custo máximo (% do faturamento)"
+              onChange={(e) => setEditando(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && salvarLimite()} /> % do faturamento
+            <button onClick={salvarLimite}>Salvar</button>
             <button className="secundario" onClick={() => setEditando(null)}>Cancelar</button>
           </>
         ) : (
           <>
-            {margem != null ? <b className="margem-valor">{formatarPercentual(margem)}</b> : <span className="texto-alerta">não informada</span>}
-            {podeEditar && <button className="secundario" onClick={() => setEditando(margem != null ? String(margem).replace('.', ',') : '')}>Alterar</button>}
+            <b className="margem-valor">{limite != null ? formatarPercentual(limite) : '…'}</b> do faturamento bruto das lojas
+            {podeEditar && <button className="secundario" onClick={() => setEditando(limite != null ? String(limite).replace('.', ',') : '')}>Alterar</button>}
           </>
         )}
         {erro && <p className="erro">{erro}</p>}
         <p className="dica">
-          Lucro estimado = o que as lojas compraram da 101 (ERP) × margem. Vale a pena quando esse lucro cobre o que a
-          101 paga pelo atendimento (arquivos das agências). Quando houver o custo de cada produto, o lucro passa a ser
-          calculado produto por produto.
+          % do faturamento = o que a 101 paga pelo atendimento (arquivos das agências) ÷ o que as lojas compraram da 101
+          (VLR TOTAL do ERP, bruto). Exemplo: as lojas compraram R$ 10.000 e o promotor custa R$ 250 = 2,5%, vale a pena.
         </p>
       </div>
 
-      {(resumo?.avisos || []).map((aviso) => <p key={aviso} className="nota">⚠ {aviso}</p>)}
-      {margem == null && (
-        <div className="aviso">Informe a margem para ver quem vale a pena. Sem ela, só dá para comparar o custo com as compras.</div>
-      )}
-
       {resumo && (
-        <div className="cards cards-4">
-          <div className="card"><span>Lojas compraram</span><strong>{formatarMoeda(resumo.faturamento)}</strong></div>
-          <div className="card"><span>Lucro estimado da 101</span><strong>{margem != null ? formatarMoeda(resumo.lucro_estimado) : '—'}</strong></div>
-          <div className="card"><span>Pago às agências</span><strong>{formatarMoeda(resumo.custo)}</strong>
-            <small>{formatarPercentual(resumo.percentual_custo)} do que as lojas compraram</small></div>
-          <div className={`card ${margem == null ? '' : resumo.resultado >= 0 ? 'pct-ok' : 'pct-critico'}`}>
-            <span>Sobra para a 101</span><strong>{margem != null ? formatarMoeda(resumo.resultado) : '—'}</strong>
-            {margem != null && resumo.percentual_do_lucro != null && (
-              <small>{formatarPercentual(resumo.percentual_do_lucro)} do lucro vai para o atendimento</small>
-            )}
+        <div className="cards cards-3">
+          <div className="card"><span>Lojas compraram</span><strong>{resumo.sem_erp ? '—' : formatarMoeda(resumo.faturamento)}</strong>
+            <small>faturamento bruto do ERP</small></div>
+          <div className="card"><span>Custo do atendimento</span><strong>{formatarMoeda(resumo.custo)}</strong>
+            <small>pago às agências, MEIs e CLT</small></div>
+          <div className={`card ${situacao(resumo) === 'ok' ? 'pct-ok' : situacao(resumo) ? 'pct-critico' : ''}`}>
+            <span>% do faturamento</span>
+            <strong>{resumo.sem_erp ? '—' : formatarPercentual(resumo.percentual_custo)}</strong>
+            <small><EtiquetaSituacao linha={resumo} /></small>
           </div>
         </div>
       )}
-      {resumo && margem != null && (
+      {(resumo?.avisos || []).map((aviso) => <p key={aviso} className="nota">⚠ {aviso}</p>)}
+      {resumo && (
         <p className="se-paga-legenda">
           <span className="se-paga se-paga-ok">🟢 Vale a pena: {contagem.ok}</span>{' '}
-          <span className="se-paga se-paga-limite">🟡 No limite: {contagem.limite}</span>{' '}
           <span className="se-paga se-paga-prejuizo">🔴 Não vale a pena: {contagem.prejuizo + contagem['sem-faturamento']}</span>
-          <span className="dica">
-            {' '}· Faixas de exemplo (a definir): até {FAIXAS.bom}% do lucro = vale a pena; de {FAIXAS.bom}% a {FAIXAS.limite}% =
-            no limite; acima de {FAIXAS.limite}% = a 101 paga mais do que lucra com essas lojas.
-          </span>
+          {contagem['sem-erp'] > 0 && <span className="se-paga se-paga-sem-erp">⚪ Falta o faturamento: {contagem['sem-erp']}</span>}
         </p>
       )}
     </section>
@@ -223,11 +305,11 @@ export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEd
 }
 
 /** Cartões do resultado de um promotor (ou agência) e a tabela das lojas dele. */
-export function FichaSePaga({ linha, lojas, periodo, carregado, temFaturamento, quem = 'ele' }) {
+export function FichaSePaga({ linha, lojas, periodo, carregado, temFaturamento }) {
   if (!temFaturamento) {
     return (
       <div className="aviso">
-        Ainda não há faturamento importado. Importe o arquivo do ERP na aba <b>Faturamento</b> para ver quanto as lojas
+        Ainda não há faturamento importado. Importe o arquivo do ERP em <b>Importações › Faturamento do ERP</b> para ver quanto as lojas
         compraram e se vale a pena.
       </div>
     )
@@ -240,24 +322,16 @@ export function FichaSePaga({ linha, lojas, periodo, carregado, temFaturamento, 
       </div>
     )
   }
-  const temMargem = linha.resultado != null
   return (
     <>
       <p className="dica">Período: {formatarMes(periodo.inicio)} a {formatarMes(periodo.fim)}</p>
-      <div className="cards cards-4">
-        <div className="card"><span>Lojas compraram</span><strong>{formatarMoeda(linha.faturamento)}</strong></div>
-        <div className="card"><span>Lucro estimado da 101</span><strong>{temMargem ? formatarMoeda(linha.lucro_estimado) : '—'}</strong></div>
-        <div className="card"><span>Custo no período</span><strong>{formatarMoeda(linha.custo_periodo)}</strong>
-          <small>{formatarPercentual(linha.percentual_custo)} do que as lojas compraram</small></div>
-        <div className={`card ${!temMargem ? '' : linha.resultado >= 0 ? 'pct-ok' : 'pct-critico'}`}>
-          <span>Sobra para a 101</span><strong>{temMargem ? formatarMoeda(linha.resultado) : '—'}</strong>
-          {!temMargem && <small>Informe a margem da 101 no topo da aba.</small>}
-          {temMargem && (
-            <small>
-              <EtiquetaSituacao linha={linha} />
-              {linha.percentual_do_lucro != null && ` · ${formatarPercentual(linha.percentual_do_lucro)} do lucro vai para ${quem}`}
-            </small>
-          )}
+      <div className="cards cards-3">
+        <div className="card"><span>Lojas compraram</span><strong>{linha.sem_erp ? '—' : formatarMoeda(linha.faturamento)}</strong></div>
+        <div className="card"><span>Custo no período</span><strong>{formatarMoeda(linha.custo_periodo)}</strong></div>
+        <div className={`card ${situacao(linha) === 'ok' ? 'pct-ok' : situacao(linha) ? 'pct-critico' : ''}`}>
+          <span>% do faturamento</span>
+          <strong>{linha.sem_erp ? '—' : formatarPercentual(linha.percentual_custo)}</strong>
+          <small><EtiquetaSituacao linha={linha} /></small>
         </div>
       </div>
       <Tabela

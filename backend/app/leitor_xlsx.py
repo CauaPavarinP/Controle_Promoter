@@ -47,7 +47,7 @@ class ArquivoSuspeito(Exception):
 # Limites de um .xlsx. A planilha real (317 mil linhas) tem 52 MB compactada e 562 MB aberta (557 MB numa aba), com
 # razão de compactação de ~11x e textos (sharedStrings) de 5 MB. Um arquivo malicioso de 1,6 MB que abria 1,5 GB de
 # textos derrubava o servidor (512 MB) antes de qualquer outra conferência.
-LIMITE_ABERTO_TOTAL = 3_000_000_000      # soma das partes abertas
+LIMITE_ABERTO_TOTAL = 30_000_000_000     # soma das partes abertas (lidas aos poucos; a memória não cresce com isso)
 LIMITE_PARTE_INTEIRA = 100_000_000       # partes lidas inteiras na memória (textos, estilos, livro): real ~5 MB
 RAZAO_MAXIMA = 100                        # compactação acima disso, em parte grande, é bomba (real: ~11x)
 LIMITE_LINHA_XML = 64 * 1024 * 1024      # uma linha <row> sozinha maior que isso não é planilha de verdade

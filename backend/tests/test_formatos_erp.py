@@ -138,17 +138,110 @@ def test_mes_sem_faturamento_do_erp_nao_aparece_como_sem_compras(cliente):
     assert not any(l["sem_erp"] for l in painel["lojas"])
 
 
-def test_limite_de_tamanho_por_tipo(cliente, monkeypatch, banco):
-    """Texto do ERP (.xls HTML, .txt, .csv) vai até 300 MB; .xlsx e as outras importações continuam em 150 MB."""
-    from app.limites import FOLGA_ENVIO, LIMITE_FATURAMENTO_TEXTO, LIMITE_IMPORTACAO, limite_para
-    assert limite_para("/api/importacoes/faturamento/previa") == LIMITE_FATURAMENTO_TEXTO + FOLGA_ENVIO
-    assert limite_para("/api/importacoes/atendimento/previa") == LIMITE_IMPORTACAO + FOLGA_ENVIO
-    assert LIMITE_FATURAMENTO_TEXTO == 300 * 1024 * 1024 and LIMITE_IMPORTACAO == 150 * 1024 * 1024
+def _faturamento_da_empresa(empresa) -> bytes:
+    """O faturamento de exemplo como se fosse de outra empresa (COD EMP); None = sem a coluna COD EMP."""
+    import io
+
+    from openpyxl import Workbook
+    linhas = _linhas_exemplo()
+    livro = Workbook()
+    aba = livro.active
+    coluna = linhas[0].index("COD EMP")
+    for numero, linha in enumerate(linhas):
+        linha = list(linha)
+        if numero and empresa is not None:
+            linha[coluna] = empresa
+        if empresa is None:
+            linha.pop(coluna)
+        aba.append(linha)
+    saida = io.BytesIO()
+    livro.save(saida)
+    return saida.getvalue()
+
+
+def test_substituicao_e_por_empresa_e_mes(cliente):
+    """O relatório do Focco sai por empresa: importar a empresa 10 não pode apagar a 11 do mesmo mês."""
     entrar(cliente)
-    # Sem gerar 150 MB de verdade: baixa o limite do .xlsx e confere que o .xls com o mesmo tamanho passa.
-    monkeypatch.setattr(banco.main, "TAMANHO_MAXIMO_MB", 0)
-    xlsx = cliente.post("/api/importacoes/faturamento/previa",
-                        files={"arquivo": ("f.xlsx", (EXEMPLOS / "faturamento_exemplo.xlsx").read_bytes())})
-    assert xlsx.status_code == 413 and "máximo 0 MB" in xlsx.json()["detail"]
-    html = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("r.xls", _html_focco(_linhas_exemplo()))})
-    assert html.status_code == 200 and "token" in html.json()
+    total = lambda: cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"]
+    previa_11, resposta = _importar(cliente, "empresa11.xlsx", _faturamento_da_empresa(11))
+    assert resposta.status_code == 200 and previa_11["empresas"] == ["11"]
+    um = total()
+    # Empresa 10, mesmos meses: não conflita, soma.
+    previa_10 = cliente.post("/api/importacoes/faturamento/previa",
+                             files={"arquivo": ("empresa10.xlsx", _faturamento_da_empresa(10))}).json()
+    assert previa_10["meses_existentes"] == [] and previa_10["periodos_existentes"] == []
+    assert cliente.post(f"/api/importacoes/faturamento/{previa_10['token']}/confirmar", json={}).status_code == 200
+    assert total() == round(um * 2, 2)
+    # Empresa 11 de novo: substitui só a 11.
+    de_novo = cliente.post("/api/importacoes/faturamento/previa",
+                           files={"arquivo": ("empresa11.xlsx", _faturamento_da_empresa(11))}).json()
+    assert {p["empresa"] for p in de_novo["periodos_existentes"]} == {"11"} and len(de_novo["meses_existentes"]) == 9
+    sem_confirmar = cliente.post(f"/api/importacoes/faturamento/{de_novo['token']}/confirmar", json={})
+    assert sem_confirmar.status_code == 400 and "empresa 11" in sem_confirmar.json()["detail"]
+    feito = cliente.post(f"/api/importacoes/faturamento/{de_novo['token']}/confirmar", json={"substituir": True}).json()
+    assert {p["empresa"] for p in feito["periodos_substituidos"]} == {"11"}
+    assert total() == round(um * 2, 2)   # não duplicou e não apagou a 10
+    # Arquivo sem a coluna COD EMP: conflita com todas as empresas do mês (nunca conta duas vezes).
+    sem_empresa = cliente.post("/api/importacoes/faturamento/previa",
+                               files={"arquivo": ("sem.xlsx", _faturamento_da_empresa(None))}).json()
+    assert {p["empresa"] for p in sem_empresa["periodos_existentes"]} == {"10", "11"}
+    cliente.post(f"/api/importacoes/faturamento/{sem_empresa['token']}/confirmar", json={"substituir": True})
+    assert total() == um
+
+
+def test_codigo_da_empresa_em_formatos_diferentes_e_a_mesma_empresa(cliente):
+    """Gravado como "10,00" (texto do HTML) e importado de novo como 10: é a mesma empresa, substitui de verdade."""
+    entrar(cliente)
+    linhas = _linhas_exemplo()
+    _importar(cliente, "relatorio.xls", _html_focco(linhas))           # COD EMP "10,00"
+    um = cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"]
+    previa = cliente.post("/api/importacoes/faturamento/previa",
+                          files={"arquivo": ("f.xlsx", _faturamento_da_empresa(10))}).json()
+    assert {p["empresa"] for p in previa["periodos_existentes"]} == {"10"}
+    cliente.post(f"/api/importacoes/faturamento/{previa['token']}/confirmar", json={"substituir": True})
+    assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == um   # não duplicou
+
+
+def test_faturamento_sem_limite_de_tamanho_por_padrao(banco, monkeypatch):
+    """Sem LIMITE_FATURAMENTO_MB não há limite (lido em partes); com a variável, vale o teto definido."""
+    from fastapi.testclient import TestClient
+
+    from conftest import recarregar_app
+
+    def cliente_com(valor):
+        if valor is None:
+            monkeypatch.delenv("LIMITE_FATURAMENTO_MB", raising=False)
+        else:
+            monkeypatch.setenv("LIMITE_FATURAMENTO_MB", valor)
+        app = recarregar_app()
+        return app, TestClient(app.main.app)
+
+    app, cliente = cliente_com(None)
+    assert app.limites.limite_para("/api/importacoes/faturamento/previa") is None
+    assert app.limites.limite_para("/api/importacoes/atendimento/previa") == 151 * 1024 * 1024
+    with cliente:
+        entrar(cliente)
+        assert cliente.get("/api/limites").json() == {"faturamento_texto_mb": None, "planilha_mb": 150}
+        # 3 MB de .txt sem cabeçalho: passa do envio (sem limite) e é recusado pela leitura, não pelo tamanho.
+        grande = b"COD EMP;CNPJ CPF\n" + b"x" * (3 * 1024 * 1024)
+        resposta = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("r.txt", grande)})
+        assert resposta.status_code == 400 and "grande demais" not in resposta.json()["detail"]
+    assert cliente_com("abc")[0].config.LIMITE_FATURAMENTO_MB == 0          # valor inválido: sem limite
+    app, cliente = cliente_com("1")
+    with cliente:
+        entrar(cliente)
+        assert cliente.get("/api/limites").json()["faturamento_texto_mb"] == 1
+        grande = b"COD EMP;CNPJ CPF\n" + b"x" * (2 * 1024 * 1024)
+        assert cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("r.txt", grande)}).status_code == 413
+    monkeypatch.delenv("LIMITE_FATURAMENTO_MB", raising=False)
+    recarregar_app()
+
+
+def test_sem_espaco_em_disco_recusa_antes_de_copiar(cliente, banco, monkeypatch):
+    import shutil as _shutil
+    entrar(cliente)
+    monkeypatch.setattr(banco.main.shutil, "disk_usage", lambda _p: _shutil._ntuple_diskusage(10, 10, 1024))
+    resposta = cliente.post("/api/importacoes/faturamento/previa",
+                            files={"arquivo": ("f.xlsx", (EXEMPLOS / "faturamento_exemplo.xlsx").read_bytes())})
+    assert resposta.status_code == 413 and "espaço em disco" in resposta.json()["detail"]
+

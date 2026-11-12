@@ -9,13 +9,16 @@ bytes recebidos e para no limite.
 """
 import json
 
+from .config import LIMITE_FATURAMENTO_MB
+
 from starlette.exceptions import HTTPException
 
 MB = 1024 * 1024
 LIMITE_IMPORTACAO = 150 * MB   # planilhas (a real tem 64 MB)
 # Faturamento do ERP em texto (o ".xls" do Focco é HTML, TXT, CSV): lido aos poucos, usa pouca memória qualquer que
 # seja o tamanho; o arquivo é grande porque cada célula leva a formatação junto (10 meses = ~500 MB).
-LIMITE_FATURAMENTO_TEXTO = 300 * MB
+# Faturamento: sem limite (None), a não ser que LIMITE_FATURAMENTO_MB esteja definido. Lido em partes (memória constante).
+LIMITE_FATURAMENTO_TEXTO = LIMITE_FATURAMENTO_MB * MB if LIMITE_FATURAMENTO_MB else None
 FOLGA_ENVIO = 1 * MB           # o envio do arquivo (multipart) tem cabeçalhos além do próprio arquivo
 LIMITE_EXPORTACAO = 20 * MB    # tabela que a tela manda para virar Excel (a maior real tem ~2 MB)
 LIMITE_PADRAO = 1 * MB         # todo o resto (login, cadastros, regras…)
@@ -23,7 +26,7 @@ LIMITE_PADRAO = 1 * MB         # todo o resto (login, cadastros, regras…)
 
 def limite_para(caminho: str) -> int:
     if caminho == "/api/importacoes/faturamento/previa":
-        return LIMITE_FATURAMENTO_TEXTO + FOLGA_ENVIO   # o .xlsx continua com LIMITE_IMPORTACAO (conferido na rota)
+        return None if LIMITE_FATURAMENTO_TEXTO is None else LIMITE_FATURAMENTO_TEXTO + FOLGA_ENVIO
     if caminho.startswith("/api/importacoes/"):
         return LIMITE_IMPORTACAO + FOLGA_ENVIO
     if caminho == "/api/exportar":
@@ -54,6 +57,8 @@ class LimiteDeTamanho:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         limite = limite_para(scope.get("path", ""))
+        if limite is None:   # rota sem limite de tamanho (faturamento): o envio vai direto para o disco
+            return await self.app(scope, receive, send)
         cabecalhos = dict(scope.get("headers") or [])
         declarado = cabecalhos.get(b"content-length")
         if declarado is not None:

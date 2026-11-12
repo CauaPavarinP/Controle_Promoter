@@ -6,13 +6,16 @@
 - CNPJ de várias lojas no mesmo mês (rede que compra pelo CNPJ da matriz ou do CD): o faturamento do CNPJ é dividido
   em partes iguais entre essas lojas, e dentro da loja entre os promotores/agências dela, para a soma por promotor
   (ou agência, UF, loja) bater com o total sem contar a mesma compra duas vezes.
-- "Vale a pena?": lucro estimado (faturamento × margem da 101) menos o custo (ver calculos._se_paga).
+- "Vale a pena?": custo ÷ faturamento bruto (VLR TOTAL, sem descontar devolução nem bonificação). Até o limite
+  (padrão 3%, editável) vale a pena; acima, não. Decisão do Maurício: o promotor de loja pode custar no máximo 3%
+  do que as lojas dele compram. (Margem e lucro ficam para depois.)
 """
 from dataclasses import dataclass
 
 import pandas as pd
 
-from .calculos import _percentual, _se_paga, aplicar_tipos_de_nota, indice_mes
+from .calculos import _percentual, aplicar_tipos_de_nota, indice_mes
+from .regras import LIMITE_PADRAO
 
 
 @dataclass
@@ -24,6 +27,8 @@ class FiltrosAtendimento:
     uf: str = ""
     cidade: str = ""
     loja: str = ""         # nome da loja
+    tipo: str = ""         # Agência | CLT | MEI | Freelancer
+    supervisor: str = ""   # nome do supervisor (como veio no arquivo)
 
 
 def _rotulo(indice: int) -> str:
@@ -64,22 +69,34 @@ def atribuir_faturamento(atend: pd.DataFrame, fat_mes: pd.DataFrame) -> pd.DataF
     return a
 
 
-def _indicadores(custo: float, faturamento: float, margem) -> dict:
-    linha = {"custo_periodo": _dinheiro(custo), "faturamento": _dinheiro(faturamento),
-             "percentual_custo": _percentual(custo, faturamento)}
-    _se_paga(linha, margem)
-    return linha
+def situacao(custo: float, faturamento: float, limite: float, sem_erp: bool = False) -> str:
+    """ok (até o limite) | acima (passou do limite) | sem_compras (custo sem nenhuma compra) | sem_custo |
+    sem_erp (o faturamento do período ainda não foi importado)."""
+    if sem_erp:
+        return "sem_erp"
+    if custo <= 0:
+        return "sem_custo"
+    if faturamento <= 0:
+        return "sem_compras"
+    return "ok" if custo / faturamento * 100 <= limite + 1e-9 else "acima"
 
 
-def _indicadores_grupo(g: pd.DataFrame, margem) -> dict:
+def _indicadores(custo: float, faturamento: float, limite: float, sem_erp: bool = False) -> dict:
+    custo, faturamento = float(custo), float(faturamento)
+    return {"custo_periodo": _dinheiro(custo), "faturamento": _dinheiro(faturamento),
+            "percentual_custo": _percentual(custo, faturamento), "sem_erp": sem_erp,
+            "situacao": situacao(custo, faturamento, limite, sem_erp)}
+
+
+def _indicadores_grupo(g: pd.DataFrame, limite: float) -> dict:
     """Indicadores de um grupo de linhas; sem_erp = nenhum mês do grupo tem faturamento do ERP importado."""
-    return {**_indicadores(g["valor"].sum(), g["faturamento"].sum(), margem), "sem_erp": not bool(g["tem_erp"].any())}
+    return _indicadores(g["valor"].sum(), g["faturamento"].sum(), limite, not bool(g["tem_erp"].any()))
 
 
 def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAtendimento, regras: dict) -> dict:
     inicio, fim = sorted([indice_mes(filtros.inicio), indice_mes(filtros.fim)])
     meses = list(range(inicio, fim + 1))
-    margem = regras.get("margem_percentual")
+    limite = regras.get("limite_percentual") or LIMITE_PADRAO
     fat_mes = faturamento_por_cnpj_mes(faturamento, regras)
     fat_mes = fat_mes[fat_mes["indice"].between(inicio, fim)]
 
@@ -102,6 +119,10 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
         a = a[a["cidade"] == filtros.cidade]
     if filtros.loja:
         a = a[a["loja"] == filtros.loja]
+    if filtros.tipo:
+        a = a[a["tipo"] == filtros.tipo]
+    if filtros.supervisor:
+        a = a[a["supervisor"] == filtros.supervisor]
 
     meses_com_atendimento = sorted(a["indice"].unique().tolist()) if not a.empty else []
     custo_total, fat_total = float(a["valor"].sum()) if not a.empty else 0.0, float(a["faturamento"].sum()) if not a.empty else 0.0
@@ -122,7 +143,7 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
                 int(df[["cnpj", "loja_chave"]].drop_duplicates().shape[0]))
     agencias, promotores, lojas = _contar(com_custo)
     agencias_zero, promotores_zero, lojas_zero = _contar(zerada)
-    resumo = {**_indicadores(custo_total, fat_total, margem),
+    resumo = {**_indicadores(custo_total, fat_total, limite, not meses_erp),
               "custo": _dinheiro(custo_total), "meses": len(meses),
               "meses_com_arquivo": len(meses_com_atendimento),
               "promotores": promotores, "lojas": lojas, "agencias": agencias,
@@ -130,17 +151,16 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
               "lojas_sem_custo": lojas_zero,
               "visitas": int(a["visitas"].fillna(0).sum()) if not a.empty else 0,
               "cnpjs_compartilhados": int(a.loc[a["compartilhado"], "cnpj"].nunique()) if not a.empty else 0,
-              "sem_erp": not meses_erp,
               "avisos": _avisos(a, meses, meses_com_atendimento, meses_erp)}
 
     return {
         "resumo": resumo,
-        "regras": {c: regras.get(c) for c in ("margem_percentual", "limite_percentual", "valor_faturamento")},
-        "promotores": _por_promotor(a, margem),
-        "lojas": _por_loja(a, margem),
-        "agencias": _por_agencia(a, margem),
-        "por_uf": _arvore(a, margem),
-        "mes_a_mes": _mes_a_mes(a, meses, margem, meses_erp),
+        "regras": {"limite_percentual": limite, "valor_faturamento": regras.get("valor_faturamento")},
+        "promotores": _por_promotor(a, limite),
+        "lojas": _por_loja(a, limite),
+        "agencias": _por_agencia(a, limite),
+        "por_uf": _arvore(a, limite),
+        "mes_a_mes": _mes_a_mes(a, meses, limite, meses_erp),
         "grade": _grade(a, meses),
     }
 
@@ -166,7 +186,7 @@ def _avisos(a: pd.DataFrame, meses: list, com_atendimento: list, meses_erp: set)
     return avisos
 
 
-def _por_promotor(a: pd.DataFrame, margem) -> list[dict]:
+def _por_promotor(a: pd.DataFrame, limite) -> list[dict]:
     if a.empty:
         return []
     linhas = []
@@ -175,18 +195,18 @@ def _por_promotor(a: pd.DataFrame, margem) -> list[dict]:
         linhas.append({
             "chave": chave, "nome": ultimo["promotor"].iloc[-1], "codigo": _juntar(g["promotor_codigo"]),
             "agencia": _juntar(g["agencia"]), "agencia_chave": g["agencia_chave"].iloc[-1],
-            "ufs": _juntar(g["uf"]), "cidades": _juntar(g["cidade"]),
+            "tipo": _juntar(g["tipo"]), "supervisor": _juntar(ultimo["supervisor"]), "ufs": _juntar(g["uf"]), "cidades": _juntar(g["cidade"]),
             "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "lojas_ultimo_mes": int(ultimo[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "visitas": int(g["visitas"].fillna(0).sum()),
             "primeiro_mes": _rotulo(int(g["indice"].min())), "ultimo_mes": _rotulo(int(g["indice"].max())),
             "meses_com_atendimento": int(g["indice"].nunique()),
-            **_indicadores_grupo(g, margem),
+            **_indicadores_grupo(g, limite),
         })
     return sorted(linhas, key=lambda l: l["nome"])
 
 
-def _por_loja(a: pd.DataFrame, margem) -> list[dict]:
+def _por_loja(a: pd.DataFrame, limite) -> list[dict]:
     if a.empty:
         return []
     linhas = []
@@ -195,32 +215,32 @@ def _por_loja(a: pd.DataFrame, margem) -> list[dict]:
         linhas.append({
             "chave": f"{cnpj}|{loja_chave}", "loja": ultimo["loja"].iloc[-1], "cnpj": cnpj,
             "cidade": ultimo["cidade"].iloc[-1], "uf": ultimo["uf"].iloc[-1],
-            "agencia": _juntar(g["agencia"]), "agencia_chaves": sorted(set(g["agencia_chave"])),
-            "promotor": _juntar(ultimo["promotor"]),
+            "agencia": _juntar(g["agencia"]), "agencia_chaves": sorted(set(g["agencia_chave"])), "tipo": _juntar(g["tipo"]),
+            "promotor": _juntar(ultimo["promotor"]), "supervisor": _juntar(ultimo["supervisor"]),
             "promotor_chaves": sorted(set(g["promotor_chave"])), "dias": _juntar(ultimo["dias"]),
             "visitas": int(g["visitas"].fillna(0).sum()), "compartilhado": bool(g["compartilhado"].any()),
             "status": ultimo["status"].iloc[-1], "meses_com_atendimento": int(g["indice"].nunique()),
-            **_indicadores_grupo(g, margem),
+            **_indicadores_grupo(g, limite),
         })
     return sorted(linhas, key=lambda l: (l["uf"], l["cidade"], l["loja"]))
 
 
-def _por_agencia(a: pd.DataFrame, margem) -> list[dict]:
+def _por_agencia(a: pd.DataFrame, limite) -> list[dict]:
     if a.empty:
         return []
     linhas = []
     for chave, g in a.groupby("agencia_chave", sort=False):
         linhas.append({
-            "chave": chave, "nome": g["agencia"].iloc[-1], "ufs": _juntar(g["uf"]),
+            "chave": chave, "nome": g["agencia"].iloc[-1], "tipo": _juntar(g["tipo"]), "ufs": _juntar(g["uf"]),
             "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "promotores": int(g["promotor_chave"].nunique()), "visitas": int(g["visitas"].fillna(0).sum()),
             "meses": sorted(_rotulo(int(m)) for m in g["indice"].unique()),
-            **_indicadores_grupo(g, margem),
+            **_indicadores_grupo(g, limite),
         })
     return sorted(linhas, key=lambda l: l["nome"])
 
 
-def _arvore(a: pd.DataFrame, margem) -> list[dict]:
+def _arvore(a: pd.DataFrame, limite) -> list[dict]:
     """Linhas na ordem UF → agência → promotor (a tabela do Resumo abre em níveis)."""
     if a.empty:
         return []
@@ -230,7 +250,7 @@ def _arvore(a: pd.DataFrame, margem) -> list[dict]:
         return {"nivel": nivel, "nome": nome, "promotores": int(g["promotor_chave"].nunique()),
                 "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
                 "visitas": int(g["visitas"].fillna(0).sum()),
-                **_indicadores_grupo(g, margem), **extra}
+                **_indicadores_grupo(g, limite), **extra}
 
     a = a.assign(uf=a["uf"].replace("", "—"))
     for uf, gu in sorted(a.groupby("uf"), key=lambda x: (x[0] == "—", x[0])):
@@ -243,7 +263,7 @@ def _arvore(a: pd.DataFrame, margem) -> list[dict]:
     return linhas
 
 
-def _mes_a_mes(a: pd.DataFrame, meses: list, margem, meses_erp: set) -> list[dict]:
+def _mes_a_mes(a: pd.DataFrame, meses: list, limite, meses_erp: set) -> list[dict]:
     linhas = []
     for indice in meses:
         g = a[a["indice"] == indice] if not a.empty else a
@@ -252,8 +272,7 @@ def _mes_a_mes(a: pd.DataFrame, meses: list, margem, meses_erp: set) -> list[dic
                        "lojas": 0 if vazio else int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
                        "visitas": 0 if vazio else int(g["visitas"].fillna(0).sum()),
                        **_indicadores(0 if vazio else g["valor"].sum(), 0 if vazio else g["faturamento"].sum(),
-                                      margem),
-                       "sem_erp": indice not in meses_erp})
+                                      limite, indice not in meses_erp)})
     return linhas
 
 
@@ -292,4 +311,6 @@ def opcoes(faturamento: pd.DataFrame, atend: pd.DataFrame) -> dict:
         "lojas": [{"nome": l.loja, "cidade": l.cidade, "uf": l.uf} for l in lojas.itertuples()],
         "ufs": sorted(u for u in atend["uf"].unique() if u),
         "cidades": [{"uf": l.uf, "cidade": l.cidade} for l in locais.itertuples()],
+        "tipos": [t for t in ("Agência", "CLT", "MEI", "Freelancer") if t in set(atend["tipo"])],
+        "supervisores": sorted({s for s in atend["supervisor"] if s}, key=str.casefold),
     }

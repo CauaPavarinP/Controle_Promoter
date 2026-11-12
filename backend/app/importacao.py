@@ -429,10 +429,11 @@ def _juntar_partes(partes: list, dicionarios: dict) -> pd.DataFrame:
     return pd.DataFrame(colunas)
 
 
-def ler_faturamento(fonte, nome_arquivo: str, ao_progredir=None):
-    """Lê a exportação do ERP (bytes ou caminho do arquivo). Devolve (itens válidos, erros, avisos, aba).
+def ler_faturamento_em_partes(fonte, nome_arquivo: str):
+    """Lê a exportação do ERP aos poucos. Devolve (aba, avisos, gerador de (linhas lidas, itens válidos, erros)).
 
-    `ao_progredir(linhas_lidas)` é chamado a cada parte, para a tela mostrar o andamento.
+    Cada parte tem no máximo LINHAS_POR_PARTE linhas: quem lê guarda as partes no disco e a memória não cresce com o
+    tamanho do arquivo (é o que permite arquivo de qualquer tamanho sem derrubar o servidor).
     """
     achado = _partes_do_arquivo(fonte, nome_arquivo, APELIDOS_FATURAMENTO, _valida_faturamento)
     if achado is None:
@@ -440,16 +441,31 @@ def ler_faturamento(fonte, nome_arquivo: str, ao_progredir=None):
             "Não encontrei a base de faturamento. Colunas obrigatórias: CNPJ CPF, NUM NF, TOTAL VENDA (ou VLR TOTAL) "
             "e a data de emissão (ou ANO e MÊS).")
     aba, mapa, primeira_linha, avisos, partes_brutas = achado
-    usar_vlr_total = "total_venda" not in mapa
     # O relatório do Focco não tem TOTAL VENDA (era uma coluna da planilha antiga): o valor é o VLR TOTAL, que é o
     # padrão do sistema. Não é motivo de aviso.
+    usar_vlr_total = "total_venda" not in mapa
+
+    def partes():
+        linha = primeira_linha
+        for bruta in partes_brutas:
+            parte, erros_parte = _tratar_parte(bruta, linha, usar_vlr_total)
+            linha += len(bruta)
+            yield len(bruta), parte, erros_parte
+    return aba, avisos, partes()
+
+
+def ler_faturamento(fonte, nome_arquivo: str, ao_progredir=None):
+    """Lê a exportação do ERP inteira. Devolve (itens válidos, erros, avisos, aba).
+
+    A importação usa ler_faturamento_em_partes (memória constante); esta junta tudo, para arquivos pequenos e testes.
+    `ao_progredir(linhas_lidas)` é chamado a cada parte, para a tela mostrar o andamento.
+    """
+    aba, avisos, partes_lidas = ler_faturamento_em_partes(fonte, nome_arquivo)
     partes, erros = [], []
     dicionarios = {campo: {} for campo in CAMPOS_REPETIDOS}
     linhas_lidas = 0
-    for bruta in partes_brutas:
-        parte, erros_parte = _tratar_parte(bruta, primeira_linha, usar_vlr_total)
-        primeira_linha += len(bruta)
-        linhas_lidas += len(bruta)
+    for brutas, parte, erros_parte in partes_lidas:
+        linhas_lidas += brutas
         erros += erros_parte
         if not parte.empty:
             for campo in CAMPOS_REPETIDOS:

@@ -79,13 +79,15 @@ export default function Filtros({ opcoes, filtros, alterar, limpar }) {
   const nomeAgencia = opcoes.agencias.find((a) => a.chave === filtros.agencia)?.nome
   const ativos = [
     filtros.agencia && { campo: 'agencia', texto: `Agência: ${nomeAgencia || filtros.agencia}` },
+    filtros.tipo && { campo: 'tipo', texto: `Tipo: ${filtros.tipo}` },
+    filtros.supervisor && { campo: 'supervisor', texto: `Supervisor: ${filtros.supervisor}` },
     filtros.promotor && { campo: 'promotor', texto: `Promotor: ${nomePromotor || filtros.promotor}` },
     filtros.uf && { campo: 'uf', texto: `UF: ${filtros.uf}` },
     filtros.cidade && { campo: 'cidade', texto: `Cidade: ${filtros.cidade}` },
     filtros.loja && { campo: 'loja', texto: `Loja: ${filtros.loja}` },
   ].filter(Boolean)
   const [maisFiltros, setMaisFiltros] = useState(false)
-  const escondidosAtivos = ['promotor', 'cidade', 'loja'].filter((c) => filtros[c]).length
+  const escondidosAtivos = ['supervisor', 'promotor', 'cidade', 'loja'].filter((c) => filtros[c]).length
 
   return (
     <section className="filtros">
@@ -118,6 +120,10 @@ export default function Filtros({ opcoes, filtros, alterar, limpar }) {
           opcoes={opcoes.agencias.map((a) => ({ valor: a.chave, texto: a.nome }))}
           todos="Todas"
         />
+        {(opcoes.tipos || []).length > 0 && (
+          <Seletor rotulo="Tipo" valor={filtros.tipo} aoMudar={(v) => alterar('tipo', v)}
+            opcoes={opcoes.tipos.map((t) => ({ valor: t, texto: t }))} todos="Todos" />
+        )}
         <Seletor rotulo="UF" valor={filtros.uf} aoMudar={mudarUf} opcoes={opcoes.ufs.map((u) => ({ valor: u, texto: u }))} />
         <button className="secundario mais-filtros" onClick={() => setMaisFiltros((v) => !v)} aria-expanded={maisFiltros}>
           {maisFiltros ? 'Menos filtros ▴' : `Mais filtros${escondidosAtivos ? ` (${escondidosAtivos})` : ''} ▾`}
@@ -126,6 +132,10 @@ export default function Filtros({ opcoes, filtros, alterar, limpar }) {
 
       {maisFiltros && (
         <div className="filtros-linha">
+          {(opcoes.supervisores || []).length > 0 && (
+            <Seletor rotulo="Supervisor" valor={filtros.supervisor} aoMudar={(v) => alterar('supervisor', v)}
+              opcoes={opcoes.supervisores.map((s) => ({ valor: s, texto: s }))} todos="Todos" />
+          )}
           <Seletor rotulo="Promotor" valor={filtros.promotor} aoMudar={(v) => alterar('promotor', v)} opcoes={promotores} />
           <Seletor rotulo="Cidade" valor={filtros.cidade} aoMudar={(v) => alterar('cidade', v)} opcoes={cidades} todos="Todas" />
           <FiltroLoja lojas={opcoes.lojas || []} valor={filtros.loja} aoMudar={(v) => alterar('loja', v)} />

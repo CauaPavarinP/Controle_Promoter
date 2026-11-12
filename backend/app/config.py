@@ -40,6 +40,20 @@ if not SECRET_KEY:
 
 SESSAO_HORAS = int(os.getenv("SESSAO_HORAS", "12"))
 
+
+def _inteiro(nome: str, padrao: int, minimo: int, maximo: int) -> int:
+    try:
+        valor = int(os.getenv(nome, "").strip() or padrao)
+    except ValueError:
+        return padrao
+    return min(max(valor, minimo), maximo)
+
+
+# Tamanho máximo do arquivo de faturamento, em MB. 0 (padrão) = sem limite: o arquivo é lido e gravado em partes, com
+# memória constante, então o tamanho não derruba o servidor; o que limita é o espaço em disco (conferido no envio).
+# Para impor um teto (ex.: tempo de envio), defina LIMITE_FATURAMENTO_MB no .env.
+LIMITE_FATURAMENTO_MB = _inteiro("LIMITE_FATURAMENTO_MB", 0, 0, 1_000_000)
+
 # Pasta do front (React) já compilado com "npm run build".
 FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
 

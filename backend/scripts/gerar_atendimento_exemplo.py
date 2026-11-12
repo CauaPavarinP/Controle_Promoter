@@ -35,7 +35,8 @@ def gerar(destino: Path = PASTA / "atendimento_exemplo.xlsx") -> Path:
         for loja, cnpj, cidade, uf, agencia, promotor, codigo, dias, visitas, valor, primeiro in LOJAS:
             if mes < primeiro:
                 continue
-            valores = [f"{mes:02d}/2026", agencia, cnpj, loja, cidade, uf, promotor, codigo, dias, visitas, valor,
+            tipo = "CLT" if agencia == "101 do Brasil" else "Agência"
+            valores = [f"{mes:02d}/2026", agencia, tipo, cnpj, loja, cidade, uf, promotor, codigo, dias, visitas, valor,
                        "Ativa", ""]
             for coluna, valor_celula in enumerate(valores, start=1):
                 aba.cell(linha, coluna, valor_celula)
