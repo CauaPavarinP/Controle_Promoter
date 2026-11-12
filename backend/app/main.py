@@ -254,6 +254,12 @@ def confirmar_atendimento(token: str, dados: ConfirmacaoAtendimento, _=Depends(e
         _erro(str(erro))
 
 
+@app.get("/api/limites")
+def limites_de_envio(_=Depends(usuario_logado)):
+    """Tamanhos máximos de arquivo, para a tela avisar antes de enviar (o servidor confere de novo)."""
+    return {"faturamento_texto_mb": LIMITE_FATURAMENTO_TEXTO // (1024 * 1024), "planilha_mb": TAMANHO_MAXIMO_MB}
+
+
 @app.get("/api/modelo-atendimento", include_in_schema=False)
 def baixar_modelo(_=Depends(usuario_logado)):
     """O modelo em Excel que as agências preenchem."""

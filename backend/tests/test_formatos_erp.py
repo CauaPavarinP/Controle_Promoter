@@ -216,3 +216,34 @@ def test_codigo_da_empresa_em_formatos_diferentes_e_a_mesma_empresa(cliente):
     assert {p["empresa"] for p in previa["periodos_existentes"]} == {"10"}
     cliente.post(f"/api/importacoes/faturamento/{previa['token']}/confirmar", json={"substituir": True})
     assert cliente.get("/api/faturamento", params=PERIODO).json()["totais"]["total"] == um   # não duplicou
+
+
+def test_limite_do_faturamento_configuravel_pela_variavel_de_ambiente(banco, monkeypatch):
+    """LIMITE_FATURAMENTO_MB no .env: no computador dá para subir; no Render fica o padrão (300)."""
+    from fastapi.testclient import TestClient
+
+    from conftest import recarregar_app
+
+    def cliente_com(valor):
+        if valor is None:
+            monkeypatch.delenv("LIMITE_FATURAMENTO_MB", raising=False)
+        else:
+            monkeypatch.setenv("LIMITE_FATURAMENTO_MB", valor)
+        app = recarregar_app()
+        return app, TestClient(app.main.app)
+
+    app, cliente = cliente_com(None)
+    with cliente:
+        entrar(cliente)
+        assert cliente.get("/api/limites").json() == {"faturamento_texto_mb": 300, "planilha_mb": 150}
+    assert cliente_com("abc")[0].config.LIMITE_FATURAMENTO_MB == 300          # valor inválido: padrão
+    assert cliente_com("1000")[0].limites.limite_para("/api/importacoes/faturamento/previa") == 1001 * 1024 * 1024
+    app, cliente = cliente_com("1")
+    with cliente:
+        entrar(cliente)
+        assert cliente.get("/api/limites").json()["faturamento_texto_mb"] == 1
+        grande = b"COD EMP;CNPJ CPF\n" + b"x" * (2 * 1024 * 1024)
+        resposta = cliente.post("/api/importacoes/faturamento/previa", files={"arquivo": ("r.txt", grande)})
+        assert resposta.status_code == 413
+    monkeypatch.delenv("LIMITE_FATURAMENTO_MB", raising=False)
+    recarregar_app()

@@ -40,6 +40,20 @@ if not SECRET_KEY:
 
 SESSAO_HORAS = int(os.getenv("SESSAO_HORAS", "12"))
 
+
+def _inteiro(nome: str, padrao: int, minimo: int, maximo: int) -> int:
+    try:
+        valor = int(os.getenv(nome, "").strip() or padrao)
+    except ValueError:
+        return padrao
+    return min(max(valor, minimo), maximo)
+
+
+# Tamanho máximo do arquivo de faturamento em texto (.xls do Focco, .txt, .csv), em MB. Ele é lido aos poucos, então
+# o que pesa na memória é o número de linhas, não os MB. No Render (512 MB de memória) deixe o padrão, 300; no
+# computador dá para subir (ex.: LIMITE_FATURAMENTO_MB=1000 no .env) e importar o ano inteiro de uma vez.
+LIMITE_FATURAMENTO_MB = _inteiro("LIMITE_FATURAMENTO_MB", 300, 1, 5000)
+
 # Pasta do front (React) já compilado com "npm run build".
 FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
 

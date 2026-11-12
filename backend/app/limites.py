@@ -9,13 +9,15 @@ bytes recebidos e para no limite.
 """
 import json
 
+from .config import LIMITE_FATURAMENTO_MB
+
 from starlette.exceptions import HTTPException
 
 MB = 1024 * 1024
 LIMITE_IMPORTACAO = 150 * MB   # planilhas (a real tem 64 MB)
 # Faturamento do ERP em texto (o ".xls" do Focco é HTML, TXT, CSV): lido aos poucos, usa pouca memória qualquer que
 # seja o tamanho; o arquivo é grande porque cada célula leva a formatação junto (10 meses = ~500 MB).
-LIMITE_FATURAMENTO_TEXTO = 300 * MB
+LIMITE_FATURAMENTO_TEXTO = LIMITE_FATURAMENTO_MB * MB   # variável de ambiente LIMITE_FATURAMENTO_MB (padrão 300)
 FOLGA_ENVIO = 1 * MB           # o envio do arquivo (multipart) tem cabeçalhos além do próprio arquivo
 LIMITE_EXPORTACAO = 20 * MB    # tabela que a tela manda para virar Excel (a maior real tem ~2 MB)
 LIMITE_PADRAO = 1 * MB         # todo o resto (login, cadastros, regras…)
