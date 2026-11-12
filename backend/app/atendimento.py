@@ -49,6 +49,7 @@ APELIDOS = {
     "valor": ["VALOR DO MES R", "VALOR DO MES", "VLR MES", "VALOR MES", "VALOR TOTAL", "VALOR"],
     "status": ["STATUS", "STATUS ATENDIMENTO", "SITUACAO"],
     "observacao": ["OBSERVACAO", "OBSERVACOES", "OBS"],
+    "supervisor": ["SUPERVISOR", "SUPERVISORA", "SUPERVISOR MERCHAN", "SUPERVISOR A"],
 }
 OBRIGATORIAS = ("agencia", "cnpj", "loja", "valor")
 UFS = set("AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO".split())
@@ -113,6 +114,15 @@ def _texto(valor) -> str:
     if isinstance(valor, float) and valor.is_integer():
         valor = int(valor)
     return re.sub(r"\s+", " ", str(valor)).strip()
+
+
+ERROS_DO_EXCEL = {"N A", "NA", "REF", "VALUE", "DIV 0", "NAME", "NULL", "NUM"}   # "#N/A", "#REF!"…
+
+
+def _texto_sem_erro(valor) -> str:
+    """Texto da célula, com os erros do Excel ("#N/A", "#REF!"…) virando vazio."""
+    texto = _texto(valor)
+    return "" if normalizar_texto(texto) in ERROS_DO_EXCEL else texto
 
 
 def _visitas(valor):
@@ -269,6 +279,7 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
                 "promotor_chave": chave_promotor(agencia_chave, codigo, promotor)[:200],
                 "dias": _texto(registro.get("dias"))[:80], "visitas": _visitas(registro.get("visitas")),
                 "valor": round(float(valor), 2), "status": _status(registro.get("status")),
+                "supervisor": _texto_sem_erro(registro.get("supervisor"))[:100],
                 "observacao": observacao[:2000],
             })
     if not linhas:
@@ -498,7 +509,7 @@ def confirmar(token: str, substituir: bool, repetidas: str | None = None) -> dic
         for linha in df.to_dict("records"):
             registros.append({c: linha[c] for c in (
                 "ano", "mes", "agencia", "agencia_chave", "tipo", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
-                "promotor_codigo", "promotor_chave", "dias", "valor", "status", "observacao", "linha")}
+                "promotor_codigo", "promotor_chave", "dias", "valor", "status", "observacao", "linha", "supervisor")}
                 | {"importacao_id": importacao_id,
                    "visitas": None if pd.isna(linha["visitas"]) else int(linha["visitas"])})
         conexao.execute(Atendimento.__table__.insert(), registros)
@@ -527,10 +538,10 @@ def exportar_xlsx(sessao) -> tuple[bytes, int]:
     from .main import MODELO_ATENDIMENTO   # import aqui: main importa este módulo
     livro = load_workbook(MODELO_ATENDIMENTO)
     aba = livro["Atendimentos"]
-    for coluna in range(1, 15):            # tira a linha de exemplo (a coluna O, conferência do CNPJ, fica)
+    for coluna in range(1, 16):            # tira a linha de exemplo (a coluna P, conferência do CNPJ, fica)
         aba.cell(2, coluna).value = None
     campos = ("ano", "mes", "agencia", "tipo", "cnpj", "loja", "cidade", "uf", "promotor", "promotor_codigo", "dias",
-              "visitas", "valor", "status", "observacao")
+              "visitas", "valor", "status", "observacao", "supervisor")
     consulta = select(*[getattr(Atendimento, c) for c in campos]).order_by(
         Atendimento.ano, Atendimento.mes, Atendimento.agencia, Atendimento.loja)
     total = 0
@@ -539,7 +550,7 @@ def exportar_xlsx(sessao) -> tuple[bytes, int]:
         promotor = "" if r["promotor"] == SEM_PROMOTOR else r["promotor"]
         valores = [f"{r['mes']:02d}/{r['ano']}", r["agencia"], r["tipo"], formatar_cnpj(r["cnpj"]), r["loja"], r["cidade"],
                    r["uf"], promotor, r["promotor_codigo"], r["dias"], r["visitas"], r["valor"], r["status"],
-                   r["observacao"]]
+                   r["observacao"], r["supervisor"]]
         for coluna, valor in enumerate(valores, start=1):
             aba.cell(numero, coluna, valor if valor != "" else None)
         total += 1
@@ -569,7 +580,7 @@ def apagar_tudo(sessao) -> int:
 # ---------------------------------------------------------------------------------------------------------------
 
 COLUNAS = ["ano", "mes", "agencia", "agencia_chave", "tipo", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
-           "promotor_codigo", "promotor_chave", "dias", "visitas", "valor", "status"]
+           "promotor_codigo", "promotor_chave", "dias", "visitas", "valor", "status", "supervisor"]
 _guardado: dict = {"versao": None, "df": None}
 _versao = 0
 

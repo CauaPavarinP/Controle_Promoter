@@ -28,6 +28,7 @@ class FiltrosAtendimento:
     cidade: str = ""
     loja: str = ""         # nome da loja
     tipo: str = ""         # Agência | CLT | MEI | Freelancer
+    supervisor: str = ""   # nome do supervisor (como veio no arquivo)
 
 
 def _rotulo(indice: int) -> str:
@@ -120,6 +121,8 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
         a = a[a["loja"] == filtros.loja]
     if filtros.tipo:
         a = a[a["tipo"] == filtros.tipo]
+    if filtros.supervisor:
+        a = a[a["supervisor"] == filtros.supervisor]
 
     meses_com_atendimento = sorted(a["indice"].unique().tolist()) if not a.empty else []
     custo_total, fat_total = float(a["valor"].sum()) if not a.empty else 0.0, float(a["faturamento"].sum()) if not a.empty else 0.0
@@ -192,7 +195,7 @@ def _por_promotor(a: pd.DataFrame, limite) -> list[dict]:
         linhas.append({
             "chave": chave, "nome": ultimo["promotor"].iloc[-1], "codigo": _juntar(g["promotor_codigo"]),
             "agencia": _juntar(g["agencia"]), "agencia_chave": g["agencia_chave"].iloc[-1],
-            "tipo": _juntar(g["tipo"]), "ufs": _juntar(g["uf"]), "cidades": _juntar(g["cidade"]),
+            "tipo": _juntar(g["tipo"]), "supervisor": _juntar(ultimo["supervisor"]), "ufs": _juntar(g["uf"]), "cidades": _juntar(g["cidade"]),
             "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "lojas_ultimo_mes": int(ultimo[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "visitas": int(g["visitas"].fillna(0).sum()),
@@ -213,7 +216,7 @@ def _por_loja(a: pd.DataFrame, limite) -> list[dict]:
             "chave": f"{cnpj}|{loja_chave}", "loja": ultimo["loja"].iloc[-1], "cnpj": cnpj,
             "cidade": ultimo["cidade"].iloc[-1], "uf": ultimo["uf"].iloc[-1],
             "agencia": _juntar(g["agencia"]), "agencia_chaves": sorted(set(g["agencia_chave"])), "tipo": _juntar(g["tipo"]),
-            "promotor": _juntar(ultimo["promotor"]),
+            "promotor": _juntar(ultimo["promotor"]), "supervisor": _juntar(ultimo["supervisor"]),
             "promotor_chaves": sorted(set(g["promotor_chave"])), "dias": _juntar(ultimo["dias"]),
             "visitas": int(g["visitas"].fillna(0).sum()), "compartilhado": bool(g["compartilhado"].any()),
             "status": ultimo["status"].iloc[-1], "meses_com_atendimento": int(g["indice"].nunique()),
@@ -309,4 +312,5 @@ def opcoes(faturamento: pd.DataFrame, atend: pd.DataFrame) -> dict:
         "ufs": sorted(u for u in atend["uf"].unique() if u),
         "cidades": [{"uf": l.uf, "cidade": l.cidade} for l in locais.itertuples()],
         "tipos": [t for t in ("Agência", "CLT", "MEI", "Freelancer") if t in set(atend["tipo"])],
+        "supervisores": sorted({s for s in atend["supervisor"] if s}, key=str.casefold),
     }

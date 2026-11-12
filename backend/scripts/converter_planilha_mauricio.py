@@ -5,7 +5,7 @@ O que lê (só estas abas; a aba FATURAMENTO não é aberta):
   - SC, SP, PR, MG, RS: roteiro (qual promotor atende qual loja: CNPJ, razão social, cidade, UF, supervisor).
 
 O que gera: um Excel no modelo "Atendimento das agências", pronto para importar na aba Agências, com uma linha por
-loja × mês: Agência = "101 do Brasil", Tipo = CLT, Código = código do promotor, Supervisor na Observação.
+loja × mês: Agência = "101 do Brasil", Tipo = CLT, Código = código do promotor, Supervisor na coluna Supervisor.
 
 Valor de cada loja no mês = custo mensal do promotor dividido igualmente entre as lojas do roteiro dele
 (ex.: R$ 3.000 e 10 lojas = R$ 300 por loja). Os centavos que sobram da divisão vão para a última loja, para a soma
@@ -265,15 +265,14 @@ def montar_linhas(lojas: list[dict], meses: list[tuple[int, int]], agencia: str)
             for posicao, (_, _, loja) in enumerate(itens):
                 valor = (parte + (resto if posicao == len(itens) - 1 else 0)) / 100
                 supervisor = loja["supervisor"] or (promotor["supervisor"] if promotor else "")
-                observacao = [f"Supervisor: {supervisor}"] if supervisor else []
-                observacao.append(f"Gerado da planilha ROTEIROS X FATURAMENTOS ({loja['aba']}, linha {loja['linha']})")
+                observacao = f"Gerado da planilha ROTEIROS X FATURAMENTOS ({loja['aba']}, linha {loja['linha']})"
                 linhas.append({
                     "Mês de referência": f"{mes:02d}/{ano}", "Agência ou MEI": agencia, "Tipo": "CLT",
                     "CNPJ da loja": formatar(_cnpj_do_sistema(loja["cnpj"])) or loja["cnpj"], "Loja": loja["loja"],
                     "Cidade": loja["cidade"], "UF": loja["uf"],
                     "Promotor": promotor["nome"] if promotor else loja["colaborador"],
                     "Código do promotor": promotor["codigo"] if promotor else "",
-                    "Valor do mês (R$)": valor, "Status": "Ativa", "Observação": " · ".join(observacao),
+                    "Valor do mês (R$)": valor, "Status": "Ativa", "Observação": observacao, "Supervisor": supervisor,
                 })
     return linhas
 

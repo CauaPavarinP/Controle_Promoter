@@ -82,7 +82,7 @@ python scripts/converter_planilha_mauricio.py "C:\caminho\ROTEIROS X FATURAMENTO
 ```
 
 - Valor de cada loja no mês = custo do promotor (TOTAL da PROMOTORES BRASIL) ÷ lojas do roteiro dele.
-- Agência "101 do Brasil", Tipo CLT, código do promotor; supervisor na Observação; quem foi admitido depois do mês
+- Agência "101 do Brasil", Tipo CLT, código do promotor e supervisor; quem foi admitido depois do mês
   não entra naquele mês.
 - O arquivo gerado tem a aba **Conferência** (e o mesmo resumo na tela): promotor do roteiro sem cadastro de custo,
   cadastro sem loja, nomes ligados por semelhança, CNPJ inválido, supervisor "#N/A".

@@ -36,6 +36,7 @@ COLUNAS = [  # (título, largura, obrigatória, ajuda)
     ("Valor do mês (R$)", 16, True, "Valor cobrado por ESTA loja no mês. Ver a aba Instruções para quem cobra por visita ou por promotor"),
     ("Status", 13, True, "Ativa ou Encerrada (escolha na lista)"),
     ("Observação", 34, False, "Qualquer informação importante (início no meio do mês, troca de promotor…)"),
+    ("Supervisor", 20, False, "Supervisor(a) responsável pelo promotor, se houver"),
     ("Conferência do CNPJ", 30, False, "Preenchido automaticamente: não digite nesta coluna"),
 ]
 TIPOS = ["Agência", "CLT", "MEI", "Freelancer"]

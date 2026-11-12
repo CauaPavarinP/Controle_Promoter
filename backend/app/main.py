@@ -324,7 +324,7 @@ MESES_MAXIMOS = 60
 
 @app.get("/api/painel")
 def painel(pedido: Request, inicio: str, fim: str, agencia: str = "", promotor: str = "", uf: str = "",
-           cidade: str = "", loja: str = "", tipo: str = "", _=Depends(usuario_logado)):
+           cidade: str = "", loja: str = "", tipo: str = "", supervisor: str = "", _=Depends(usuario_logado)):
     try:
         indice_inicio, indice_fim = indice_mes(inicio), indice_mes(fim)
     except ValueError as erro:
@@ -332,7 +332,7 @@ def painel(pedido: Request, inicio: str, fim: str, agencia: str = "", promotor: 
     if abs(indice_fim - indice_inicio) >= MESES_MAXIMOS:
         _erro("Escolha um período de até 5 anos.")
     filtros = FiltrosAtendimento(inicio=inicio, fim=fim, agencia=agencia, promotor=promotor, uf=uf, cidade=cidade,
-                                 loja=loja, tipo=tipo)
+                                 loja=loja, tipo=tipo, supervisor=supervisor)
     return respostas_guardadas.responder(
         pedido, ("painel", *astuple(filtros)),
         lambda: calcular_painel(faturamento.faturamento_mensal(), atendimento.carregar(), filtros, ler_regras()))
