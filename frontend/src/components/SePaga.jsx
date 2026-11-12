@@ -281,7 +281,7 @@ export function FichaSePaga({ linha, lojas, periodo, carregado, temFaturamento }
   if (!temFaturamento) {
     return (
       <div className="aviso">
-        Ainda não há faturamento importado. Importe o arquivo do ERP na aba <b>Faturamento</b> para ver quanto as lojas
+        Ainda não há faturamento importado. Importe o arquivo do ERP em <b>Importações › Faturamento do ERP</b> para ver quanto as lojas
         compraram e se vale a pena.
       </div>
     )

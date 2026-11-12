@@ -6,7 +6,7 @@ import { DetalheNotas } from './GradeMensal.jsx'
 import { Envio, Historico, PreviaFaturamento } from './Importar.jsx'
 import { definirSubtituloExportacao, Tabela } from './ui.jsx'
 
-function Importacao({ aoImportar }) {
+export function ImportacaoFaturamento({ aoImportar }) {
   const [previa, setPrevia] = useState(null)
   const [concluido, setConcluido] = useState(null)
   const [versao, setVersao] = useState(0)
@@ -97,7 +97,7 @@ function colunasDosMeses(meses, aoClicar) {
   }))
 }
 
-export default function Faturamento({ admin, meses, aoImportar }) {
+export default function Faturamento({ admin, meses }) {
   const ultimo = meses[meses.length - 1] || ''
   const [periodo, setPeriodo] = useState({ inicio: '', fim: '' })
   const [dados, setDados] = useState(null)
@@ -136,9 +136,12 @@ export default function Faturamento({ admin, meses, aoImportar }) {
 
   return (
     <>
-      {admin && <Importacao aoImportar={aoImportar} />}
-
-      {!meses.length && <div className="aviso">Ainda não há faturamento importado.</div>}
+      {!meses.length && (
+        <div className="aviso">
+          Ainda não há faturamento importado.{' '}
+          {admin ? <a href="#importar-faturamento">Importar em Importações › Faturamento do ERP.</a> : 'Peça a um administrador para importar.'}
+        </div>
+      )}
       {erro && <div className="erro-caixa">{erro}</div>}
       {carregando && <p className="carregando">Carregando o faturamento… com a planilha inteira isso pode levar alguns segundos.</p>}
 
