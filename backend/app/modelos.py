@@ -245,7 +245,7 @@ class Atendimento(Base):
     promotor_chave: Mapped[str] = mapped_column(String(200), default="")
     dias: Mapped[str] = mapped_column(String(80), default="")
     visitas: Mapped[int | None] = mapped_column(Integer)
-    valor: Mapped[float] = mapped_column(Numeric(12, 2, asdecimal=False), default=0)
+    valor: Mapped[float | None] = mapped_column(Numeric(12, 2, asdecimal=False))   # None = não informado
     status: Mapped[str] = mapped_column(String(20), default="Ativa")
     observacao: Mapped[str] = mapped_column(Text, default="")
     linha: Mapped[int | None] = mapped_column(Integer)

@@ -1,4 +1,5 @@
 import { classePercentual, formatarMoeda, formatarPercentual } from '../formato.js'
+import { formatarCusto } from './SePaga.jsx'
 
 // Os 4 números principais do Resumo: custo das agências, compras das lojas, custo ÷ compras, promotores e lojas.
 export default function CardsResumo({ resumo, regras }) {
@@ -7,7 +8,7 @@ export default function CardsResumo({ resumo, regras }) {
       <section className="cards cards-4">
         <div className="card">
           <span>Pago às agências</span>
-          <strong>{formatarMoeda(resumo.custo)}</strong>
+          <strong>{formatarCusto(resumo, 'custo')}</strong>
           <small>
             {resumo.meses_com_arquivo === resumo.meses
               ? `atendimento das lojas em ${resumo.meses} mês(es)`
@@ -21,8 +22,8 @@ export default function CardsResumo({ resumo, regras }) {
         </div>
         <div className="card">
           <span>% do faturamento</span>
-          <strong className={resumo.sem_erp ? '' : classePercentual(resumo.percentual_custo, regras) || 'pct-ok'}>
-            {resumo.sem_erp ? '—' : formatarPercentual(resumo.percentual_custo)}
+          <strong className={resumo.sem_erp || resumo.percentual_custo == null ? '' : classePercentual(resumo.percentual_custo, regras) || 'pct-ok'}>
+            {resumo.sem_erp || resumo.percentual_custo == null ? '—' : formatarPercentual(resumo.percentual_custo)}
           </strong>
           <small>custo ÷ compras das lojas · máximo {formatarPercentual(regras?.limite_percentual)}</small>
         </div>

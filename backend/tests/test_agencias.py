@@ -88,7 +88,8 @@ def test_linhas_com_erro_exemplo_e_total_sao_tratadas(cliente):
     assert previa["linhas_validas"] == 4
     assert sorted(e["motivo"].split(" (")[0].split(":")[0] for e in previa["erros"]) == [
         "Agência ou MEI vazio", "Mês de referência vazio ou inválido", "Valor do mês não é número"]
-    assert any("sem valor" in a and "Sem valor" in a for a in previa["avisos"])
+    assert any("sem valor do mês (custo não informado" in a for a in previa["avisos"])
+    assert any(i["loja"] == "Sem valor" and i["falta"] == "valor do mês" for i in previa["incompletas"])
     assert any("Sem promotor informado" in a for a in previa["avisos"])
     assert [g["mes"] for g in previa["grupos"]] == ["2026-10", "2026-11"]
 
@@ -504,3 +505,89 @@ def test_supervisor_opcional_entra_e_filtra(cliente):
     assert cliente.get("/api/opcoes").json()["supervisores"] == ["Jesus"]
     so_jesus = cliente.get("/api/painel", params={**mes, "supervisor": "Jesus"}).json()
     assert [p["nome"] for p in so_jesus["promotores"]] == ["Paula"] and so_jesus["resumo"]["custo"] == 100
+
+
+# --- Linhas de CLT sem CNPJ, visitas e valor (não são título) ---------------------------------------------------
+
+def _clt(loja, promotor="Rildo", codigo="501", cidade="Curitiba", visitas=None, valor=None, mes="10/2026"):
+    return [mes, "101 do Brasil - Filial PR (CLT)", "CLT", None, loja, cidade, "PR", promotor, codigo, "Seg, Qui",
+            visitas, valor, "Ativa", None, None]
+
+
+def _banco_atendimentos(banco):
+    from sqlalchemy import text
+    with banco.db.engine.connect() as conexao:
+        return {l: (v, vi) for l, v, vi in conexao.execute(text("SELECT loja, valor, visitas FROM atendimentos"))}
+
+
+def test_linha_clt_sem_cnpj_visitas_e_valor_entra_como_nao_informado(cliente, banco):
+    entrar(cliente)
+    previa = _previa(cliente, _arquivo([
+        _linha(loja="Loja Agência", valor=300, visitas=4),                      # linha normal: sem mudança
+        _clt("AMIGÃO SOMACO"),
+        _clt("MERCADO CLT DOIS", promotor="Ana Clara", codigo="502"),
+    ])).json()
+    assert previa["linhas_validas"] == 3 and previa["descartadas"] == [] and previa["linhas_com_erro"] == 0
+    assert any("2 loja(s) entraram sem valor do mês" in a for a in previa["avisos"])
+    assert any("2 loja(s) entraram sem visitas no mês" in a for a in previa["avisos"])
+    assert [(i["linha"], i["loja"], i["falta"]) for i in previa["incompletas"]] == [
+        (3, "AMIGÃO SOMACO", "valor do mês e visitas no mês"),
+        (4, "MERCADO CLT DOIS", "valor do mês e visitas no mês")]
+    assert previa["promotores"] == 3
+    grupos = {g["agencia"]: g for g in previa["grupos"]}
+    assert grupos["101 do Brasil - Filial PR (CLT)"]["sem_valor"] == 2 and grupos["Agência Beta"]["valor"] == 300
+    cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
+    gravado = _banco_atendimentos(banco)
+    assert gravado["AMIGÃO SOMACO"] == (None, None)                              # NULL, não 0
+    assert float(gravado["Loja Agência"][0]) == 300 and gravado["Loja Agência"][1] == 4
+    painel = cliente.get("/api/painel", params={"inicio": "2026-10", "fim": "2026-10"}).json()
+    resumo = painel["resumo"]
+    # Os promotores CLT são contados (não entram em "agências sem custo") e o custo não vira R$ 0 de verdade.
+    assert (resumo["agencias"], resumo["promotores"], resumo["lojas"]) == (2, 3, 3)
+    assert resumo["agencias_sem_custo"] == 0 and resumo["custo"] == 300
+    assert any("2 loja(s) sem valor do mês informado" in a for a in resumo["avisos"])
+    situacoes = {p["nome"]: (p["situacao"], p["custo_informado"], p["percentual_custo"]) for p in painel["promotores"]}
+    assert situacoes["Rildo"] == ("sem_erp", False, None)                      # sem faturamento importado no teste
+    agencias = {a["nome"]: a for a in painel["agencias"]}
+    assert agencias["101 do Brasil - Filial PR (CLT)"]["custo_informado"] is False
+    assert agencias["Agência Beta"]["custo_informado"] is True
+
+
+def test_titulo_verdadeiro_e_cabecalho_repetido_continuam_descartados(cliente):
+    entrar(cliente)
+    previa = _previa(cliente, _arquivo([
+        [None, None, None, None, "ATENDIMENTOS FORT", None, None, None, None, None, None, None, None, None, None],
+        ["Mês de referência", "Agência ou MEI", "Tipo", "CNPJ da loja", "Loja", "Cidade", "UF", "Promotor",
+         "Código do promotor", "Dias de visita", "Visitas no mês", "Valor do mês (R$)", "Status", "Observação"],
+        _clt("AMIGÃO SOMACO"),
+    ])).json()
+    assert [(d["linha"], d["motivo"]) for d in previa["descartadas"]] == [
+        (2, "Parece título (sem CNPJ, valor e visitas)"), (3, "Cabeçalho repetido")]
+    assert previa["linhas_validas"] == 1
+
+
+def test_sem_mes_mas_com_cnpj_e_valor_continua_erro_e_visitas_zero_fica_zero(cliente, banco):
+    entrar(cliente)
+    previa = _previa(cliente, _arquivo([
+        _linha(mes=None, loja="Sem mês", valor=150),                             # não some: vai para "com erro"
+        _linha(loja="Zero visitas", visitas=0, valor=120),
+    ])).json()
+    assert previa["linhas_com_erro"] == 1 and previa["erros"][0]["motivo"].startswith("Mês de referência")
+    assert previa["descartadas"] == [] and previa["incompletas"] == []
+    cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
+    assert _banco_atendimentos(banco)["Zero visitas"][1] == 0                  # 0 é 0 (não "não informado")
+
+
+def test_linhas_repetidas_sem_valor_continuam_sem_valor(cliente, banco):
+    entrar(cliente)
+    previa = _previa(cliente, _arquivo([_clt("AMIGÃO SOMACO"), _clt("AMIGÃO SOMACO")])).json()
+    assert any("repetidas" in a for a in previa["avisos"])
+    cliente.post(f"/api/importacoes/atendimento/{previa['token']}/confirmar", json={})
+    assert _banco_atendimentos(banco)["AMIGÃO SOMACO"] == (None, None)
+
+
+def test_situacao_custo_nao_informado():
+    from app.calculo_atendimento import situacao
+    assert situacao(0, 5000, 3, custo_informado=False) == "custo_nao_informado"
+    assert situacao(0, 5000, 3, sem_erp=True, custo_informado=False) == "sem_erp"
+    assert situacao(0, 5000, 3) == "sem_custo"                                  # R$ 0 informado continua "sem custo"

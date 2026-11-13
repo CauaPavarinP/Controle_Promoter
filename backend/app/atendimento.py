@@ -126,8 +126,11 @@ def _texto_sem_erro(valor) -> str:
 
 
 def _visitas(valor):
+    """Visitas no mês: vazio (ou texto) = None (não informado); 0 continua 0 (vazio ≠ zero)."""
+    if _vazio(valor):
+        return None
     numero = ler_numero(valor)
-    if numero is None or numero <= 0:
+    if numero is None or numero < 0:
         return None
     return int(round(numero))
 
@@ -199,7 +202,13 @@ def _vazio(valor) -> bool:
 
 
 def _parece_titulo(registro: dict) -> bool:
-    """Sem nenhum número de CNPJ, sem valor e sem visitas: é título ou separador de bloco, não uma loja."""
+    """Título ou separador de bloco (ex.: "ATENDIMENTOS FORT"), não uma loja.
+
+    Linha com Mês (válido) e Agência preenchidos é SEMPRE uma loja, mesmo sem CNPJ, valor e visitas (ex.: promotor
+    CLT, que não tem custo por loja). Só é título quando falta o Mês ou a Agência E também não tem CNPJ, valor nem
+    visitas. Se faltar Mês/Agência mas tiver CNPJ ou valor, a linha vai para "linhas com erro" (não some calada)."""
+    if ler_mes(registro.get("mes")) is not None and not _vazio(registro.get("agencia")):
+        return False
     tem_digitos = bool(re.search(r"\d{6}", re.sub(r"\D", "", _texto(registro.get("cnpj")))))
     return not tem_digitos and _vazio(registro.get("valor")) and _vazio(registro.get("visitas"))
 
@@ -211,8 +220,8 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
         raise ErroImportacao(
             "Não encontrei a tabela de atendimento. O arquivo precisa ter as colunas Agência ou MEI, CNPJ da loja, "
             "Loja e Valor do mês (use o modelo \"Atendimento das agências\").")
-    linhas, erros, descartadas, cnpjs_invalidos = [], [], [], []
-    corrigidos, sem_valor, sem_promotor, promotor_agencia, sem_mes_coluna = [], [], [], [], False
+    linhas, erros, descartadas, cnpjs_invalidos, incompletas = [], [], [], [], []
+    corrigidos, sem_promotor, promotor_agencia, sem_mes_coluna = [], [], [], False
     tipo_invalido = []
     for aba, primeira, tabela in tabelas:
         if "mes" not in tabela:
@@ -243,15 +252,18 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
                 erros.append({"linha": numero, "aba": aba, "motivo": "Mês de referência vazio ou inválido (use MM/AAAA)"})
                 continue
             valor_bruto = registro.get("valor")
-            if valor_bruto is None or (isinstance(valor_bruto, float) and pd.isna(valor_bruto)) or \
-                    _texto(valor_bruto) == "":
-                valor = 0.0
-                sem_valor.append(loja)
+            if _vazio(valor_bruto):
+                valor = None   # não informado (vazio ≠ R$ 0,00): fica NULL no banco
             else:
                 valor = ler_numero(valor_bruto)
                 if valor is None or valor < 0:
                     erros.append({"linha": numero, "aba": aba, "motivo": f"Valor do mês não é número: {_texto(valor_bruto)[:30]}"})
                     continue
+            visitas = _visitas(registro.get("visitas"))
+            falta = [nome for nome, vazio in (("valor do mês", valor is None), ("visitas no mês", visitas is None)) if vazio]
+            if falta:
+                incompletas.append({"linha": numero, "aba": aba, "loja": loja[:200], "agencia": agencia[:150],
+                                    "falta": " e ".join(falta)})
             cnpj, aviso_cnpj = ler_cnpj(registro.get("cnpj"))
             if aviso_cnpj == "corrigido":
                 corrigidos.append(loja)
@@ -277,8 +289,8 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
                 "loja_chave": normalizar_texto(loja)[:200], "cidade": _texto(registro.get("cidade"))[:120].upper(),
                 "uf": uf if uf in UFS else "", "promotor": promotor[:150], "promotor_codigo": codigo[:40],
                 "promotor_chave": chave_promotor(agencia_chave, codigo, promotor)[:200],
-                "dias": _texto(registro.get("dias"))[:80], "visitas": _visitas(registro.get("visitas")),
-                "valor": round(float(valor), 2), "status": _status(registro.get("status")),
+                "dias": _texto(registro.get("dias"))[:80], "visitas": visitas,
+                "valor": None if valor is None else round(float(valor), 2), "status": _status(registro.get("status")),
                 "supervisor": _texto_sem_erro(registro.get("supervisor"))[:100],
                 "observacao": observacao[:2000],
             })
@@ -289,8 +301,11 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
     df = pd.DataFrame(linhas)
 
     # Cada loja aparece uma vez em cada aviso (o arquivo pode ter vários meses da mesma loja).
-    corrigidos, sem_valor, sem_promotor, promotor_agencia = (
-        list(dict.fromkeys(lista)) for lista in (corrigidos, sem_valor, sem_promotor, promotor_agencia))
+    corrigidos, sem_promotor, promotor_agencia = (
+        list(dict.fromkeys(lista)) for lista in (corrigidos, sem_promotor, promotor_agencia))
+    # Vazio = não informado (NaN), nunca 0: as somas ignoram, e o cálculo mostra "custo não informado".
+    df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+    df["visitas"] = pd.to_numeric(df["visitas"], errors="coerce")
     lojas_sem_cnpj = list(dict.fromkeys(c["loja"] for c in cnpjs_invalidos))
     avisos = []
     if sem_mes_coluna:
@@ -311,9 +326,14 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
     if promotor_agencia:
         avisos.append(f"{len(promotor_agencia)} promotor(es) com nome de agência (confira se a coluna Promotor está "
                       "certa): " + "; ".join(promotor_agencia[:6]) + (" …" if len(promotor_agencia) > 6 else ""))
+    sem_valor = sum(1 for i in incompletas if "valor" in i["falta"])
+    sem_visitas = sum(1 for i in incompletas if "visitas" in i["falta"])
     if sem_valor:
-        avisos.append(f"{len(sem_valor)} loja(s) sem valor entraram com R$ 0,00: " + "; ".join(sem_valor[:8])
-                      + (" …" if len(sem_valor) > 8 else ""))
+        avisos.append(f"{sem_valor} loja(s) entraram sem valor do mês (custo não informado, não R$ 0,00): veja a lista "
+                      "\"Lojas sem valor ou visitas\" abaixo, com a linha do arquivo.")
+    if sem_visitas:
+        avisos.append(f"{sem_visitas} loja(s) entraram sem visitas no mês (não informado): veja a lista \"Lojas sem "
+                      "valor ou visitas\" abaixo, com a linha do arquivo.")
     if sem_promotor:
         avisos.append(f"{len(sem_promotor)} loja(s) sem promotor ficaram como \"{SEM_PROMOTOR}\": "
                       + "; ".join(sem_promotor[:8]) + (" …" if len(sem_promotor) > 8 else ""))
@@ -323,7 +343,7 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
                       "somados. Confira se não é a mesma loja duas vezes: " + ", ".join(repetidas["loja"].head(6)))
     avisos += _nomes_parecidos(df)
     return {"linhas": df, "erros": erros, "avisos": avisos, "abas": sorted({a for a, _, _ in tabelas}),
-            "descartadas": descartadas, "cnpjs_invalidos": cnpjs_invalidos}
+            "descartadas": descartadas, "cnpjs_invalidos": cnpjs_invalidos, "incompletas": incompletas}
 
 
 def _nomes_parecidos(df: pd.DataFrame) -> list[str]:
@@ -422,6 +442,7 @@ def preparar_previa(conteudo: bytes, nome_arquivo: str, usuario: str) -> dict:
         resumo.append({"agencia": grupo["agencia"].iloc[0], "mes": _rotulo(int(ano), int(mes)),
                        "lojas": int(grupo["loja_chave"].nunique()), "promotores": int(grupo["promotor_chave"].nunique()),
                        "visitas": int(grupo["visitas"].fillna(0).sum()), "valor": round(float(grupo["valor"].sum()), 2),
+                       "sem_valor": int(grupo["valor"].isna().sum()),
                        "ja_existe": (chave, int(ano), int(mes)) in existentes})
     token = secrets.token_urlsafe(16)
     with _trava:
@@ -438,7 +459,7 @@ def preparar_previa(conteudo: bytes, nome_arquivo: str, usuario: str) -> dict:
             "substituir": [f"{g['agencia']} {g['mes']}" for g in resumo if g["ja_existe"]],
             "repetidas_outra_agencia": [{k: v for k, v in r.items() if not k.startswith("_")} for r in repetidas],
             "descartadas": lido["descartadas"][:200],
-            "cnpjs_invalidos": lido["cnpjs_invalidos"][:500]}
+            "cnpjs_invalidos": lido["cnpjs_invalidos"][:500], "incompletas": lido["incompletas"][:2000]}
 
 
 ACOES_REPETIDAS = ("substituir", "ignorar")
@@ -459,7 +480,9 @@ def confirmar(token: str, substituir: bool, repetidas: str | None = None) -> dic
     chaves = ["agencia_chave", "ano", "mes", "cnpj", "loja_chave", "promotor_chave"]
     df = (df.groupby(chaves, as_index=False, sort=False)
             .agg({**{c: "first" for c in df.columns if c not in chaves and c != "valor" and c != "visitas"},
-                  "valor": "sum", "visitas": lambda v: int(v.sum()) if v.notna().any() else None}))
+                  # min_count=1: se nenhuma das linhas repetidas tem valor, o total continua "não informado" (NaN), não 0
+                  "valor": lambda v: v.sum(min_count=1),
+                  "visitas": lambda v: int(v.sum()) if v.notna().any() else None}))
     grupos = {(a, int(y), int(m)) for a, y, m in df[["agencia_chave", "ano", "mes"]].itertuples(index=False)}
     meses = sorted({_rotulo(int(y), int(m)) for _, y, m in grupos})
     ignoradas = substituidas_outras = 0
@@ -509,8 +532,9 @@ def confirmar(token: str, substituir: bool, repetidas: str | None = None) -> dic
         for linha in df.to_dict("records"):
             registros.append({c: linha[c] for c in (
                 "ano", "mes", "agencia", "agencia_chave", "tipo", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
-                "promotor_codigo", "promotor_chave", "dias", "valor", "status", "observacao", "linha", "supervisor")}
+                "promotor_codigo", "promotor_chave", "dias", "status", "observacao", "linha", "supervisor")}
                 | {"importacao_id": importacao_id,
+                   "valor": None if pd.isna(linha["valor"]) else round(float(linha["valor"]), 2),
                    "visitas": None if pd.isna(linha["visitas"]) else int(linha["visitas"])})
         conexao.execute(Atendimento.__table__.insert(), registros)
         # Importações de atendimento que ficaram sem linha nenhuma (todos os meses substituídos).

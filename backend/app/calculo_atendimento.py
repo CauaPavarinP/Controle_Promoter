@@ -93,11 +93,14 @@ def atribuir_faturamento(atend: pd.DataFrame, fat_mes: pd.DataFrame) -> pd.DataF
     return a
 
 
-def situacao(custo: float, faturamento: float, limite: float, sem_erp: bool = False) -> str:
-    """ok (até o limite) | acima (passou do limite) | sem_compras (custo sem nenhuma compra) | sem_custo |
-    sem_erp (o faturamento do período ainda não foi importado)."""
+def situacao(custo: float, faturamento: float, limite: float, sem_erp: bool = False,
+             custo_informado: bool = True) -> str:
+    """ok (até o limite) | acima (passou do limite) | sem_compras (custo sem nenhuma compra) | sem_custo (R$ 0
+    informado) | custo_nao_informado (valor do mês vazio: ex. CLT) | sem_erp (faturamento ainda não importado)."""
     if sem_erp:
         return "sem_erp"
+    if not custo_informado:
+        return "custo_nao_informado"
     if custo <= 0:
         return "sem_custo"
     if faturamento <= 0:
@@ -105,16 +108,21 @@ def situacao(custo: float, faturamento: float, limite: float, sem_erp: bool = Fa
     return "ok" if custo / faturamento * 100 <= limite + 1e-9 else "acima"
 
 
-def _indicadores(custo: float, faturamento: float, limite: float, sem_erp: bool = False) -> dict:
+def _indicadores(custo: float, faturamento: float, limite: float, sem_erp: bool = False,
+                 custo_informado: bool = True) -> dict:
+    """custo_informado=False: nenhuma linha tem o valor do mês (vazio ≠ R$ 0,00). Aí o custo e o % ficam "—"."""
     custo, faturamento = float(custo), float(faturamento)
     return {"custo_periodo": _dinheiro(custo), "faturamento": _dinheiro(faturamento),
-            "percentual_custo": _percentual(custo, faturamento), "sem_erp": sem_erp,
-            "situacao": situacao(custo, faturamento, limite, sem_erp)}
+            "percentual_custo": _percentual(custo, faturamento) if custo_informado else None, "sem_erp": sem_erp,
+            "custo_informado": custo_informado,
+            "situacao": situacao(custo, faturamento, limite, sem_erp, custo_informado)}
 
 
 def _indicadores_grupo(g: pd.DataFrame, limite: float) -> dict:
-    """Indicadores de um grupo de linhas; sem_erp = nenhum mês do grupo tem faturamento do ERP importado."""
-    return _indicadores(g["valor"].sum(), g["faturamento"].sum(), limite, not bool(g["tem_erp"].any()))
+    """Indicadores de um grupo de linhas; sem_erp = nenhum mês do grupo tem faturamento do ERP importado.
+    A soma do custo ignora os valores não informados (NaN); custo_informado diz se algum foi informado."""
+    return _indicadores(g["valor"].sum(), g["faturamento"].sum(), limite, not bool(g["tem_erp"].any()),
+                        bool(g["valor"].notna().any()))
 
 
 def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAtendimento, regras: dict) -> dict:
@@ -153,8 +161,11 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
     # Agências sem custo no período (ex.: promotores CLT/MEI informados com R$ 0): contadas à parte, para não inflar
     # os números de agências, promotores e lojas.
     if not a.empty:
-        custo_agencia = a.groupby("agencia_chave")["valor"].sum()
-        sem_custo = set(custo_agencia[custo_agencia <= 0].index)
+        # "Sem custo" = a agência informou R$ 0 (ou nada > 0) em TODAS as lojas. Agência com valor não informado
+        # (ex.: CLT sem custo por loja) não é "sem custo": é contada normalmente e não fica escondida.
+        por_agencia = a.groupby("agencia_chave")["valor"]
+        custo_agencia, tudo_informado = por_agencia.sum(), por_agencia.apply(lambda v: bool(v.notna().all()))
+        sem_custo = set(custo_agencia[(custo_agencia <= 0) & tudo_informado].index)
     else:
         sem_custo = set()
     com_custo = a[~a["agencia_chave"].isin(sem_custo)] if not a.empty else a
@@ -168,7 +179,8 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
     agencias, promotores, lojas = _contar(com_custo)
     agencias_zero, promotores_zero, lojas_zero = _contar(zerada)
     sem_erp_total = not bool(a["tem_erp"].any()) if not a.empty else not meses_erp
-    resumo = {**_indicadores(custo_total, fat_total, limite, sem_erp_total),
+    custo_informado_total = bool(a["valor"].notna().any()) if not a.empty else True
+    resumo = {**_indicadores(custo_total, fat_total, limite, sem_erp_total, custo_informado_total),
               "custo": _dinheiro(custo_total), "meses": len(meses),
               "meses_com_arquivo": len(meses_com_atendimento),
               "promotores": promotores, "lojas": lojas, "agencias": agencias,
@@ -207,6 +219,10 @@ def _avisos(a: pd.DataFrame, meses: list, com_atendimento: list, meses_erp: set)
     elif sem_arquivo:
         avisos.append("Meses do período sem nenhum arquivo de agência (custo zero nesses meses): "
                       + ", ".join(_rotulo(m) for m in sem_arquivo))
+    if not a.empty and a["valor"].isna().any():
+        sem_valor = a.loc[a["valor"].isna(), ["cnpj", "loja_chave"]].drop_duplicates()
+        avisos.append(f"{len(sem_valor)} loja(s) sem valor do mês informado (ex.: CLT): o custo do período está "
+                      "incompleto e o \"Vale a pena?\" dessas lojas aparece como \"custo não informado\".")
     if not a.empty:
         sem_cnpj = a.loc[a["cnpj"] == "", "loja"].unique()
         if len(sem_cnpj):
@@ -301,7 +317,8 @@ def _mes_a_mes(a: pd.DataFrame, meses: list, limite, meses_erp: set) -> list[dic
                        "lojas": 0 if vazio else int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
                        "visitas": 0 if vazio else int(g["visitas"].fillna(0).sum()),
                        **_indicadores(0 if vazio else g["valor"].sum(), 0 if vazio else g["faturamento"].sum(),
-                                      limite, indice not in meses_erp if vazio else not bool(g["tem_erp"].any()))})
+                                      limite, indice not in meses_erp if vazio else not bool(g["tem_erp"].any()),
+                                      True if vazio else bool(g["valor"].notna().any()))})
     return linhas
 
 

@@ -58,6 +58,7 @@ function PreviaAtendimento({ previa, aoConcluir, aoCancelar }) {
   const repetidas = previa.repetidas_outra_agencia || []
   const invalidos = previa.cnpjs_invalidos || []
   const descartadas = previa.descartadas || []
+  const incompletas = previa.incompletas || []
 
   async function confirmar() {
     setEnviando(true)
@@ -91,7 +92,9 @@ function PreviaAtendimento({ previa, aoConcluir, aoCancelar }) {
           { campo: 'lojas', titulo: 'Lojas', num: true },
           { campo: 'promotores', titulo: 'Promotores', num: true },
           { campo: 'visitas', titulo: 'Visitas', num: true },
-          { campo: 'valor', titulo: 'Valor', num: true, mostrar: (g) => formatarMoeda(g.valor) },
+          { campo: 'valor', titulo: 'Valor', num: true,
+            mostrar: (g) => (g.sem_valor > 0 && g.sem_valor >= g.lojas ? <span className="dica">não informado</span>
+              : <>{formatarMoeda(g.valor)}{g.sem_valor > 0 && <small className="dica"> ({g.sem_valor} sem valor)</small>}</>) },
           { campo: 'ja_existe', titulo: '', semOrdem: true,
             mostrar: (g) => (g.ja_existe ? <span className="etiqueta">já importado: será substituído</span> : '') },
         ]}
@@ -106,6 +109,15 @@ function PreviaAtendimento({ previa, aoConcluir, aoCancelar }) {
               { campo: 'loja', titulo: 'Loja', quebra: true },
               { campo: 'cnpj', titulo: 'CNPJ informado', mostrar: (c) => <b className="texto-critico">{c.cnpj || '(vazio)'}</b> },
               { campo: 'motivo', titulo: 'Motivo' }]} />
+        </details>
+      )}
+      {incompletas.length > 0 && (
+        <details className="caixa-alerta">
+          <summary><b>Lojas sem valor ou visitas ({incompletas.length})</b>: entram como "não informado" (não como R$ 0,00 nem 0 visitas).</summary>
+          <Tabela chave="chave" linhas={incompletas.map((c, i) => ({ ...c, chave: i }))} porPagina={10} arquivo="lojas-sem-valor-ou-visitas"
+            colunas={[{ campo: 'linha', titulo: 'Linha', num: true }, { campo: 'aba', titulo: 'Aba' },
+              { campo: 'loja', titulo: 'Loja', quebra: true }, { campo: 'agencia', titulo: 'Agência', quebra: true },
+              { campo: 'falta', titulo: 'Falta' }]} />
         </details>
       )}
       {descartadas.length > 0 && (

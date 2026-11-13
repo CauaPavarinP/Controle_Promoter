@@ -5,17 +5,18 @@ import { http } from '../api.js'
 import { formatarMes, formatarMoeda, formatarPercentual } from '../formato.js'
 import { Tabela } from './ui.jsx'
 
-// Situação calculada no servidor: ok | acima | sem_compras | sem_custo | sem_erp
-const CLASSES = { ok: 'ok', acima: 'prejuizo', sem_compras: 'sem-faturamento', sem_erp: 'sem-erp' }
+// Situação calculada no servidor: ok | acima | sem_compras | sem_custo | sem_erp | custo_nao_informado
+const CLASSES = { ok: 'ok', acima: 'prejuizo', sem_compras: 'sem-faturamento', sem_erp: 'sem-erp',
+  custo_nao_informado: 'custo-nao-informado' }
 
-/** 'ok' | 'prejuizo' | 'sem-faturamento' | 'sem-erp' | null (sem custo). */
+/** 'ok' | 'prejuizo' | 'sem-faturamento' | 'sem-erp' | 'custo-nao-informado' | null (sem custo). */
 export const situacao = (linha) => CLASSES[linha?.situacao] || null
 
 function textos(limite) {
   const pct = limite != null ? formatarPercentual(limite) : 'do limite'
   return {
     ok: '🟢 Vale a pena', prejuizo: `🔴 Acima de ${pct}`, 'sem-faturamento': '🔴 Sem compras',
-    'sem-erp': '⚪ Falta o faturamento do ERP',
+    'sem-erp': '⚪ Falta o faturamento do ERP', 'custo-nao-informado': '⚪ Custo não informado',
   }
 }
 
@@ -58,7 +59,7 @@ export function LegendaBolinhas() {
     <p className="legenda-bolinhas">
       <span>🟢 Vale a pena: custo até {limite} do faturamento</span>
       <span>🔴 Acima de {limite}, ou com custo e nenhuma compra</span>
-      <span>⚪ Falta o faturamento do ERP no período</span>
+      <span>⚪ Falta o faturamento do ERP no período, ou custo não informado (ex.: CLT sem valor no arquivo)</span>
       <span>— Sem custo</span>
     </p>
   )
@@ -73,12 +74,17 @@ export const COLUNA_VALE_A_PENA = {
 
 // Colunas de dinheiro e do veredito, iguais nas tabelas de promotores, agências e lojas.
 export const COLUNAS_SE_PAGA = [
-  { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (l) => formatarMoeda(l.custo_periodo) },
+  { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (l) => formatarCusto(l) },
   { campo: 'faturamento', titulo: 'Compraram', num: true, formato: 'moeda',
     mostrar: (l) => (l.sem_erp ? '—' : formatarMoeda(l.faturamento)) },
   COLUNA_PERCENTUAL,
   COLUNA_VALE_A_PENA,
 ]
+
+// Custo vazio no arquivo (ex.: CLT) ≠ R$ 0,00: mostra "não informado".
+export const formatarCusto = (l, campo = 'custo_periodo') => (l?.custo_informado === false
+  ? <span className="dica" title="O arquivo não traz o valor do mês destas lojas (ex.: CLT)">não informado</span>
+  : formatarMoeda(l?.[campo]))
 
 function periodoPadrao(meses) {
   if (!meses.length) return { inicio: '', fim: '' }
@@ -106,7 +112,9 @@ export function useOcultarSemCusto(agencias) {
       window.localStorage.setItem(CHAVE_OCULTAR, valor ? 'sim' : 'nao')
     } catch { /* navegador sem armazenamento: vale só nesta tela */ }
   }
-  const semCusto = new Set((agencias || []).filter((a) => !(a.custo_periodo > 0)).map((a) => a.chave))
+  // Custo não informado (ex.: CLT) não é "sem custo": essas agências não são ocultadas.
+  const semCusto = new Set((agencias || []).filter((a) => a.custo_informado !== false && !(a.custo_periodo > 0))
+    .map((a) => a.chave))
   return { ocultar, setOcultar, semCusto, visivel: (chaves) => !ocultar || chaves.some((c) => !semCusto.has(c)) }
 }
 
@@ -220,7 +228,7 @@ export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEd
   const [erro, setErro] = useState('')
   const resumo = dados?.resumo
   definirLimite(limite)
-  const contagem = { ok: 0, prejuizo: 0, 'sem-faturamento': 0, 'sem-erp': 0 }
+  const contagem = { ok: 0, prejuizo: 0, 'sem-faturamento': 0, 'sem-erp': 0, 'custo-nao-informado': 0 }
   for (const p of linhas || dados?.[contar] || []) {
     const s = situacao(p)
     if (s) contagem[s] += 1
@@ -283,11 +291,11 @@ export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEd
         <div className="cards cards-3">
           <div className="card"><span>Lojas compraram</span><strong>{resumo.sem_erp ? '—' : formatarMoeda(resumo.faturamento)}</strong>
             <small>faturamento bruto do ERP</small></div>
-          <div className="card"><span>Custo do atendimento</span><strong>{formatarMoeda(resumo.custo)}</strong>
+          <div className="card"><span>Custo do atendimento</span><strong>{formatarCusto(resumo, 'custo')}</strong>
             <small>pago às agências, MEIs e CLT</small></div>
           <div className={`card ${situacao(resumo) === 'ok' ? 'pct-ok' : situacao(resumo) ? 'pct-critico' : ''}`}>
             <span>% do faturamento</span>
-            <strong>{resumo.sem_erp ? '—' : formatarPercentual(resumo.percentual_custo)}</strong>
+            <strong>{resumo.sem_erp || resumo.percentual_custo == null ? '—' : formatarPercentual(resumo.percentual_custo)}</strong>
             <small><EtiquetaSituacao linha={resumo} /></small>
           </div>
         </div>
@@ -298,6 +306,8 @@ export function QuadroSePaga({ titulo, meses, periodo, setPeriodo, dados, podeEd
           <span className="se-paga se-paga-ok">🟢 Vale a pena: {contagem.ok}</span>{' '}
           <span className="se-paga se-paga-prejuizo">🔴 Não vale a pena: {contagem.prejuizo + contagem['sem-faturamento']}</span>
           {contagem['sem-erp'] > 0 && <span className="se-paga se-paga-sem-erp">⚪ Falta o faturamento: {contagem['sem-erp']}</span>}
+          {contagem['custo-nao-informado'] > 0 && (
+            <span className="se-paga se-paga-custo-nao-informado">⚪ Custo não informado: {contagem['custo-nao-informado']}</span>)}
         </p>
       )}
     </section>
@@ -327,10 +337,10 @@ export function FichaSePaga({ linha, lojas, periodo, carregado, temFaturamento }
       <p className="dica">Período: {formatarMes(periodo.inicio)} a {formatarMes(periodo.fim)}</p>
       <div className="cards cards-3">
         <div className="card"><span>Lojas compraram</span><strong>{linha.sem_erp ? '—' : formatarMoeda(linha.faturamento)}</strong></div>
-        <div className="card"><span>Custo no período</span><strong>{formatarMoeda(linha.custo_periodo)}</strong></div>
+        <div className="card"><span>Custo no período</span><strong>{formatarCusto(linha)}</strong></div>
         <div className={`card ${situacao(linha) === 'ok' ? 'pct-ok' : situacao(linha) ? 'pct-critico' : ''}`}>
           <span>% do faturamento</span>
-          <strong>{linha.sem_erp ? '—' : formatarPercentual(linha.percentual_custo)}</strong>
+          <strong>{linha.sem_erp || linha.percentual_custo == null ? '—' : formatarPercentual(linha.percentual_custo)}</strong>
           <small><EtiquetaSituacao linha={linha} /></small>
         </div>
       </div>

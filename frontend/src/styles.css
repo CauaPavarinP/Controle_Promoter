@@ -406,6 +406,7 @@ details.lembrados > summary { cursor: pointer; color: var(--primaria); font-weig
 .lista-backups li { margin: 4px 0; overflow-wrap: anywhere; }
 
 .se-paga-sem-erp { background: var(--fundo, #f2f4f7); color: var(--texto-suave, #667085); }
+.se-paga-custo-nao-informado { background: var(--fundo, #f2f4f7); color: var(--texto-suave, #667085); }
 /* Filtros de local na aba Promotores (UF → município → mercado, agência, tipo) */
 .filtros-local { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin: 10px 0 4px; }
 .filtros-local .filtro input { min-width: 200px; }
