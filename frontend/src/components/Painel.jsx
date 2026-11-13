@@ -104,6 +104,12 @@ export default function Painel({ usuario, aoSair }) {
     }
   }, [aba, carregarOpcoes])
 
+  // Promotores, Agências e Faturamento também precisam das opções (meses): carrega se ainda não veio, senão a aba
+  // fica em branco ao abrir o sistema direto nela (ou apertar F5 nela).
+  useEffect(() => {
+    if (!opcoes && !ABAS_COM_FILTRO.includes(aba)) carregarOpcoes()
+  }, [aba, opcoes, carregarOpcoes])
+
   // Sem faturamento, o administrador cai direto na importação do faturamento — só na abertura.
   const jaDirecionou = useRef(false)
   useEffect(() => {
