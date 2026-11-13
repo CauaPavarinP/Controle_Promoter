@@ -50,7 +50,20 @@ APELIDOS = {
     "status": ["STATUS", "STATUS ATENDIMENTO", "SITUACAO"],
     "observacao": ["OBSERVACAO", "OBSERVACOES", "OBS"],
     "supervisor": ["SUPERVISOR", "SUPERVISORA", "SUPERVISOR MERCHAN", "SUPERVISOR A"],
+    "frequencia": ["FREQUENCIA SEMANA", "FREQUENCIA SEMANAL", "FREQUENCIA", "VEZES POR SEMANA", "FREQ SEMANA"],
 }
+# Arquivo dos MEIs ("CONTROLE DE PROMOTORES MEI", aba "CONTROLE GERAL"): sem Mês, Agência e Loja; loja e CNPJ juntos
+# em "CLIENTE / CNPJ"; promotor e valor em células mescladas por bloco de lojas do mesmo promotor.
+APELIDOS_MEI = {
+    "promotor": ["NOME DO PROMOTOR", "PROMOTOR"],
+    "uf": ["UF", "ESTADO"],
+    "cidade": ["CIDADE", "MUNICIPIO"],
+    "cliente": ["CLIENTE CNPJ", "CLIENTE"],
+    "frequencia": APELIDOS["frequencia"],
+    "observacao": ["OBSERVACAO", "OBSERVACOES", "OBS"],
+    "valor": ["VALOR R", "VALOR"],
+}
+OBRIGATORIAS_MEI = ("promotor", "cliente", "valor")
 OBRIGATORIAS = ("agencia", "cnpj", "loja", "valor")
 UFS = set("AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO".split())
 NOMES_MESES = {"JAN": 1, "FEV": 2, "MAR": 3, "ABR": 4, "MAI": 5, "JUN": 6, "JUL": 7, "AGO": 8, "SET": 9, "OUT": 10,
@@ -168,23 +181,115 @@ def chave_promotor(agencia_chave: str, codigo: str, nome: str) -> str:
 # Leitura do arquivo
 # ---------------------------------------------------------------------------------------------------------------
 
-def _tabelas(conteudo: bytes, nome_arquivo: str):
-    """(aba, linha do cabeçalho no Excel, DataFrame com as colunas renomeadas) das abas que têm o modelo."""
+def _colunas(dados: pd.DataFrame, mapa: dict) -> pd.DataFrame:
+    return pd.DataFrame({campo: dados.iloc[:, posicao] if posicao < dados.shape[1]
+                         else pd.Series([None] * len(dados), index=dados.index, dtype=object)
+                         for campo, posicao in mapa.items()})
+
+
+def _tabelas(conteudo: bytes, nome_arquivo: str, mes_escolhido: str = ""):
+    """(aba, linha do cabeçalho no Excel, DataFrame com as colunas renomeadas, info do MEI ou None) das abas que
+    têm o modelo, ou o layout do arquivo dos MEIs (convertido para as colunas do modelo)."""
     for aba, ler in _ler_abas(conteudo, nome_arquivo):
         previa = ler(nrows=30)
-        melhor = None
+        melhor, mei = None, None
         for indice, linha in previa.iterrows():
             mapa = _mapear_colunas(linha.tolist(), APELIDOS)
             if all(c in mapa for c in OBRIGATORIAS) and (melhor is None or len(mapa) > len(melhor[1])):
                 melhor = (indice, mapa)
-        if melhor is None:
-            continue
-        cabecalho, mapa = melhor
-        dados = ler(skiprows=cabecalho + 1)
-        tabela = pd.DataFrame({campo: dados.iloc[:, posicao] if posicao < dados.shape[1]
-                               else pd.Series([None] * len(dados), index=dados.index, dtype=object)
-                               for campo, posicao in mapa.items()})
-        yield aba, cabecalho + 2, tabela
+            mapa_mei = _mapear_colunas(linha.tolist(), APELIDOS_MEI)
+            if mei is None and all(c in mapa_mei for c in OBRIGATORIAS_MEI) and "agencia" not in mapa:
+                mei = (indice, mapa_mei)
+        if melhor is not None:
+            cabecalho, mapa = melhor
+            yield aba, cabecalho + 2, _colunas(ler(skiprows=cabecalho + 1), mapa), None
+        elif mei is not None:
+            cabecalho, mapa = mei
+            tabela, info = _tabela_mei(_colunas(ler(skiprows=cabecalho + 1), mapa), mes_escolhido)
+            yield aba, cabecalho + 2, tabela, info
+
+
+_CNPJ_NO_FIM = re.compile(r"\(?\s*(\d[\d./\-]{10,20}\d)\s*\)?\s*$")   # sem espaço dentro do CNPJ
+
+
+def separar_cliente(texto: str) -> tuple[str, str]:
+    """"MAX FORT - 14.814.080/0003-41" → ("MAX FORT", "14.814.080/0003-41"); "NIEDERAUER / 881232160005-58";
+    "ROTA /  (15.384.277/0003-02) - 15.384.277/0003-02" → ("ROTA", ...). Sem número no fim: (texto, "")."""
+    texto = _texto(texto)
+    achado = _CNPJ_NO_FIM.search(texto)
+    if not achado:
+        return texto, ""
+    loja = re.sub(r"\(\s*[\d./\-]{11,}\s*\)", " ", texto[:achado.start()])   # "(15.384.277/0003-02)" repetido
+    loja = re.sub(r"\s+", " ", loja).strip(" -/–|(")
+    return (loja or texto), achado.group(1).strip()
+
+
+def ler_frequencia(valor) -> int | None:
+    """Vezes por semana: 3, "3", "3x", "3 vezes" → 3. Vazio ou sem número → None."""
+    if _vazio(valor):
+        return None
+    numero = ler_numero(valor)
+    if numero is None:
+        achado = re.search(r"\d+", _texto(valor))
+        numero = float(achado.group()) if achado else None
+    if numero is None or numero <= 0 or numero > 7:
+        return None
+    return int(round(numero))
+
+
+def _tabela_mei(tabela: pd.DataFrame, mes_escolhido: str) -> tuple[pd.DataFrame, dict]:
+    """Converte o layout dos MEIs nas colunas do modelo.
+
+    - Promotor (coluna A mesclada): vale para as linhas de baixo até o próximo nome.
+    - Valor (coluna G mesclada): o valor do bloco é dividido em partes iguais entre as lojas do promotor; os
+      centavos que sobram do arredondamento vão para a última loja do bloco (a soma bate com o arquivo).
+      Se cada loja tiver o próprio valor (sem mesclar), vale o de cada linha.
+    - Agência: "MEI - <Promotor>" (cada MEI é um prestador, com nota e pagamento próprios). Tipo: MEI.
+    - Mês: o arquivo não tem; vem do campo "Mês de referência" escolhido na importação."""
+    if not mes_escolhido or ler_mes(mes_escolhido) is None:
+        raise ErroImportacao("Este é o arquivo dos MEIs (\"CONTROLE GERAL\"), que não tem o mês: escolha o mês de "
+                             "referência no campo \"Mês de referência\" e leia o arquivo de novo.")
+    ano, mes = ler_mes(mes_escolhido)
+    t = tabela.copy()
+    t["cliente"] = t["cliente"].map(_texto)
+    linhas_loja = t["cliente"] != ""
+    novo_bloco = t["promotor"].map(lambda v: not _vazio(v))
+    t["bloco"] = novo_bloco.cumsum()
+    t["promotor"] = t["promotor"].where(novo_bloco).ffill()
+    t = t[linhas_loja & (t["bloco"] > 0)].copy()
+    divisoes, valores = [], []
+    for _, g in t.groupby("bloco", sort=False):
+        preenchidos = [v for v in g["valor"] if not _vazio(v)]
+        if len(preenchidos) == 1 and len(g) > 1 and not _vazio(g["valor"].iloc[0]):
+            total = ler_numero(g["valor"].iloc[0])
+            if total is None:
+                valores += [g["valor"].iloc[0]] + [None] * (len(g) - 1)
+                continue
+            parte = round(total / len(g), 2)
+            partes = [parte] * len(g)
+            partes[-1] = round(total - parte * (len(g) - 1), 2)
+            valores += partes
+            divisoes.append(f"{_texto(g['promotor'].iloc[0]).title()}: {_brl(total)} ÷ {len(g)} lojas = {_brl(parte)}"
+                            + (f" (última loja {_brl(partes[-1])})" if partes[-1] != parte else ""))
+        else:
+            valores += list(g["valor"])
+    t["valor"] = valores
+    separados = t["cliente"].map(separar_cliente)
+    nomes = t["promotor"].map(lambda v: _texto(v).title())
+    convertida = pd.DataFrame({
+        "mes": f"{mes:02d}/{ano}", "agencia": "MEI - " + nomes, "tipo": "MEI",
+        "cnpj": [c for _, c in separados], "loja": [l for l, _ in separados],
+        "cidade": t["cidade"] if "cidade" in t else "", "uf": t["uf"] if "uf" in t else "",
+        "promotor": nomes, "frequencia": t["frequencia"] if "frequencia" in t else None,
+        "observacao": t["observacao"] if "observacao" in t else "", "valor": t["valor"],
+    }, index=t.index)
+    # Mantém a numeração das linhas do Excel (as linhas vazias ficam de fora sem desalinhar).
+    convertida = convertida.reindex(range(len(tabela)))
+    return convertida, {"mes": f"{mes:02d}/{ano}", "divisoes": divisoes}
+
+
+def _brl(valor: float) -> str:
+    return "R$ " + f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 _NOMES_CABECALHO = {campo: {normalizar_texto(n) for n in nomes} for campo, nomes in APELIDOS.items()}
@@ -213,9 +318,18 @@ def _parece_titulo(registro: dict) -> bool:
     return not tem_digitos and _vazio(registro.get("valor")) and _vazio(registro.get("visitas"))
 
 
-def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
-    """Lê o arquivo da agência. Devolve {linhas: DataFrame, erros: [...], avisos: [...], abas: [...]}."""
-    tabelas = list(_tabelas(conteudo, nome_arquivo))
+def chave_loja(loja: str, cnpj: str, cidade: str, uf: str) -> str:
+    """Nome normalizado da loja; sem CNPJ válido, mais cidade e UF (duas lojas de mesmo nome em cidades diferentes,
+    ex.: SUPER BENEDETTI de Três de Maio e de Crissiumal, continuam sendo duas lojas)."""
+    if cnpj:
+        return normalizar_texto(loja)[:200]
+    return f"{normalizar_texto(loja)} | {normalizar_texto(cidade)} {normalizar_texto(uf)}".strip()[:200]
+
+
+def ler_atendimento(conteudo: bytes, nome_arquivo: str, mes_escolhido: str = "") -> dict:
+    """Lê o arquivo da agência. Devolve {linhas: DataFrame, erros: [...], avisos: [...], abas: [...]}.
+    mes_escolhido ("MM/AAAA" ou "AAAA-MM"): só para o arquivo dos MEIs, que não tem a coluna Mês."""
+    tabelas = list(_tabelas(conteudo, nome_arquivo, mes_escolhido))
     if not tabelas:
         raise ErroImportacao(
             "Não encontrei a tabela de atendimento. O arquivo precisa ter as colunas Agência ou MEI, CNPJ da loja, "
@@ -223,7 +337,8 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
     linhas, erros, descartadas, cnpjs_invalidos, incompletas = [], [], [], [], []
     corrigidos, sem_promotor, promotor_agencia, sem_mes_coluna = [], [], [], False
     tipo_invalido = []
-    for aba, primeira, tabela in tabelas:
+    meis = [info for _, _, _, info in tabelas if info]
+    for aba, primeira, tabela, _info in tabelas:
         if "mes" not in tabela:
             sem_mes_coluna = True
         for posicao, registro in enumerate(tabela.to_dict("records")):
@@ -260,7 +375,12 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
                     erros.append({"linha": numero, "aba": aba, "motivo": f"Valor do mês não é número: {_texto(valor_bruto)[:30]}"})
                     continue
             visitas = _visitas(registro.get("visitas"))
-            falta = [nome for nome, vazio in (("valor do mês", valor is None), ("visitas no mês", visitas is None)) if vazio]
+            frequencia = ler_frequencia(registro.get("frequencia"))
+            if frequencia is None:
+                achado = re.match(r"\s*(\d)\s*x\s*/?\s*(por\s+)?semana", _texto(registro.get("dias")), re.I)
+                frequencia = int(achado.group(1)) if achado else None
+            falta = [nome for nome, vazio in (("valor do mês", valor is None),
+                                              ("visitas no mês", visitas is None and frequencia is None)) if vazio]
             if falta:
                 incompletas.append({"linha": numero, "aba": aba, "loja": loja[:200], "agencia": agencia[:150],
                                     "falta": " e ".join(falta)})
@@ -282,14 +402,18 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
                 tipo_invalido.append(f"{_texto(registro.get('tipo'))[:20]} (linha {numero})")
             codigo = _texto(registro.get("codigo"))
             uf = normalizar_texto(registro.get("uf"))[:2]
+            uf = uf if uf in UFS else ""
+            cidade = _texto(registro.get("cidade"))[:120].upper()
             agencia_chave = normalizar_texto(agencia)
+            dias = _texto(registro.get("dias"))[:80] or (f"{frequencia}x/semana" if frequencia else "")
             linhas.append({
                 "linha": numero, "aba": aba, "ano": mes[0], "mes": mes[1], "agencia": agencia[:150],
                 "agencia_chave": agencia_chave[:150], "tipo": tipo, "cnpj": cnpj, "loja": loja[:200],
-                "loja_chave": normalizar_texto(loja)[:200], "cidade": _texto(registro.get("cidade"))[:120].upper(),
-                "uf": uf if uf in UFS else "", "promotor": promotor[:150], "promotor_codigo": codigo[:40],
+                "loja_chave": chave_loja(loja, cnpj, cidade, uf), "cidade": cidade,
+                "uf": uf, "promotor": promotor[:150], "promotor_codigo": codigo[:40],
                 "promotor_chave": chave_promotor(agencia_chave, codigo, promotor)[:200],
-                "dias": _texto(registro.get("dias"))[:80], "visitas": visitas,
+                "dias": dias, "visitas": visitas, "frequencia_semana": frequencia,
+                "cnpj_arquivo": "" if cnpj else _texto(registro.get("cnpj"))[:40],
                 "valor": None if valor is None else round(float(valor), 2), "status": _status(registro.get("status")),
                 "supervisor": _texto_sem_erro(registro.get("supervisor"))[:100],
                 "observacao": observacao[:2000],
@@ -306,8 +430,15 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
     # Vazio = não informado (NaN), nunca 0: as somas ignoram, e o cálculo mostra "custo não informado".
     df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
     df["visitas"] = pd.to_numeric(df["visitas"], errors="coerce")
+    df["frequencia_semana"] = pd.to_numeric(df["frequencia_semana"], errors="coerce")
     lojas_sem_cnpj = list(dict.fromkeys(c["loja"] for c in cnpjs_invalidos))
     avisos = []
+    for info in meis:
+        avisos.append(f"Arquivo dos MEIs: gravado em {info['mes']} (mês escolhido na importação); cada promotor é "
+                      "uma agência \"MEI - <nome>\". Visitas estimadas pela frequência por semana.")
+        if info["divisoes"]:
+            avisos.append("Valor do promotor (célula mesclada) dividido igualmente entre as lojas dele: "
+                          + "; ".join(info["divisoes"]) + ".")
     if sem_mes_coluna:
         avisos.append("Uma aba não tem a coluna \"Mês de referência\": as linhas dela entraram como erro.")
     if corrigidos:
@@ -342,7 +473,7 @@ def ler_atendimento(conteudo: bytes, nome_arquivo: str) -> dict:
         avisos.append(f"{len(repetidas)} linha(s) repetidas (mesma agência, mês, loja e promotor): os valores foram "
                       "somados. Confira se não é a mesma loja duas vezes: " + ", ".join(repetidas["loja"].head(6)))
     avisos += _nomes_parecidos(df)
-    return {"linhas": df, "erros": erros, "avisos": avisos, "abas": sorted({a for a, _, _ in tabelas}),
+    return {"linhas": df, "erros": erros, "avisos": avisos, "abas": sorted({a for a, _, _, _ in tabelas}),
             "descartadas": descartadas, "cnpjs_invalidos": cnpjs_invalidos, "incompletas": incompletas}
 
 
@@ -381,7 +512,7 @@ def _grupos_existentes(conexao, grupos: set[tuple[str, int, int]]) -> set[tuple[
 
 
 def _chave_loja(cnpj: str, loja_chave: str) -> str:
-    """A mesma loja em arquivos diferentes: pelo CNPJ; sem CNPJ válido, pelo nome."""
+    """A mesma loja em arquivos diferentes: pelo CNPJ; sem CNPJ válido, pelo nome + cidade/UF (loja_chave)."""
     return f"cnpj:{cnpj}" if cnpj else f"nome:{loja_chave}"
 
 
@@ -424,8 +555,8 @@ def _repetidas_no_arquivo(df: pd.DataFrame) -> list[str]:
                 chaves.groupby(["ano", "mes", "chave"])["loja"].first().values) if len(agencias) > 1]
 
 
-def preparar_previa(conteudo: bytes, nome_arquivo: str, usuario: str) -> dict:
-    lido = ler_atendimento(conteudo, nome_arquivo)
+def preparar_previa(conteudo: bytes, nome_arquivo: str, usuario: str, mes: str = "") -> dict:
+    lido = ler_atendimento(conteudo, nome_arquivo, mes)
     df = lido["linhas"]
     grupos = df.groupby(["agencia_chave", "ano", "mes"])
     with db.engine.connect() as conexao:
@@ -440,7 +571,7 @@ def preparar_previa(conteudo: bytes, nome_arquivo: str, usuario: str) -> dict:
     resumo = []
     for (chave, ano, mes), grupo in grupos:
         resumo.append({"agencia": grupo["agencia"].iloc[0], "mes": _rotulo(int(ano), int(mes)),
-                       "lojas": int(grupo["loja_chave"].nunique()), "promotores": int(grupo["promotor_chave"].nunique()),
+                       "lojas": int(grupo[["cnpj", "loja_chave"]].drop_duplicates().shape[0]), "promotores": int(grupo["promotor_chave"].nunique()),
                        "visitas": int(grupo["visitas"].fillna(0).sum()), "valor": round(float(grupo["valor"].sum()), 2),
                        "sem_valor": int(grupo["valor"].isna().sum()),
                        "ja_existe": (chave, int(ano), int(mes)) in existentes})
@@ -532,8 +663,10 @@ def confirmar(token: str, substituir: bool, repetidas: str | None = None) -> dic
         for linha in df.to_dict("records"):
             registros.append({c: linha[c] for c in (
                 "ano", "mes", "agencia", "agencia_chave", "tipo", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
-                "promotor_codigo", "promotor_chave", "dias", "status", "observacao", "linha", "supervisor")}
+                "promotor_codigo", "promotor_chave", "dias", "status", "observacao", "linha", "supervisor",
+                "cnpj_arquivo")}
                 | {"importacao_id": importacao_id,
+                   "frequencia_semana": None if pd.isna(linha["frequencia_semana"]) else int(linha["frequencia_semana"]),
                    "valor": None if pd.isna(linha["valor"]) else round(float(linha["valor"]), 2),
                    "visitas": None if pd.isna(linha["visitas"]) else int(linha["visitas"])})
         conexao.execute(Atendimento.__table__.insert(), registros)
@@ -565,14 +698,15 @@ def exportar_xlsx(sessao) -> tuple[bytes, int]:
     for coluna in range(1, 16):            # tira a linha de exemplo (a coluna P, conferência do CNPJ, fica)
         aba.cell(2, coluna).value = None
     campos = ("ano", "mes", "agencia", "tipo", "cnpj", "loja", "cidade", "uf", "promotor", "promotor_codigo", "dias",
-              "visitas", "valor", "status", "observacao", "supervisor")
+              "visitas", "valor", "status", "observacao", "supervisor", "cnpj_arquivo")
     consulta = select(*[getattr(Atendimento, c) for c in campos]).order_by(
         Atendimento.ano, Atendimento.mes, Atendimento.agencia, Atendimento.loja)
     total = 0
     for numero, linha in enumerate(sessao.execute(consulta), start=2):
         r = dict(zip(campos, linha))
         promotor = "" if r["promotor"] == SEM_PROMOTOR else r["promotor"]
-        valores = [f"{r['mes']:02d}/{r['ano']}", r["agencia"], r["tipo"], formatar_cnpj(r["cnpj"]), r["loja"], r["cidade"],
+        cnpj = formatar_cnpj(r["cnpj"]) if r["cnpj"] else (r["cnpj_arquivo"] or "")   # inválido: como veio
+        valores = [f"{r['mes']:02d}/{r['ano']}", r["agencia"], r["tipo"], cnpj, r["loja"], r["cidade"],
                    r["uf"], promotor, r["promotor_codigo"], r["dias"], r["visitas"], r["valor"], r["status"],
                    r["observacao"], r["supervisor"]]
         for coluna, valor in enumerate(valores, start=1):
@@ -604,7 +738,8 @@ def apagar_tudo(sessao) -> int:
 # ---------------------------------------------------------------------------------------------------------------
 
 COLUNAS = ["ano", "mes", "agencia", "agencia_chave", "tipo", "cnpj", "loja", "loja_chave", "cidade", "uf", "promotor",
-           "promotor_codigo", "promotor_chave", "dias", "visitas", "valor", "status", "supervisor"]
+           "promotor_codigo", "promotor_chave", "dias", "visitas", "valor", "status", "supervisor", "observacao",
+           "cnpj_arquivo", "frequencia_semana"]
 _guardado: dict = {"versao": None, "df": None}
 _versao = 0
 
@@ -628,6 +763,8 @@ def carregar() -> pd.DataFrame:
         df = pd.DataFrame(conexao.execute(consulta).all(), columns=COLUNAS)
     df["valor"] = df["valor"].astype(float)
     df["visitas"] = pd.to_numeric(df["visitas"], errors="coerce")
+    df["frequencia_semana"] = pd.to_numeric(df["frequencia_semana"], errors="coerce")
+    df[["observacao", "cnpj_arquivo"]] = df[["observacao", "cnpj_arquivo"]].fillna("")
     with _trava:
         if versao == _versao:
             _guardado.update(versao=versao, df=df)

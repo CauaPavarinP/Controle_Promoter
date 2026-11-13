@@ -76,7 +76,8 @@ export const COLUNA_VALE_A_PENA = {
 export const COLUNAS_SE_PAGA = [
   { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (l) => formatarCusto(l) },
   { campo: 'faturamento', titulo: 'Compraram', num: true, formato: 'moeda',
-    mostrar: (l) => (l.sem_erp ? '—' : formatarMoeda(l.faturamento)) },
+    mostrar: (l) => (l.sem_erp ? '—' : <>{formatarMoeda(l.faturamento)}{l.faturamento_sem_custo > 0 && (
+      <span className="texto-alerta" title={`Mais ${formatarMoeda(l.faturamento_sem_custo)} de compras em ${l.meses_sem_custo} mês(es) sem custo de atendimento: ficam fora do % e do "Vale a pena?" (custo e compras do mesmo período).`}> ⚠</span>)}</>) },
   COLUNA_PERCENTUAL,
   COLUNA_VALE_A_PENA,
 ]
@@ -85,6 +86,14 @@ export const COLUNAS_SE_PAGA = [
 export const formatarCusto = (l, campo = 'custo_periodo') => (l?.custo_informado === false
   ? <span className="dica" title="O arquivo não traz o valor do mês destas lojas (ex.: CLT)">não informado</span>
   : formatarMoeda(l?.[campo]))
+
+// Visitas: "≈13" quando estimadas pela frequência por semana (arquivo dos MEIs).
+export const COLUNA_VISITAS = {
+  campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro',
+  mostrar: (l) => (l.visitas_estimadas
+    ? <span className="dica" title="Estimativa: frequência por semana × dias do mês ÷ 7 (o arquivo não informa as visitas)">≈{l.visitas}</span>
+    : l.visitas),
+}
 
 function periodoPadrao(meses) {
   if (!meses.length) return { inicio: '', fim: '' }
@@ -355,7 +364,7 @@ export function FichaSePaga({ linha, lojas, periodo, carregado, temFaturamento }
             mostrar: (l) => <>{l.loja}{l.compartilhado && <span className="etiqueta" title="O CNPJ é de mais de uma loja: o faturamento foi dividido entre elas">CNPJ compartilhado</span>}</> },
           { campo: 'cidade', titulo: 'Cidade', mostrar: (l) => `${l.cidade}${l.uf ? ` - ${l.uf}` : ''}` },
           { campo: 'dias', titulo: 'Dias', quebra: true },
-          { campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro' },
+          COLUNA_VISITAS,
           ...COLUNAS_SE_PAGA,
         ]}
       />

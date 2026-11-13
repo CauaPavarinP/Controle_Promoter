@@ -94,7 +94,7 @@ export const http = {
   post: (caminho, corpo) => requisitar(caminho, json('POST', corpo)),
   put: (caminho, corpo) => requisitar(caminho, json('PUT', corpo)),
   delete: (caminho) => requisitar(caminho, { method: 'DELETE' }),
-  enviarArquivo: async (caminho, arquivo) => {
+  enviarArquivo: async (caminho, arquivo, campos = {}) => {
     const mb = arquivo.size / 1024 / 1024
     const limite = await limiteDoArquivo(caminho, arquivo)
     if (limite && mb > limite) {
@@ -104,6 +104,7 @@ export const http = {
     }
     const corpo = new FormData()
     corpo.append('arquivo', arquivo)
+    for (const [nome, valor] of Object.entries(campos)) if (valor) corpo.append(nome, valor)
     return requisitar(caminho, { method: 'POST', body: corpo })
   },
 }

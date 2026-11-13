@@ -2,7 +2,7 @@
 // faturamento mês a mês (clicável para ver as notas).
 import { formatarCnpj } from '../formato.js'
 import GradeMensal from './GradeMensal.jsx'
-import { COLUNAS_SE_PAGA, OpcaoOcultarSemCusto, useOcultarSemCusto } from './SePaga.jsx'
+import { COLUNA_VISITAS, COLUNAS_SE_PAGA, OpcaoOcultarSemCusto, useOcultarSemCusto } from './SePaga.jsx'
 import { Tabela } from './ui.jsx'
 
 export default function LojasUf({ uf, aoMudarUf, ufs, lojas: todas, grade, avisos = [], agencias }) {
@@ -33,15 +33,22 @@ export default function LojasUf({ uf, aoMudarUf, ufs, lojas: todas, grade, aviso
             vazio="Nenhuma loja com esses filtros."
             colunas={[
               { campo: 'loja', titulo: 'Loja', quebra: true,
-                mostrar: (l) => <>{l.loja}{l.compartilhado && <span className="etiqueta" title="O CNPJ é de mais de uma loja: o faturamento foi dividido entre elas">CNPJ compartilhado</span>}</> },
-              { campo: 'cnpj', titulo: 'CNPJ', mostrar: (l) => (l.cnpj ? formatarCnpj(l.cnpj) : <span className="texto-alerta">sem CNPJ</span>),
-                exportar: (l) => (l.cnpj ? formatarCnpj(l.cnpj) : '') },
+                mostrar: (l) => <>{l.loja}{l.compartilhado && <span className="etiqueta" title="O CNPJ é de mais de uma loja: o faturamento foi dividido entre elas">CNPJ compartilhado</span>}
+                  {l.inicio && <span className="etiqueta" title="Observação do arquivo: o atendimento começou no meio do mês. O custo e o faturamento do mês não foram cortados.">início {l.inicio}</span>}</> },
+              { campo: 'cnpj', titulo: 'CNPJ', mostrar: (l) => {
+                if (l.cnpj) return formatarCnpj(l.cnpj)
+                if (l.cnpj_arquivo) {
+                  return <span className="texto-alerta" title="O dígito verificador não confere (erro no arquivo da agência): a loja fica sem faturamento até a agência corrigir.">CNPJ inválido no arquivo: {l.cnpj_arquivo}</span>
+                }
+                return <span className="texto-alerta">sem CNPJ</span>
+              },
+                exportar: (l) => (l.cnpj ? formatarCnpj(l.cnpj) : l.cnpj_arquivo ? `inválido: ${l.cnpj_arquivo}` : '') },
               { campo: 'cidade', titulo: 'Cidade', quebra: true, mostrar: (l) => `${l.cidade}${l.uf ? ` - ${l.uf}` : ''}`,
                 exportar: (l) => `${l.cidade}${l.uf ? ` - ${l.uf}` : ''}` },
               { campo: 'agencia', titulo: 'Agência', quebra: true },
               { campo: 'promotor', titulo: 'Promotor', quebra: true },
               { campo: 'dias', titulo: 'Dias', quebra: true },
-              { campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro' },
+              COLUNA_VISITAS,
               ...COLUNAS_SE_PAGA,
             ]}
           />

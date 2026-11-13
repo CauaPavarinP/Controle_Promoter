@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
@@ -229,13 +229,15 @@ def andamento_da_leitura(codigo: str, _=Depends(exigir_admin)):
 # --- Atendimento das agências (modelo único) -----------------------------------------------------------------
 
 @app.post("/api/importacoes/atendimento/previa")
-async def previa_atendimento(arquivo: UploadFile = File(...), usuario: Usuario = Depends(exigir_admin)):
-    """Lê o arquivo de uma (ou mais) agências e mostra o resumo antes de gravar."""
+async def previa_atendimento(arquivo: UploadFile = File(...), mes: str = Form(""),
+                             usuario: Usuario = Depends(exigir_admin)):
+    """Lê o arquivo de uma (ou mais) agências e mostra o resumo antes de gravar.
+    mes ("AAAA-MM"): mês de referência do arquivo dos MEIs, que não tem a coluna Mês."""
     conteudo, nome = await _ler_arquivo(arquivo)
     if faturamento.lendo_agora() or not _trava_cadastros.acquire(blocking=False):
         _erro(OCUPADO)
     try:
-        return await run_in_threadpool(atendimento.preparar_previa, conteudo, nome, usuario.usuario)
+        return await run_in_threadpool(atendimento.preparar_previa, conteudo, nome, usuario.usuario, mes)
     except ErroImportacao as erro:
         _erro(str(erro))
     finally:

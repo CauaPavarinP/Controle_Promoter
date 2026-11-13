@@ -5,7 +5,7 @@ import { formatarMes, formatarMoeda } from '../formato.js'
 import {
   COLUNA_PERCENTUAL, COLUNA_VALE_A_PENA, COLUNAS_SE_PAGA, FichaSePaga, FiltrosLocal, OpcaoOcultarSemCusto, QuadroSePaga,
   situacao, useOcultarSemCusto, useSePaga,
-  formatarCusto,
+  formatarCusto, COLUNA_VISITAS,
 } from './SePaga.jsx'
 import { Modal, Tabela } from './ui.jsx'
 
@@ -117,7 +117,7 @@ export default function PromotoresAba({ admin, meses, opcoes }) {
               { campo: 'supervisor', titulo: 'Supervisor', quebra: true },
               { campo: 'ufs', titulo: 'UF' },
               { campo: 'lojas_ultimo_mes', titulo: 'Lojas', num: true, formato: 'inteiro' },
-              { campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro' },
+              COLUNA_VISITAS,
               { campo: 'custo_periodo', titulo: 'Custo', num: true, formato: 'moeda', mostrar: (p) => formatarCusto(p) },
               { campo: 'faturamento', titulo: 'Compraram', num: true, formato: 'moeda',
                 mostrar: (p) => (p.sem_erp ? '—' : formatarMoeda(p.faturamento)) },

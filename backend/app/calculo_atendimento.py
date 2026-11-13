@@ -10,6 +10,8 @@
   (padrão 3%, editável) vale a pena; acima, não. Decisão do Maurício: o promotor de loja pode custar no máximo 3%
   do que as lojas dele compram. (Margem e lucro ficam para depois.)
 """
+import calendar
+import re
 from dataclasses import dataclass
 
 import pandas as pd
@@ -118,11 +120,57 @@ def _indicadores(custo: float, faturamento: float, limite: float, sem_erp: bool 
             "situacao": situacao(custo, faturamento, limite, sem_erp, custo_informado)}
 
 
+def _faturamento_comparavel(g: pd.DataFrame) -> tuple[float, float, int]:
+    """(faturamento usado no %, faturamento deixado de fora, meses deixados de fora).
+
+    O % compara custo e faturamento do MESMO período: se o grupo tem custo (> 0) em algum mês, só entra o
+    faturamento dos meses (de cada loja) em que houve custo. Ex.: loja com custo só em outubro e compras de janeiro a
+    novembro: no Acumulado, o % usa só outubro. Grupo sem nenhum custo (ex.: CLT sem valor): fica tudo, para mostrar
+    o que as lojas compraram (o % não é calculado)."""
+    if g.empty or not bool((g["valor"] > 0).any()):
+        return float(g["faturamento"].sum()) if not g.empty else 0.0, 0.0, 0
+    com = g["mes_com_custo"]
+    fora = g.loc[~com & (g["faturamento"] > 0)]
+    return float(g.loc[com, "faturamento"].sum()), float(fora["faturamento"].sum()), int(fora["indice"].nunique())
+
+
 def _indicadores_grupo(g: pd.DataFrame, limite: float) -> dict:
     """Indicadores de um grupo de linhas; sem_erp = nenhum mês do grupo tem faturamento do ERP importado.
     A soma do custo ignora os valores não informados (NaN); custo_informado diz se algum foi informado."""
-    return _indicadores(g["valor"].sum(), g["faturamento"].sum(), limite, not bool(g["tem_erp"].any()),
-                        bool(g["valor"].notna().any()))
+    fat, fora, meses_fora = _faturamento_comparavel(g)
+    return {**_indicadores(g["valor"].sum(), fat, limite, not bool(g["tem_erp"].any()),
+                           bool(g["valor"].notna().any())),
+            "faturamento_sem_custo": _dinheiro(fora), "meses_sem_custo": meses_fora}
+
+
+def marcar_mes_com_custo(a: pd.DataFrame) -> pd.Series:
+    """True quando a loja (CNPJ + chave) teve custo > 0 naquele mês, em qualquer agência/promotor."""
+    if a.empty:
+        return pd.Series(dtype=bool)
+    positivo = a["valor"].fillna(0) > 0
+    return positivo.groupby([a["cnpj"], a["loja_chave"], a["indice"]]).transform("any").astype(bool)
+
+
+def estimar_visitas(a: pd.DataFrame) -> pd.DataFrame:
+    """Visitas não informadas, mas com frequência por semana (arquivo dos MEIs): frequência × dias do mês ÷ 7,
+    arredondado (ex.: 3x/semana em outubro, 31 dias = 13). Marca visitas_estimadas para a tela avisar."""
+    a = a.copy()
+    freq = a["frequencia_semana"] if "frequencia_semana" in a else pd.Series(float("nan"), index=a.index)
+    estimar = a["visitas"].isna() & freq.notna()
+    dias = [calendar.monthrange(int(y), int(m))[1] for y, m in zip(a["ano"], a["mes"])]
+    estimadas = (freq * pd.Series(dias, index=a.index, dtype=float) / 7).round()
+    a["visitas"] = a["visitas"].where(~estimar, estimadas)
+    a["visitas_estimadas"] = estimar
+    return a
+
+
+_INICIO = re.compile(r"in[ií]cio\D{0,15}(\d{1,2}/\d{1,2}(?:/\d{2,4})?)", re.I)
+
+
+def inicio_no_mes(observacao: str) -> str:
+    """"Atendimento teve início dia 20/10" → "20/10" (só para aviso; o custo e o faturamento não são cortados)."""
+    achado = _INICIO.search(observacao or "")
+    return achado.group(1) if achado else ""
 
 
 def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAtendimento, regras: dict) -> dict:
@@ -141,6 +189,10 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
     # não "não comprou": o faturamento daquele mês só ainda não foi importado para aquela UF.
     meses_erp, meses_uf_erp = cobertura_erp(faturamento, inicio, fim)
     a = a.assign(tem_erp=marcar_tem_erp(a, meses_erp, meses_uf_erp))
+    if not a.empty:
+        a = estimar_visitas(a.assign(mes_com_custo=marcar_mes_com_custo(a)))
+    else:
+        a = a.assign(mes_com_custo=False, visitas_estimadas=False)
     if filtros.agencia:
         a = a[a["agencia_chave"] == filtros.agencia]
     if filtros.promotor:
@@ -180,7 +232,10 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
     agencias_zero, promotores_zero, lojas_zero = _contar(zerada)
     sem_erp_total = not bool(a["tem_erp"].any()) if not a.empty else not meses_erp
     custo_informado_total = bool(a["valor"].notna().any()) if not a.empty else True
-    resumo = {**_indicadores(custo_total, fat_total, limite, sem_erp_total, custo_informado_total),
+    fat_comparavel, fat_fora, meses_fora = _faturamento_comparavel(a)
+    resumo = {**_indicadores(custo_total, fat_comparavel, limite, sem_erp_total, custo_informado_total),
+              "faturamento_sem_custo": _dinheiro(fat_fora), "meses_sem_custo": meses_fora,
+              "visitas_estimadas": bool(a["visitas_estimadas"].any()) if not a.empty else False,
               "custo": _dinheiro(custo_total), "meses": len(meses),
               "meses_com_arquivo": len(meses_com_atendimento),
               "promotores": promotores, "lojas": lojas, "agencias": agencias,
@@ -219,12 +274,21 @@ def _avisos(a: pd.DataFrame, meses: list, com_atendimento: list, meses_erp: set)
     elif sem_arquivo:
         avisos.append("Meses do período sem nenhum arquivo de agência (custo zero nesses meses): "
                       + ", ".join(_rotulo(m) for m in sem_arquivo))
+    if not a.empty and bool((a["valor"] > 0).any()):
+        fora = a.loc[~a["mes_com_custo"] & (a["faturamento"] > 0)]
+        if not fora.empty:
+            avisos.append(f"{fora[['cnpj', 'loja_chave']].drop_duplicates().shape[0]} loja(s) compraram em meses sem "
+                          f"custo de atendimento (R$ {fora['faturamento'].sum():,.2f}): esse faturamento fica fora do "
+                          "% e do \"Vale a pena?\", que comparam custo e compras do mesmo período.")
+    if not a.empty and bool(a["visitas_estimadas"].any()):
+        avisos.append("Visitas de lojas MEI estimadas pela frequência por semana (frequência × dias do mês ÷ 7): "
+                      "aparecem com \"≈\".")
     if not a.empty and a["valor"].isna().any():
         sem_valor = a.loc[a["valor"].isna(), ["cnpj", "loja_chave"]].drop_duplicates()
         avisos.append(f"{len(sem_valor)} loja(s) sem valor do mês informado (ex.: CLT): o custo do período está "
                       "incompleto e o \"Vale a pena?\" dessas lojas aparece como \"custo não informado\".")
     if not a.empty:
-        sem_cnpj = a.loc[a["cnpj"] == "", "loja"].unique()
+        sem_cnpj = a.loc[a["cnpj"] == "", ["loja", "loja_chave"]].drop_duplicates()["loja"].tolist()
         if len(sem_cnpj):
             avisos.append(f"{len(sem_cnpj)} loja(s) sem CNPJ válido no arquivo da agência: aparecem sem faturamento ("
                           + ", ".join(sem_cnpj[:6]) + (" …" if len(sem_cnpj) > 6 else "") + ").")
@@ -243,7 +307,7 @@ def _por_promotor(a: pd.DataFrame, limite) -> list[dict]:
             "tipo": _juntar(g["tipo"]), "supervisor": _juntar(ultimo["supervisor"]), "ufs": _juntar(g["uf"]), "cidades": _juntar(g["cidade"]),
             "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "lojas_ultimo_mes": int(ultimo[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
-            "visitas": int(g["visitas"].fillna(0).sum()),
+            "visitas": int(g["visitas"].fillna(0).sum()), "visitas_estimadas": bool(g["visitas_estimadas"].any()),
             "primeiro_mes": _rotulo(int(g["indice"].min())), "ultimo_mes": _rotulo(int(g["indice"].max())),
             "meses_com_atendimento": int(g["indice"].nunique()),
             **_indicadores_grupo(g, limite),
@@ -264,6 +328,9 @@ def _por_loja(a: pd.DataFrame, limite) -> list[dict]:
             "promotor": _juntar(ultimo["promotor"]), "supervisor": _juntar(ultimo["supervisor"]),
             "promotor_chaves": sorted(set(g["promotor_chave"])), "dias": _juntar(ultimo["dias"]),
             "visitas": int(g["visitas"].fillna(0).sum()), "compartilhado": bool(g["compartilhado"].any()),
+            "visitas_estimadas": bool(g["visitas_estimadas"].any()),
+            "cnpj_arquivo": _juntar(ultimo["cnpj_arquivo"]) if not cnpj and "cnpj_arquivo" in g else "",
+            "inicio": _juntar(ultimo["observacao"].map(inicio_no_mes)) if "observacao" in g else "",
             "status": ultimo["status"].iloc[-1], "meses_com_atendimento": int(g["indice"].nunique()),
             **_indicadores_grupo(g, limite),
         })
@@ -279,6 +346,7 @@ def _por_agencia(a: pd.DataFrame, limite) -> list[dict]:
             "chave": chave, "nome": g["agencia"].iloc[-1], "tipo": _juntar(g["tipo"]), "ufs": _juntar(g["uf"]),
             "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
             "promotores": int(g["promotor_chave"].nunique()), "visitas": int(g["visitas"].fillna(0).sum()),
+            "visitas_estimadas": bool(g["visitas_estimadas"].any()),
             "meses": sorted(_rotulo(int(m)) for m in g["indice"].unique()),
             **_indicadores_grupo(g, limite),
         })
@@ -294,7 +362,7 @@ def _arvore(a: pd.DataFrame, limite) -> list[dict]:
     def linha(nivel, nome, g, **extra):
         return {"nivel": nivel, "nome": nome, "promotores": int(g["promotor_chave"].nunique()),
                 "lojas": int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
-                "visitas": int(g["visitas"].fillna(0).sum()),
+                "visitas": int(g["visitas"].fillna(0).sum()), "visitas_estimadas": bool(g["visitas_estimadas"].any()),
                 **_indicadores_grupo(g, limite), **extra}
 
     a = a.assign(uf=a["uf"].replace("", "—"))
@@ -316,7 +384,7 @@ def _mes_a_mes(a: pd.DataFrame, meses: list, limite, meses_erp: set) -> list[dic
         linhas.append({"mes": _rotulo(indice), "com_atendimento": not vazio,
                        "lojas": 0 if vazio else int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
                        "visitas": 0 if vazio else int(g["visitas"].fillna(0).sum()),
-                       **_indicadores(0 if vazio else g["valor"].sum(), 0 if vazio else g["faturamento"].sum(),
+                       **_indicadores(0 if vazio else g["valor"].sum(), 0 if vazio else _faturamento_comparavel(g)[0],
                                       limite, indice not in meses_erp if vazio else not bool(g["tem_erp"].any()),
                                       True if vazio else bool(g["valor"].notna().any()))})
     return linhas

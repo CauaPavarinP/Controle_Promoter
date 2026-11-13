@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { http } from '../api.js'
 import { formatarDataHora, formatarMes, formatarMoeda } from '../formato.js'
 import { Envio, Historico } from './Importar.jsx'
-import { COLUNAS_SE_PAGA, OpcaoOcultarSemCusto, QuadroSePaga, useOcultarSemCusto, useSePaga } from './SePaga.jsx'
+import { COLUNA_VISITAS, COLUNAS_SE_PAGA, OpcaoOcultarSemCusto, QuadroSePaga, useOcultarSemCusto, useSePaga } from './SePaga.jsx'
 import { Tabela } from './ui.jsx'
 
 function RepetidasOutraAgencia({ repetidas, escolha, setEscolha }) {
@@ -156,6 +156,7 @@ function PreviaAtendimento({ previa, aoConcluir, aoCancelar }) {
 
 export function ImportacaoAgencias({ aoImportar }) {
   const [previa, setPrevia] = useState(null)
+  const [mesArquivo, setMesArquivo] = useState('')
   const [concluido, setConcluido] = useState(null)
   const [versao, setVersao] = useState(0)
   return (
@@ -170,9 +171,13 @@ export function ImportacaoAgencias({ aoImportar }) {
             rotulo="Ler arquivo"
             aoEnviar={async (arquivo) => {
               setConcluido(null)
-              setPrevia(await http.enviarArquivo('/api/importacoes/atendimento/previa', arquivo))
+              setPrevia(await http.enviarArquivo('/api/importacoes/atendimento/previa', arquivo, { mes: mesArquivo }))
             }}
           />
+          <label className="filtro" title="O arquivo dos MEIs (CONTROLE GERAL) não tem a coluna Mês: escolha aqui o mês dele. Arquivos no modelo usam o mês de cada linha.">
+            Mês de referência (só para o arquivo dos MEIs)
+            <input type="month" value={mesArquivo} onChange={(e) => setMesArquivo(e.target.value)} />
+          </label>
           <p className="dica">
             <a href="/api/modelo-atendimento">Baixar o modelo em Excel</a> para mandar às agências (com instruções e
             conferência do CNPJ).
@@ -298,7 +303,7 @@ export default function Agencias({ admin, meses }) {
                   { campo: 'ufs', titulo: 'UF' },
                   { campo: 'lojas', titulo: 'Lojas', num: true, formato: 'inteiro' },
                   { campo: 'promotores', titulo: 'Promotores', num: true, formato: 'inteiro' },
-                  { campo: 'visitas', titulo: 'Visitas', num: true, formato: 'inteiro' },
+                  COLUNA_VISITAS,
                   { campo: 'meses', titulo: 'Meses com arquivo', semOrdem: true,
                     mostrar: (a) => (a.meses.length > 1
                       ? `${formatarMes(a.meses[0])} a ${formatarMes(a.meses[a.meses.length - 1])} (${a.meses.length})`
