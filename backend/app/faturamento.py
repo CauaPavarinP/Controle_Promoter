@@ -493,7 +493,7 @@ def erros_da_importacao(sessao: Session, importacao_id: int) -> list[dict]:
 _RECEITA = func.coalesce(FaturamentoItem.receita, literal_column("''"))
 
 COLUNAS_MENSAL = ["ano", "mes", "cnpj", "cod_cliente", "chave_tipo", "tipo_nf", "receita",
-                  "total_venda", "vlr_total", "notas"]
+                  "total_venda", "vlr_total", "notas", "uf"]
 
 
 # Somar as ~317 mil linhas do ano leva menos de 1 s num computador comum, mas de 30 s a minutos no Postgres
@@ -561,7 +561,8 @@ def _somar_faturamento_mensal() -> pd.DataFrame:
                        _RECEITA,
                        func.coalesce(func.sum(FaturamentoItem.total_venda), 0),
                        func.coalesce(func.sum(FaturamentoItem.vlr_total), 0),
-                       func.count(FaturamentoItem.num_nf.distinct()))
+                       func.count(FaturamentoItem.num_nf.distinct()),
+                       func.max(FaturamentoItem.uf))  # UF do cliente: diz quais UFs do mês já têm ERP importado
                 .group_by(FaturamentoItem.ano, FaturamentoItem.mes, FaturamentoItem.cnpj_cpf, FaturamentoItem.cod_cli,
                           FaturamentoItem.tipo_nf_chave, _RECEITA))
     with db.engine.connect() as conexao:
@@ -569,6 +570,7 @@ def _somar_faturamento_mensal() -> pd.DataFrame:
     df = pd.DataFrame(linhas, columns=COLUNAS_MENSAL)
     for coluna in ("total_venda", "vlr_total"):
         df[coluna] = df[coluna].astype(float)
+    df["uf"] = df["uf"].fillna("")
     return df
 
 

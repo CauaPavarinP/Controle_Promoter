@@ -52,6 +52,30 @@ def faturamento_por_cnpj_mes(faturamento: pd.DataFrame, regras: dict) -> pd.Data
     return fat.groupby(["indice", "cnpj"], as_index=False)["valor"].sum().rename(columns={"valor": "fat_cnpj"})
 
 
+def cobertura_erp(faturamento: pd.DataFrame, inicio: int, fim: int) -> tuple[set, set]:
+    """Quais meses (e quais UFs em cada mês) têm faturamento do ERP importado, dentro do período.
+
+    Devolve (meses, meses_uf): meses = {indice}; meses_uf = {(indice, "UF")}. A cobertura é por UF porque o ERP
+    pode ter sido importado só em parte (ex.: out/2026 só de MG): nesse caso as lojas de PR em out/2026 não
+    "não compraram", o faturamento delas só ainda não foi importado."""
+    if faturamento.empty:
+        return set(), set()
+    f = pd.DataFrame({"indice": faturamento["ano"].astype(int) * 12 + faturamento["mes"].astype(int) - 1,
+                      "uf": faturamento["uf"].fillna("").astype(str).str.strip().str.upper()
+                      if "uf" in faturamento else ""})
+    f = f[f["indice"].between(inicio, fim)].drop_duplicates()
+    return set(int(m) for m in f["indice"]), {(int(m), u) for m, u in zip(f["indice"], f["uf"]) if u}
+
+
+def marcar_tem_erp(a: pd.DataFrame, meses_erp: set, meses_uf_erp: set) -> pd.Series:
+    """True quando o ERP do mês já foi importado para a UF da loja. Loja sem UF: basta o mês ter ERP."""
+    if a.empty:
+        return pd.Series(dtype=bool)
+    uf = a["uf"].fillna("").astype(str).str.strip().str.upper()
+    return pd.Series([(int(m), u) in meses_uf_erp if u else int(m) in meses_erp for m, u in zip(a["indice"], uf)],
+                     index=a.index, dtype=bool)
+
+
 def atribuir_faturamento(atend: pd.DataFrame, fat_mes: pd.DataFrame) -> pd.DataFrame:
     """Cada linha de atendimento recebe a sua parte do faturamento do CNPJ naquele mês."""
     a = atend.copy()
@@ -105,10 +129,10 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
     a = a[a["indice"].between(inicio, fim)] if not a.empty else a
     # A divisão do faturamento do CNPJ usa todas as lojas do mês, antes dos filtros (o filtro só escolhe o que mostrar).
     a = atribuir_faturamento(a, fat_mes) if not a.empty else a.assign(faturamento=0.0, compartilhado=False)
-    # Meses do período que têm faturamento do ERP importado (de qualquer cliente). Loja atendida num mês sem ERP
-    # não "não comprou": o faturamento daquele mês só ainda não foi importado.
-    meses_erp = set(int(m) for m in fat_mes["indice"].unique())
-    a = a.assign(tem_erp=a["indice"].isin(meses_erp) if not a.empty else pd.Series(dtype=bool))
+    # Meses (e UFs de cada mês) do período que têm faturamento do ERP importado. Loja atendida num mês/UF sem ERP
+    # não "não comprou": o faturamento daquele mês só ainda não foi importado para aquela UF.
+    meses_erp, meses_uf_erp = cobertura_erp(faturamento, inicio, fim)
+    a = a.assign(tem_erp=marcar_tem_erp(a, meses_erp, meses_uf_erp))
     if filtros.agencia:
         a = a[a["agencia_chave"] == filtros.agencia]
     if filtros.promotor:
@@ -143,7 +167,8 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
                 int(df[["cnpj", "loja_chave"]].drop_duplicates().shape[0]))
     agencias, promotores, lojas = _contar(com_custo)
     agencias_zero, promotores_zero, lojas_zero = _contar(zerada)
-    resumo = {**_indicadores(custo_total, fat_total, limite, not meses_erp),
+    sem_erp_total = not bool(a["tem_erp"].any()) if not a.empty else not meses_erp
+    resumo = {**_indicadores(custo_total, fat_total, limite, sem_erp_total),
               "custo": _dinheiro(custo_total), "meses": len(meses),
               "meses_com_arquivo": len(meses_com_atendimento),
               "promotores": promotores, "lojas": lojas, "agencias": agencias,
@@ -167,11 +192,15 @@ def calcular(faturamento: pd.DataFrame, atend: pd.DataFrame, filtros: FiltrosAte
 
 def _avisos(a: pd.DataFrame, meses: list, com_atendimento: list, meses_erp: set) -> list[str]:
     avisos = []
-    sem_erp = [m for m in com_atendimento if m not in meses_erp]
-    if sem_erp:
-        avisos.append("Sem faturamento do ERP importado em " + ", ".join(_rotulo(m) for m in sem_erp)
-                      + ": nesses meses as lojas aparecem com compras R$ 0,00 e o resultado fica negativo. "
-                      "Importe o faturamento desses meses na aba Faturamento.")
+    if not a.empty and not a["tem_erp"].all():
+        faltando = a.loc[~a["tem_erp"]]
+        partes = []
+        for m, g in sorted(faltando.groupby("indice"), key=lambda x: x[0]):
+            ufs = _juntar(g["uf"])
+            partes.append(_rotulo(int(m)) + (f" ({ufs})" if ufs and m in meses_erp else ""))
+        avisos.append("Sem faturamento do ERP importado em " + ", ".join(partes)
+                      + ": nessas lojas o faturamento aparece como \"—\" (falta importar), não como \"não comprou\". "
+                      "Importe o faturamento completo desses meses na aba Faturamento.")
     sem_arquivo = [m for m in meses if m not in com_atendimento]
     if a.empty:
         avisos.append("Nenhum atendimento de agência no período. Importe os arquivos das agências na aba Agências.")
@@ -272,7 +301,7 @@ def _mes_a_mes(a: pd.DataFrame, meses: list, limite, meses_erp: set) -> list[dic
                        "lojas": 0 if vazio else int(g[["cnpj", "loja_chave"]].drop_duplicates().shape[0]),
                        "visitas": 0 if vazio else int(g["visitas"].fillna(0).sum()),
                        **_indicadores(0 if vazio else g["valor"].sum(), 0 if vazio else g["faturamento"].sum(),
-                                      limite, indice not in meses_erp)})
+                                      limite, indice not in meses_erp if vazio else not bool(g["tem_erp"].any()))})
     return linhas
 
 
